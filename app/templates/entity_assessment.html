@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block title %}主体评估 — {{ app_name }}{% endblock %}
+
+{% block brand_sub %}{{ page_subtitle }}{% endblock %}
+
+{% block header_extra %}
+<form class="filter-form" method="get" action="{{ page_path }}">
+  <label for="report_date">报告日期</label>
+  <input type="date" id="report_date" name="report_date" value="{{ report_date }}" />
+  {% if selected_entity %}
+  <input type="hidden" name="entity_id" value="{{ selected_entity.id }}" />
+  {% endif %}
+  <button type="submit">查询</button>
+</form>
+{% endblock %}
+
+{% block content %}
+<main class="layout" data-modules="{{ module_codes_csv }}">
+  <aside class="sidebar">
+    <h2>授信等级分布</h2>
+    <ul class="stat-list">
+      {% for level in credit_levels %}
+      <li>
+        <span class="credit credit-{{ level }}">{{ level }}</span>
+        <span class="count">{{ credit_counts.get(level, 0) }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+
+    <h2>监控主体</h2>
+    <ul class="entity-list">
+      {% for ent in entities %}
+      <li>
+        <a
+          href="/entity-assessment?entity_id={{ ent.id }}&report_date={{ report_date }}"
+          class="entity-link {% if selected_entity and selected_entity.id == ent.id %}active{% endif %}"
+        >
+          <span class="entity-name">{{ ent.display_name or ent.name }}</span>
+          <span class="credit credit-{{ ent.credit_level }}">{{ ent.credit_level }}</span>
+        </a>
+      </li>
+      {% else %}
+      <li class="empty-source">暂无监控主体</li>
+      {% endfor %}
+    </ul>
+
+    <h2>运行状态</h2>
+    <ul class="run-list">
+      {% for code, name in modules.items() %}
+      {% set run = run_map.get(code) %}
+      <li>
+        <span class="mod-name">{{ name }}</span>
+        <span class="run-status status-{{ run.status if run else 'pending' }}">
+          {% if run %}{{ run.status }} ({{ run.entry_count }}){% else %}未运行{% endif %}
+        </span>
+      </li>
+      {% endfor %}
+    </ul>
+
+    <div class="actions">
+      <a class="btn" href="/api/v1/export/docx?report_date={{ report_date }}&module_codes={{ module_codes_csv }}">导出 Word</a>
+      <button type="button" class="btn secondary" id="btn-run-pipeline">采集近24小时资讯</button>
+    </div>
+    <p class="hint" id="pipeline-msg">异步采集近 24 小时主体相关资讯；失败时保留上次结果。</p>
+  </aside>
+
+  <section class="content">
+    {% if selected_entity %}
+    <div class="entity-hero">
+      <h1>{{ selected_entity.display_name or selected_entity.name }}</h1>
+      <p class="meta">
+        {% if selected_entity.industry %}<span>{{ selected_entity.industry }}</span>{% endif %}
+        {% if selected_entity.region %}<span>{{ selected_entity.region }}</span>{% endif %}
+        <span class="credit credit-{{ selected_entity.credit_level }} credit-badge">
+          授信：{{ selected_entity.credit_level }}
+        </span>
+      </p>
+    </div>
+
+    <h2>授信更新与预警</h2>
+    {% if credit_logs %}
+    <ul class="credit-log-list">
+      {% for log in credit_logs %}
+      <li>
+        <span class="credit-change">
+          <span class="credit credit-{{ log.previous_level }}">{{ log.previous_level }}</span>
+          →
+          <span class="credit credit-{{ log.new_level }}">{{ log.new_level }}</span>
+        </span>
+        <span class="credit-reason">{{ log.reason or '' }}</span>
+        <span class="credit-time">{{ log.created_at }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-module">尚无授信变更记录。风险事件入库后将按「正常 → 关注 → 预警 → 高风险」递进调整。</p>
+    {% endif %}
+
+    <h2>风险事件{% if risks %}（{{ risks|length }}）{% endif %}</h2>
+    {% if risks %}
+    <div class="entry-grid">
+      {% for e in risks %}
+      <article class="entry-card level-border-{{ e.risk_level }}">
+        <header>
+          <span class="badge">{{ e.report_date }}</span>
+          <span class="risk">{{ e.risk_level }}</span>
+        </header>
+        <h3>{{ e.title }}</h3>
+        {% if e.risk_category %}<p class="meta"><strong>风险类别：</strong>{{ e.risk_category }}</p>{% endif %}
+        <p class="summary">{{ e.summary }}</p>
+        {% if e.impact_analysis %}<p class="impact"><strong>影响分析：</strong>{{ e.impact_analysis }}</p>{% endif %}
+        {% if e.source_url %}
+        <p class="source"><a href="{{ e.source_url }}" target="_blank" rel="noopener noreferrer">来源链接</a></p>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty">该主体暂无风险事件。可运行主体流水线，或从左侧「数据源」补充权威材料。</p>
+    {% endif %}
+    {% else %}
+    <p class="empty">暂无监控主体。系统启动时将写入默认主体（Godiva / 普洛斯等）。</p>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.REPORT_DATE = "{{ report_date }}";
+  window.PIPELINE_MODULES = "{{ module_codes_csv }}".split(",").filter(Boolean);
+  window.ENTRY_CHARTS = [];
+</script>
+{% endblock %}

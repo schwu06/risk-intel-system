@@ -1,0 +1,13 @@
+# 虚拟环境与依赖
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# 本地数据库与上传文件夹（保证各自电脑数据独立）
+*.db
+*.sqlite3
+data/uploads/
+.env
+.idea/
+.vscode/

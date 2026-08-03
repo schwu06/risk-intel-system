@@ -1,0 +1,92 @@
+{# 左侧可拉出：统一数据源 + 数据管理 + 关于 #}
+<button type="button" class="drawer-tab" id="btn-open-source-drawer" aria-controls="source-drawer" aria-expanded="false">
+  数据源
+</button>
+
+<div class="drawer-backdrop hidden" id="source-drawer-backdrop" hidden></div>
+
+<aside class="source-drawer" id="source-drawer" aria-hidden="true" aria-label="数据源管理">
+  <div class="source-drawer-header">
+    <h2>数据源</h2>
+    <button type="button" class="drawer-close" id="btn-close-source-drawer" aria-label="关闭">×</button>
+  </div>
+  <p class="hint drawer-hint">全站统一数据源，各模块采集时优先参考。支持 txt / xlsx / docx / pdf 与网址。</p>
+
+  <div class="source-drawer-body">
+    <section class="drawer-section">
+      <h3>上传 / 添加</h3>
+      <div class="source-forms">
+        <form class="stack-form" id="global-upload-form">
+          <input type="text" name="name" placeholder="数据源名称（可选）" />
+          <input type="file" name="file" accept=".txt,.xlsx,.docx,.pdf" required />
+          <button type="submit" class="btn small">上传文件</button>
+        </form>
+        <form class="stack-form" id="global-url-form">
+          <input type="text" name="name" placeholder="链接名称" required />
+          <input type="url" name="url" placeholder="https://..." required />
+          <button type="submit" class="btn small secondary">添加网址</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="drawer-section">
+      <h3>数据管理</h3>
+      <ul class="managed-source-list" id="managed-source-list">
+        {% for src in drawer_sources %}
+        <li class="managed-source-item" data-id="{{ src.id }}">
+          <button type="button" class="managed-source-main view-source" data-id="{{ src.id }}" title="点击查看">
+            <span class="source-name">{{ src.name }}</span>
+            <span class="source-meta">
+              {{ src.source_type }}
+              {% if src.original_filename %} · {{ src.original_filename }}{% endif %}
+              {% if src.url %} · 网址{% endif %}
+              · {{ (src.extracted_text or '')|length }} 字
+            </span>
+          </button>
+          <button type="button" class="link-btn delete-source" data-id="{{ src.id }}">删除</button>
+        </li>
+        {% else %}
+        <li class="empty-source">暂无上传数据</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+
+  <div class="source-drawer-footer">
+    <button type="button" class="about-link" id="btn-open-about">关于</button>
+  </div>
+</aside>
+
+<div class="about-modal hidden" id="about-modal" hidden role="dialog" aria-modal="true" aria-labelledby="about-title">
+  <div class="about-modal-card">
+    <div class="about-modal-header">
+      <h2 id="about-title">关于本系统</h2>
+      <button type="button" class="drawer-close" id="btn-close-about" aria-label="关闭">×</button>
+    </div>
+    <div class="about-modal-body">
+      <p><strong>做什么</strong>：按模块自动汇总近 24 小时重要资讯，结构化后写入本地库并在页面展示；可选导出 Word。</p>
+      <p><strong>默认怎么取数</strong>（无需上传）：</p>
+      <ul>
+        <li>Google News RSS（按模块关键词检索）</li>
+        <li>精选媒体 RSS：Reuters、BBC、NHK 等</li>
+        <li>秘塔（Metaso）网页搜索作广度补充</li>
+        <li>日本企业模块另参考披露门户链接</li>
+      </ul>
+      <p><strong>大模型</strong>：DeepSeek 将检索结果整理为标题、摘要、分类、重要度、影响分析等字段；不编造材料中没有的事实。</p>
+      <p><strong>统一数据源</strong>：此处上传的文件/网址对所有模块共用，流水线会优先从中提取事实，再与 RSS / 秘塔结果合并。</p>
+      <p><strong>空结果含义</strong>：「今日无动态」表示采集成功但无可推送条目；「请求失败，请重新加载」表示外网或 API 异常，可重试。</p>
+    </div>
+  </div>
+</div>
+
+<div class="about-modal hidden" id="source-view-modal" hidden role="dialog" aria-modal="true" aria-labelledby="source-view-title">
+  <div class="about-modal-card source-view-card">
+    <div class="about-modal-header">
+      <h2 id="source-view-title">数据详情</h2>
+      <button type="button" class="drawer-close" id="btn-close-source-view" aria-label="关闭">×</button>
+    </div>
+    <div class="about-modal-body" id="source-view-body">
+      <p class="hint">加载中…</p>
+    </div>
+  </div>
+</div>

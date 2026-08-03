@@ -1,0 +1,72 @@
+# RSS / Google News 数据源配置（外置，改完重启或热加载即可）
+# type: google = Google News 搜索 RSS；direct = 直连 feed URL
+# modules: 适用模块代码 B/C/D/A
+# priority: 越大越优先；enabled: false 可临时关闭故障源
+
+defaults:
+  max_items_per_feed: 12
+  google_hl: zh-CN
+  google_gl: CN
+  google_ceid: "CN:zh-Hans"
+
+queries:
+  A:
+    - label: Godiva 动态
+      query: "Godiva chocolate OR Godiva Chocolatier news OR lawsuit OR recall"
+      priority: 20
+    - label: 普洛斯 GLP
+      query: "普洛斯 OR GLP logistics property 新闻 OR 动态"
+      priority: 20
+  B:
+    - label: 中东地缘
+      query: "Middle East news OR geopolitics OR Gaza OR Iran OR Israel"
+      priority: 20
+    - label: 中东政策中文
+      query: "中东 新闻 OR 地缘政治 OR 官方声明 OR 制裁"
+      priority: 20
+  C:
+    - label: 日本商社
+      query: "三菱商事 OR 三井物产 OR 伊藤忠 OR 住友商事 OR 丸红 新闻"
+      priority: 20
+    - label: 日本企业英文
+      query: "Mitsubishi Corp OR Mitsui OR Itochu OR Sumitomo OR Marubeni news"
+      priority: 18
+    - label: 电装邮船大和
+      query: "Denso OR NYK OR Daiwa Securities Japan news"
+      priority: 16
+  D:
+    - label: 原油 LNG
+      query: "oil price OR crude OR LNG market news"
+      priority: 20
+    - label: 央行与宏观
+      query: "Federal Reserve OR Bank of Japan OR 美联储 OR 日本央行 新闻"
+      priority: 20
+    - label: 贵金属股市
+      query: "gold price OR stock market OR 贵金属 OR 股市"
+      priority: 18
+
+feeds:
+  - label: Reuters World
+    url: "https://feeds.reuters.com/Reuters/worldNews"
+    modules: [B, D]
+    type: direct
+    priority: 30
+    enabled: true
+  - label: Reuters Business
+    url: "https://feeds.reuters.com/reuters/businessNews"
+    modules: [C, D, A]
+    type: direct
+    priority: 30
+    enabled: true
+  - label: BBC World
+    url: "http://feeds.bbci.co.uk/news/world/rss.xml"
+    modules: [B, D]
+    type: direct
+    priority: 25
+    enabled: true
+  - label: NHK 国际
+    url: "https://www3.nhk.or.jp/rss/news/cat0.xml"
+    modules: [C, D]
+    type: direct
+    priority: 25
+    enabled: true
