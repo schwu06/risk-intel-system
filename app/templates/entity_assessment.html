@@ -17,6 +17,7 @@
 
 {% block content %}
 <main class="layout" data-modules="{{ module_codes_csv }}">
+  {# —— 中间栏：授信分布 / 监控主体 / 操作 —— #}
   <aside class="sidebar">
     <h2>授信等级分布</h2>
     <ul class="stat-list">
@@ -59,68 +60,160 @@
     </ul>
 
     <div class="actions">
-      <a class="btn" href="/api/v1/export/docx?report_date={{ report_date }}&module_codes={{ module_codes_csv }}">导出 Word</a>
+      <button
+        type="button"
+        class="btn"
+        id="btn-export-entity-docx"
+        {% if not selected_entity %}disabled{% endif %}
+        data-entity-id="{{ selected_entity.id if selected_entity else '' }}"
+        data-report-date="{{ report_date }}"
+      >导出 Word</button>
       <button type="button" class="btn secondary" id="btn-run-pipeline">采集近24小时资讯</button>
     </div>
-    <p class="hint" id="pipeline-msg">异步采集近 24 小时主体相关资讯；失败时保留上次结果。</p>
+    <p class="hint" id="pipeline-msg">异步采集近 24 小时主体相关资讯；失败时保留上次结果，必要时回填演示样本。</p>
+    <p class="hint" id="export-msg" hidden></p>
   </aside>
 
-  <section class="content">
+  {# —— 右侧：主体评估主视图 —— #}
+  <section class="content entity-assessment-view">
     {% if selected_entity %}
-    <div class="entity-hero">
-      <h1>{{ selected_entity.display_name or selected_entity.name }}</h1>
-      <p class="meta">
-        {% if selected_entity.industry %}<span>{{ selected_entity.industry }}</span>{% endif %}
-        {% if selected_entity.region %}<span>{{ selected_entity.region }}</span>{% endif %}
-        <span class="credit credit-{{ selected_entity.credit_level }} credit-badge">
-          授信：{{ selected_entity.credit_level }}
-        </span>
-      </p>
-    </div>
+    <header class="entity-header">
+      <div class="entity-header-main">
+        <h1 class="entity-title">{{ selected_entity.display_name or selected_entity.name }}</h1>
+        <div class="entity-header-tags">
+          {% if selected_entity.industry %}
+          <span class="industry-tag">{{ selected_entity.industry }}</span>
+          {% endif %}
+          {% if selected_entity.region %}
+          <span class="region-tag">{{ selected_entity.region }}</span>
+          {% endif %}
+          <span class="credit-status-badge credit-badge-{{ selected_entity.credit_level }}">
+            {{ selected_entity.credit_level }}
+          </span>
+        </div>
+      </div>
+      <p class="entity-header-hint">授信状态随风险事件递进调整：正常 → 关注 → 预警 → 高风险</p>
+    </header>
 
-    <h2>授信更新与预警</h2>
-    {% if credit_logs %}
-    <ul class="credit-log-list">
-      {% for log in credit_logs %}
-      <li>
-        <span class="credit-change">
-          <span class="credit credit-{{ log.previous_level }}">{{ log.previous_level }}</span>
-          →
-          <span class="credit credit-{{ log.new_level }}">{{ log.new_level }}</span>
-        </span>
-        <span class="credit-reason">{{ log.reason or '' }}</span>
-        <span class="credit-time">{{ log.created_at }}</span>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p class="empty-module">尚无授信变更记录。风险事件入库后将按「正常 → 关注 → 预警 → 高风险」递进调整。</p>
-    {% endif %}
-
-    <h2>风险事件{% if risks %}（{{ risks|length }}）{% endif %}</h2>
-    {% if risks %}
-    <div class="entry-grid">
-      {% for e in risks %}
-      <article class="entry-card level-border-{{ e.risk_level }}">
-        <header>
-          <span class="badge">{{ e.report_date }}</span>
-          <span class="risk">{{ e.risk_level }}</span>
-        </header>
-        <h3>{{ e.title }}</h3>
-        {% if e.risk_category %}<p class="meta"><strong>风险类别：</strong>{{ e.risk_category }}</p>{% endif %}
-        <p class="summary">{{ e.summary }}</p>
-        {% if e.impact_analysis %}<p class="impact"><strong>影响分析：</strong>{{ e.impact_analysis }}</p>{% endif %}
-        {% if e.source_url %}
-        <p class="source"><a href="{{ e.source_url }}" target="_blank" rel="noopener noreferrer">来源链接</a></p>
+    {# 授信更新与预警 #}
+    <section class="ea-panel" aria-labelledby="credit-panel-title">
+      <div class="ea-panel-head">
+        <h2 id="credit-panel-title">授信更新与预警</h2>
+        {% if credit_logs %}
+        <span class="ea-panel-count">{{ credit_logs|length }} 条记录</span>
         {% endif %}
-      </article>
-      {% endfor %}
+      </div>
+
+      {% if credit_logs %}
+      <ol class="credit-timeline">
+        {% for log in credit_logs %}
+        <li class="credit-timeline-item">
+          <div class="credit-timeline-marker credit-marker-{{ log.new_level }}" aria-hidden="true"></div>
+          <div class="credit-timeline-card">
+            <div class="credit-timeline-top">
+              <span class="credit-change">
+                <span class="credit credit-{{ log.previous_level }}">{{ log.previous_level }}</span>
+                <span class="credit-arrow" aria-hidden="true">→</span>
+                <span class="credit credit-{{ log.new_level }}">{{ log.new_level }}</span>
+              </span>
+              <time class="credit-time" datetime="{{ log.created_at }}">{{ log.created_at }}</time>
+            </div>
+            {% if log.reason %}
+            <p class="credit-reason">{{ log.reason }}</p>
+            {% else %}
+            <p class="credit-reason muted">未注明调级原因</p>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <div class="ea-empty" role="status">
+        <div class="ea-empty-icon" aria-hidden="true">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+            <path d="M12 3v4M12 17v4M3 12h4M17 12h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <circle cx="12" cy="12" r="3.5" stroke="currentColor" stroke-width="1.4"/>
+          </svg>
+        </div>
+        <p class="ea-empty-title">暂无授信变更记录</p>
+        <p class="ea-empty-desc">风险事件入库后，将按「正常 → 关注 → 预警 → 高风险」自动递进调整，并在此展示调级原因。</p>
+      </div>
+      {% endif %}
+    </section>
+
+    {# 多维风险事件 #}
+    <section class="ea-panel" aria-labelledby="risk-panel-title">
+      <div class="ea-panel-head">
+        <h2 id="risk-panel-title">多维风险事件{% if risks %}（{{ risks|length }}）{% endif %}</h2>
+      </div>
+
+      <div class="risk-tabs" role="tablist" aria-label="风险事件分类">
+        <button type="button" class="risk-tab active" role="tab" aria-selected="true" data-tab="all">全部事件</button>
+        <button type="button" class="risk-tab" role="tab" aria-selected="false" data-tab="judicial">司法/行政监管</button>
+        <button type="button" class="risk-tab" role="tab" aria-selected="false" data-tab="finance">金融与经营数据</button>
+        <button type="button" class="risk-tab" role="tab" aria-selected="false" data-tab="public">公开舆情</button>
+        <button type="button" class="risk-tab" role="tab" aria-selected="false" data-tab="supply">供应链/关联方监控</button>
+      </div>
+
+      {% if risks %}
+      <div class="risk-event-list" id="risk-event-list">
+        {% for e in risks %}
+        <article
+          class="risk-event-card level-border-{{ e.risk_level }}"
+          data-category="{{ e.risk_category or '' }}"
+        >
+          <div class="risk-event-top">
+            <span class="risk-level-tag risk-tag-{{ e.risk_level }}">{{ e.risk_level }}</span>
+            {% if e.risk_category %}
+            <span class="risk-category-chip">{{ e.risk_category }}</span>
+            {% endif %}
+            <time class="risk-event-time">{{ e.report_date }}{% if e.created_at %} · {{ e.created_at }}{% endif %}</time>
+          </div>
+          <h3 class="risk-event-title">{{ e.title }}</h3>
+          {% if e.impact_analysis %}
+          <p class="risk-event-impact"><span class="impact-label">AI 风险影响</span>{{ e.impact_analysis }}</p>
+          {% elif e.summary %}
+          <p class="risk-event-impact"><span class="impact-label">AI 风险影响</span>{{ e.summary }}</p>
+          {% endif %}
+          {% if e.summary and e.impact_analysis %}
+          <p class="risk-event-summary">{{ e.summary }}</p>
+          {% endif %}
+          <footer class="risk-event-footer">
+            {% if e.source_url %}
+            <a class="risk-event-source" href="{{ e.source_url }}" target="_blank" rel="noopener noreferrer">数据来源</a>
+            {% else %}
+            <span class="risk-event-source muted">来源未标注</span>
+            {% endif %}
+            {% if e.related_company %}
+            <span class="risk-event-related">关联：{{ e.related_company }}</span>
+            {% endif %}
+          </footer>
+        </article>
+        {% endfor %}
+      </div>
+      <div class="ea-empty risk-tab-empty hidden" id="risk-tab-empty" role="status" hidden>
+        <p class="ea-empty-title">该分类下暂无事件</p>
+        <p class="ea-empty-desc">切换其他标签查看，或运行采集以补充近期资讯。</p>
+      </div>
+      {% else %}
+      <div class="ea-empty" role="status">
+        <div class="ea-empty-icon" aria-hidden="true">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/>
+            <path d="M8 9h8M8 12h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <p class="ea-empty-title">该主体暂无风险事件</p>
+        <p class="ea-empty-desc">可点击左侧「采集近24小时资讯」，或从最左侧「数据源」补充权威材料后再次采集。</p>
+      </div>
+      {% endif %}
+    </section>
+
+    {% else %}
+    <div class="ea-empty ea-empty-page" role="status">
+      <p class="ea-empty-title">暂无监控主体</p>
+      <p class="ea-empty-desc">系统启动时将写入默认主体（Godiva / 普洛斯等）。写入后可在中间栏切换查看评估详情。</p>
     </div>
-    {% else %}
-    <p class="empty">该主体暂无风险事件。可运行主体流水线，或从左侧「数据源」补充权威材料。</p>
-    {% endif %}
-    {% else %}
-    <p class="empty">暂无监控主体。系统启动时将写入默认主体（Godiva / 普洛斯等）。</p>
     {% endif %}
   </section>
 </main>
@@ -131,5 +224,57 @@
   window.REPORT_DATE = "{{ report_date }}";
   window.PIPELINE_MODULES = "{{ module_codes_csv }}".split(",").filter(Boolean);
   window.ENTRY_CHARTS = [];
+  window.ENTITY_ID = {% if selected_entity %}{{ selected_entity.id }}{% else %}null{% endif %};
+  window.ENTITY_NAME = {% if selected_entity %}{{ (selected_entity.display_name or selected_entity.name)|tojson }}{% else %}null{% endif %};
+</script>
+<script src="/static/js/entity_assessment.js"></script>
+<script>
+  (function initRiskTabs() {
+    var tabs = document.querySelectorAll(".risk-tab");
+    var cards = document.querySelectorAll(".risk-event-card");
+    var emptyEl = document.getElementById("risk-tab-empty");
+    if (!tabs.length || !cards.length) return;
+
+    var MATCHERS = {
+      judicial: /司法|行政|监管|合规|处罚|诉讼|法律/,
+      finance: /金融|经营|财务|信用|披露|财报|评级/,
+      public: /舆论|舆情|社交|媒体|品牌|口碑/,
+      supply: /供应链|关联|上下游|合作方|物流/
+    };
+
+    function cardMatches(card, key) {
+      if (key === "all") return true;
+      var cat = card.getAttribute("data-category") || "";
+      var re = MATCHERS[key];
+      return re ? re.test(cat) : false;
+    }
+
+    function applyTab(key) {
+      var visible = 0;
+      cards.forEach(function (card) {
+        var show = cardMatches(card, key);
+        card.classList.toggle("hidden", !show);
+        card.hidden = !show;
+        if (show) visible += 1;
+      });
+      if (emptyEl) {
+        var showEmpty = visible === 0;
+        emptyEl.classList.toggle("hidden", !showEmpty);
+        emptyEl.hidden = !showEmpty;
+      }
+    }
+
+    tabs.forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        var key = tab.getAttribute("data-tab") || "all";
+        tabs.forEach(function (t) {
+          var on = t === tab;
+          t.classList.toggle("active", on);
+          t.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        applyTab(key);
+      });
+    });
+  })();
 </script>
 {% endblock %}

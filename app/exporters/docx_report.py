@@ -13,7 +13,7 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
 from app.config import MODULE_CODES
-from app.database.models import DailyRiskEntry, IndustryReport
+from app.database.models import CreditUpdate, DailyRiskEntry, EntityRisk, IndustryReport, TargetEntity
 from app.services.chart_generator import extract_chart_specs, render_chart_png
 
 
@@ -252,3 +252,98 @@ def export_daily_report_to_bytes(
     buffer = BytesIO()
     doc.save(buffer)
     return buffer.getvalue()
+
+
+def build_entity_assessment_docx(
+    entity: TargetEntity,
+    *,
+    report_date: date,
+    risks: Iterable[EntityRisk],
+    credit_logs: Iterable[CreditUpdate],
+    institution_name: str = "风险管理部",
+) -> Document:
+    """生成《企业主体风险评估简报》。"""
+    doc = Document()
+    section = doc.sections[0]
+    section.top_margin = Pt(72)
+    section.bottom_margin = Pt(72)
+    section.left_margin = Pt(72)
+    section.right_margin = Pt(72)
+
+    display = entity.display_name or entity.name
+
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    tr = title_p.add_run("企业主体风险评估简报")
+    _set_run_font(tr, size_pt=22, bold=True, color=RGBColor(0x0F, 0x17, 0x2A))
+
+    sub = doc.add_paragraph()
+    sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    sr = sub.add_run(f"{institution_name} | 评估日期 {report_date.isoformat()}")
+    _set_run_font(sr, size_pt=11, color=RGBColor(0x55, 0x55, 0x55))
+
+    doc.add_paragraph()
+    _add_heading(doc, "一、主体概况", level=1)
+    _add_meta_line(doc, "主体名称", display)
+    if entity.industry:
+        _add_meta_line(doc, "所属行业", entity.industry)
+    if entity.region:
+        _add_meta_line(doc, "区域", entity.region)
+    _add_meta_line(doc, "当前授信等级", entity.credit_level or "正常")
+    _add_meta_line(doc, "监控状态", entity.monitor_status or "active")
+
+    _add_heading(doc, "二、授信变更历史", level=1)
+    logs = list(credit_logs)
+    if not logs:
+        _add_body(doc, "暂无授信变更记录。", indent=True)
+    else:
+        for idx, log in enumerate(logs, start=1):
+            when = log.created_at.isoformat(sep=" ", timespec="minutes") if log.created_at else ""
+            _add_heading(doc, f"{idx}. {log.previous_level} → {log.new_level}", level=2)
+            if when:
+                _add_meta_line(doc, "变更时间", when)
+            _add_meta_line(doc, "调级原因", log.reason or "未注明")
+
+    _add_heading(doc, "三、近期风险事件与 AI 摘要", level=1)
+    risk_list = list(risks)
+    if not risk_list:
+        _add_body(doc, "近期暂无风险事件。", indent=True)
+    else:
+        for idx, e in enumerate(risk_list, start=1):
+            _add_heading(doc, f"{idx}. {e.title}", level=2)
+            _add_meta_line(doc, "发生/报告日期", e.report_date.isoformat())
+            _add_meta_line(doc, "风险等级", e.risk_level)
+            if e.risk_category:
+                _add_meta_line(doc, "风险类别", e.risk_category)
+            _add_meta_line(doc, "核心摘要", e.summary or "")
+            if e.impact_analysis:
+                _add_meta_line(doc, "AI 风险影响", e.impact_analysis)
+            if e.source_url:
+                _add_meta_line(doc, "数据来源", e.source_url)
+
+    footer = doc.add_paragraph()
+    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    fr = footer.add_run("— 内部资料，未经许可不得对外传播 —")
+    _set_run_font(fr, size_pt=9, color=RGBColor(0x77, 0x77, 0x77))
+    return doc
+
+
+def export_entity_assessment_to_path(
+    entity: TargetEntity,
+    *,
+    report_date: date,
+    risks: list[EntityRisk],
+    credit_logs: list[CreditUpdate],
+    output_path: Path,
+    institution_name: str = "风险管理部",
+) -> Path:
+    doc = build_entity_assessment_docx(
+        entity,
+        report_date=report_date,
+        risks=risks,
+        credit_logs=credit_logs,
+        institution_name=institution_name,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(str(output_path))
+    return output_path

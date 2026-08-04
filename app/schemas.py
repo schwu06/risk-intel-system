@@ -36,6 +36,8 @@ class PipelineRunRequest(BaseModel):
     module_codes: Optional[list[str]] = None
     # None = 跟随配置 pipeline_async_default
     async_mode: Optional[bool] = None
+    # 主体评估页：仅采集/更新指定主体
+    entity_id: Optional[int] = None
 
 
 class PipelineRunResponse(BaseModel):
@@ -45,6 +47,7 @@ class PipelineRunResponse(BaseModel):
     job_id: Optional[str] = None
     async_mode: bool = False
     status: Optional[str] = None
+    entity_id: Optional[int] = None
 
 
 class PipelineJobStatusOut(BaseModel):
@@ -59,6 +62,8 @@ class PipelineJobStatusOut(BaseModel):
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     running_job_id: Optional[str] = None
+    snapshot: Optional[dict] = None
+    entity_id: Optional[int] = None
 
 
 class ManualEntryIn(BaseModel):
@@ -70,6 +75,7 @@ class ManualEntryIn(BaseModel):
 class DataSourceOut(BaseModel):
     id: int
     module_code: str
+    entity_id: Optional[int] = None
     name: str
     source_type: str
     original_filename: Optional[str] = None
@@ -78,6 +84,7 @@ class DataSourceOut(BaseModel):
     created_at: datetime
     text_preview: Optional[str] = None
     extracted_text: Optional[str] = None
+    chars: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -87,6 +94,7 @@ class DataSourceUrlIn(BaseModel):
     url: str = Field(..., min_length=8)
     priority: int = 0
     module_code: Optional[str] = None  # 兼容旧客户端，忽略
+    entity_id: Optional[int] = None
 
 
 class IndustryAnalysisRequest(BaseModel):

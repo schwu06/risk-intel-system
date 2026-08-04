@@ -1,4 +1,4 @@
-"""统一权威数据源管理（全站共用，不分模块）。"""
+"""统一权威数据源管理（全站共用 + 主体专属）。"""
 
 from __future__ import annotations
 
@@ -24,14 +24,18 @@ def ensure_upload_dirs() -> None:
     INDUSTRY_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
 
-def list_all_sources(db: Session) -> list[ModuleDataSource]:
-    """列出全部启用的统一数据源（含历史按模块上传的记录）。"""
-    return (
-        db.query(ModuleDataSource)
-        .filter(ModuleDataSource.is_active.is_(True))
-        .order_by(ModuleDataSource.priority.desc(), ModuleDataSource.created_at.desc())
-        .all()
-    )
+def list_all_sources(db: Session, *, entity_id: int | None = None) -> list[ModuleDataSource]:
+    """列出启用的数据源。
+
+    - entity_id 为 None：仅全站共用源（entity_id IS NULL），供风险日报等使用
+    - entity_id 有值：仅该主体专属源
+    """
+    q = db.query(ModuleDataSource).filter(ModuleDataSource.is_active.is_(True))
+    if entity_id is None:
+        q = q.filter(ModuleDataSource.entity_id.is_(None))
+    else:
+        q = q.filter(ModuleDataSource.entity_id == entity_id)
+    return q.order_by(ModuleDataSource.priority.desc(), ModuleDataSource.created_at.desc()).all()
 
 
 def get_source_by_id(db: Session, source_id: int) -> Optional[ModuleDataSource]:
@@ -39,19 +43,19 @@ def get_source_by_id(db: Session, source_id: int) -> Optional[ModuleDataSource]:
 
 
 def list_module_sources(db: Session, module_code: str | None = None) -> list[ModuleDataSource]:
-    """兼容旧接口：现统一返回全站数据源。"""
-    return list_all_sources(db)
+    """兼容旧接口：返回全站共用数据源。"""
+    return list_all_sources(db, entity_id=None)
 
 
-def get_shared_authoritative_text(db: Session, max_chars: int = 80_000) -> str:
-    sources = list_all_sources(db)
+def _compose_authority_text(sources: list[ModuleDataSource], max_chars: int) -> str:
     blocks: list[str] = []
     used = 0
     for src in sources:
         text = (src.extracted_text or "").strip()
         if not text:
             continue
-        header = f"【权威数据源: {src.name}】"
+        scope = f"主体#{src.entity_id}" if src.entity_id else "全站"
+        header = f"【权威数据源({scope}): {src.name}】"
         chunk = f"{header}\n{text}"
         if used + len(chunk) > max_chars:
             remaining = max_chars - used
@@ -63,8 +67,24 @@ def get_shared_authoritative_text(db: Session, max_chars: int = 80_000) -> str:
     return "\n\n".join(blocks)
 
 
+def get_shared_authoritative_text(db: Session, max_chars: int = 80_000) -> str:
+    return _compose_authority_text(list_all_sources(db, entity_id=None), max_chars)
+
+
+def get_entity_authoritative_text(
+    db: Session,
+    entity_id: int,
+    max_chars: int = 80_000,
+) -> str:
+    """主体采集优先使用该主体专属数据源，并合并全站共用源。"""
+    entity_sources = list_all_sources(db, entity_id=entity_id)
+    shared = list_all_sources(db, entity_id=None)
+    # 专属在前
+    return _compose_authority_text([*entity_sources, *shared], max_chars)
+
+
 def get_module_authoritative_text(db: Session, module_code: str, max_chars: int = 80_000) -> str:
-    """任意模块流水线均读取同一套统一数据源。"""
+    """任意模块流水线均读取全站共用数据源。"""
     return get_shared_authoritative_text(db, max_chars=max_chars)
 
 
@@ -75,10 +95,12 @@ def save_module_file_source(
     filename: str,
     file_bytes: bytes,
     priority: int = 0,
+    *,
+    entity_id: int | None = None,
 ) -> ModuleDataSource:
     ensure_upload_dirs()
     code = GLOBAL_SOURCE_CODE
-    dest_dir = UPLOAD_ROOT / code
+    dest_dir = UPLOAD_ROOT / (f"entity_{entity_id}" if entity_id else code)
     dest_dir.mkdir(parents=True, exist_ok=True)
     safe_name = Path(filename).name
     dest = dest_dir / safe_name
@@ -92,6 +114,7 @@ def save_module_file_source(
     extracted = truncate_text(parse_uploaded_file(dest))
     row = ModuleDataSource(
         module_code=code,
+        entity_id=entity_id,
         name=name or safe_name,
         source_type="file",
         file_path=str(dest),
@@ -111,10 +134,13 @@ def save_module_url_source(
     name: str,
     url: str,
     priority: int = 0,
+    *,
+    entity_id: int | None = None,
 ) -> ModuleDataSource:
     text = truncate_text(fetch_url_text(url))
     row = ModuleDataSource(
         module_code=GLOBAL_SOURCE_CODE,
+        entity_id=entity_id,
         name=name or url,
         source_type="url",
         url=url,

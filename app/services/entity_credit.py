@@ -34,9 +34,36 @@ def seed_default_entities(db: Session) -> int:
             )
         )
         created += 1
-    if created:
-        db.commit()
+    # 历史重复主体：独立「GLP」与「普洛斯 GLP」合并，停用多余条目
+    _dedupe_glp_entity(db)
+    db.commit()
     return created
+
+
+def _dedupe_glp_entity(db: Session) -> None:
+    """将独立 GLP 主体的风险/授信记录归并到「普洛斯」，并停用 GLP。"""
+    glp = db.query(TargetEntity).filter(TargetEntity.name == "GLP").first()
+    if not glp:
+        return
+    prologis = db.query(TargetEntity).filter(TargetEntity.name == "普洛斯").first()
+    if not prologis:
+        glp.name = "普洛斯"
+        glp.display_name = "普洛斯 GLP"
+        glp.aliases = "GLP,Global Logistic Properties,普洛斯"
+        glp.industry = glp.industry or "物流地产"
+        glp.region = glp.region or "亚太 / 全球"
+        return
+
+    if glp.id == prologis.id:
+        return
+
+    db.query(EntityRisk).filter(EntityRisk.entity_id == glp.id).update(
+        {EntityRisk.entity_id: prologis.id}, synchronize_session=False
+    )
+    db.query(CreditUpdate).filter(CreditUpdate.entity_id == glp.id).update(
+        {CreditUpdate.entity_id: prologis.id}, synchronize_session=False
+    )
+    glp.monitor_status = "inactive"
 
 
 def resolve_entity(

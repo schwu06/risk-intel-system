@@ -58,6 +58,11 @@ def on_startup():
         log.info("切片2数据就绪: %s", stats)
     finally:
         db.close()
+    from app.services.pipeline_runner import recover_stale_jobs
+
+    recovered = recover_stale_jobs()
+    if recovered:
+        log.warning("启动时清理遗留采集任务: %s", recovered)
     start_scheduler()
 
 
@@ -90,15 +95,17 @@ def _source_drawer_context(
     db: Session,
     *,
     industry_name: str | None = None,
+    entity_id: int | None = None,
 ) -> dict:
-    """全站统一数据源抽屉。"""
-    sources = list_all_sources(db)
+    """数据源抽屉：风险日报用全站源；主体评估用当前主体专属源。"""
+    sources = list_all_sources(db, entity_id=entity_id)
     return {
         "drawer_sources": sources,
         "drawer_modules": dict(MODULE_CODES),
         "drawer_module_sources": {},
         "drawer_industry_sources": [],
         "drawer_industry_name": industry_name or "",
+        "drawer_entity_id": entity_id,
     }
 
 
@@ -321,7 +328,9 @@ def _entity_assessment_context(
         "module_sources": module_sources,
         "run_map": run_map,
         "pages": PAGE_META,
-        **_source_drawer_context(db),
+        **_source_drawer_context(
+            db, entity_id=selected_entity.id if selected_entity else None
+        ),
     }
 
 

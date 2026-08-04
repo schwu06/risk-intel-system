@@ -43,7 +43,9 @@ def _sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA busy_timeout=30000")
+        # 较短超时，避免上传/侧栏接口在采集写库时卡住数十秒
+        cursor.execute("PRAGMA busy_timeout=8000")
+        cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.close()
 
 
@@ -64,6 +66,8 @@ def _migrate_sqlite_columns() -> None:
         ("report_runs", "funnel_json", "TEXT"),
         ("report_runs", "job_id", "VARCHAR(64)"),
         ("report_runs", "kept_previous", "BOOLEAN DEFAULT 0"),
+        ("pipeline_jobs", "snapshot_json", "TEXT"),
+        ("module_data_sources", "entity_id", "INTEGER"),
     ]
     with engine.begin() as conn:
         for table, column, col_type in alterations:

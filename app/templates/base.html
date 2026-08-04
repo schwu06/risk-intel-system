@@ -24,9 +24,12 @@
     </div>
   </header>
 
-  {% block content %}{% endblock %}
-
-  {% include "partials/source_drawer.html" %}
+  <div class="app-shell" id="app-shell">
+    {% include "partials/source_drawer.html" %}
+    <div class="app-main">
+      {% block content %}{% endblock %}
+    </div>
+  </div>
 
   <script src="/static/js/dashboard.js"></script>
   {% block scripts %}{% endblock %}

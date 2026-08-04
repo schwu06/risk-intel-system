@@ -27,16 +27,19 @@ class Settings(BaseSettings):
     daily_pipeline_cron: str = "0 6 * * *"
     request_timeout_seconds: int = 120
     news_window_hours: int = 24
-    news_fetch_body: bool = True
+    news_fetch_body: bool = False
     news_max_body_items: int = 8
     # 外网偶发 DNS/超时：自动重试，提高一次采集成功率
-    network_retry_attempts: int = 3
-    network_retry_backoff_seconds: float = 1.5
+    network_retry_attempts: int = 2
+    network_retry_backoff_seconds: float = 1.2
     # 流水线韧性：先粗筛再 LLM、缓存、降级入库、异步默认开启
     pipeline_async_default: bool = True
-    pipeline_llm_top_k: int = 12
+    pipeline_llm_top_k: int = 8
     pipeline_llm_cache_hours: int = 168
-    pipeline_mita_query_pause_seconds: float = 0.8
+    pipeline_mita_query_pause_seconds: float = 0.3
+    # SQLite 下默认串行，避免并行写库拖慢侧栏/上传等其它接口
+    pipeline_module_parallel: bool = False
+    pipeline_merge_llm: bool = True
     rss_config_path: str = "config/rss_feeds.yaml"
 
 
@@ -87,7 +90,7 @@ def modules_for_page(page_key: str) -> dict[str, str]:
     codes = PAGE_MODULES.get(page_key, ())
     return {c: MODULE_CODES[c] for c in codes if c in MODULE_CODES}
 
-MODULE_A_TARGETS = ["Godiva", "普洛斯", "GLP"]
+MODULE_A_TARGETS = ["Godiva", "普洛斯"]
 MODULE_A_CATEGORIES = [
     "司法与行政监管",
     "金融与经营数据",
@@ -102,15 +105,15 @@ MODULE_B_REGION_HINT = (
 
 MODULE_C_TARGETS = [
     "三菱商事",
-    "三井物产",
+    "三井物産",
     "伊藤忠商事",
     "住友商事",
-    "丸红",
-    "电装",
+    "丸紅",
+    "デンソー",
     "Denso",
-    "日本邮船",
+    "日本郵船",
     "NYK",
-    "大和证券",
+    "大和証券",
     "Daiwa Securities",
 ]
 
@@ -168,13 +171,6 @@ DEFAULT_TARGET_ENTITIES = [
         "industry": "物流地产",
         "region": "亚太 / 全球",
     },
-    {
-        "name": "GLP",
-        "display_name": "GLP",
-        "aliases": "普洛斯,Global Logistic Properties",
-        "industry": "物流地产",
-        "region": "亚太 / 全球",
-    },
 ]
 
 STRUCTURED_FIELDS_CN = [
@@ -189,13 +185,22 @@ STRUCTURED_FIELDS_CN = [
 ]
 
 
-def module_search_queries(module: str, report_date: str) -> list[dict[str, Any]]:
-    """为各模块生成近 24 小时资讯检索查询。"""
+def module_search_queries(
+    module: str,
+    report_date: str,
+    *,
+    entity_targets: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """为各模块生成近 24 小时资讯检索查询。
+
+    entity_targets: 主体评估（模块 A）可限定只搜指定主体名称列表。
+    """
     queries: list[dict[str, Any]] = []
     # 避免把具体日期塞进检索词（易导致秘塔“未找到相关数据”）
     recency = "最新 过去24小时 OR today OR 速报"
     if module == "A":
-        for target in ["Godiva", "普洛斯 GLP"]:
+        targets = entity_targets or ["Godiva", "普洛斯 GLP"]
+        for target in targets:
             for cat in MODULE_A_CATEGORIES:
                 queries.append(
                     {
@@ -220,23 +225,26 @@ def module_search_queries(module: str, report_date: str) -> list[dict[str, Any]]
             }
         )
     elif module == "C":
-        # 仅中文主体名，避免中英重复打爆配额
+        # 日语正式社名 + 適時開示/IR，减少中文转载噪音
         companies = [
-            "三菱商事",
-            "三井物产",
-            "伊藤忠商事",
-            "住友商事",
-            "丸红",
-            "电装",
-            "日本邮船",
-            "大和证券",
+            ("三菱商事", "Mitsubishi Corporation"),
+            ("三井物産", "Mitsui & Co"),
+            ("伊藤忠商事", "Itochu"),
+            ("住友商事", "Sumitomo Corporation"),
+            ("丸紅", "Marubeni"),
+            ("デンソー", "Denso"),
+            ("日本郵船", "NYK Line"),
+            ("大和証券", "Daiwa Securities"),
         ]
-        for company in companies:
+        for jp_name, en_name in companies:
             queries.append(
                 {
                     "module": "C",
-                    "query": f"{company} 新闻 披露 经营 动态 {recency}",
-                    "metadata": {"company": company},
+                    "query": (
+                        f"{jp_name} OR {en_name} "
+                        f"適時開示 OR ニュースリリース OR IR OR 決算 {recency}"
+                    ),
+                    "metadata": {"company": jp_name},
                 }
             )
     elif module == "D":

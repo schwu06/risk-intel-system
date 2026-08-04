@@ -61,7 +61,16 @@ def migrate_legacy_data(db: Session) -> dict[str, int]:
         "news_articles": 0,
         "entity_risks": 0,
         "industry_reports": 0,
+        "entity_demo": 0,
     }
+
+    try:
+        from app.services.entity_mock import seed_entity_demo_data
+
+        demo = seed_entity_demo_data(db, force=False)
+        stats["entity_demo"] = int(demo.get("risks") or 0)
+    except Exception as exc:
+        logger.warning("主体演示数据写入跳过: %s", exc)
 
     # --- 资讯：B/C/D ---
     legacy_news_ids = {

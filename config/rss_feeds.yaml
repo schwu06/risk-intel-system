@@ -2,12 +2,20 @@
 # type: google = Google News 搜索 RSS；direct = 直连 feed URL
 # modules: 适用模块代码 B/C/D/A
 # priority: 越大越优先；enabled: false 可临时关闭故障源
+#
+# module_defaults: 可按模块覆盖 Google News 地区/语言（模块 C 用日本版）
 
 defaults:
   max_items_per_feed: 12
   google_hl: zh-CN
   google_gl: CN
   google_ceid: "CN:zh-Hans"
+
+module_defaults:
+  C:
+    google_hl: ja
+    google_gl: JP
+    google_ceid: "JP:ja"
 
 queries:
   A:
@@ -25,15 +33,49 @@ queries:
       query: "中东 新闻 OR 地缘政治 OR 官方声明 OR 制裁"
       priority: 20
   C:
-    - label: 日本商社
-      query: "三菱商事 OR 三井物产 OR 伊藤忠 OR 住友商事 OR 丸红 新闻"
+    # 日本官方/准官方优先：適時開示・IR・ニュースリリース（Google 日本版）
+    - label: 五大商社 適時開示
+      query: "(三菱商事 OR 三井物産 OR 伊藤忠商事 OR 住友商事 OR 丸紅) (適時開示 OR IR OR ニュースリリース OR 決算)"
+      priority: 30
+    - label: 电装 邮船 大和
+      query: "(デンソー OR 日本郵船 OR 大和証券) (適時開示 OR ニュースリリース OR IR OR 決算)"
+      priority: 28
+    - label: 三菱商事官网
+      query: "site:www.mitsubishicorp.com (ニュースリリース OR 適時開示 OR IR)"
+      priority: 26
+    - label: 三井物产官网
+      query: "site:www.mitsui.com (ニュースリリース OR 適時開示 OR IR)"
+      priority: 26
+    - label: 伊藤忠官网
+      query: "site:www.itochu.co.jp (ニュースリリース OR 適時開示 OR IR)"
+      priority: 26
+    - label: 住友商事官网
+      query: "site:www.sumitomocorp.com (ニュースリリース OR 適時開示 OR IR)"
+      priority: 24
+    - label: 丸红官网
+      query: "site:www.marubeni.com (ニュースリリース OR 適時開示 OR IR)"
+      priority: 24
+    - label: デンソー官网
+      query: "site:www.denso.com (ニュース OR プレスリリース OR IR)"
+      priority: 22
+    - label: 日本郵船官网
+      query: "site:www.nyk.com (ニュース OR プレスリリース OR IR)"
+      priority: 22
+    - label: 大和証券官网
+      query: "site:www.daiwa.jp OR site:www.daiwa-grp.jp (ニュース OR IR OR 適時開示)"
+      priority: 22
+    - label: TDnet 披露相关
+      query: "(三菱商事 OR 三井物産 OR 伊藤忠 OR 住友商事 OR 丸紅 OR デンソー OR 日本郵船 OR 大和証券) (適時開示 OR TDnet OR 開示情報)"
       priority: 20
-    - label: 日本企业英文
-      query: "Mitsubishi Corp OR Mitsui OR Itochu OR Sumitomo OR Marubeni news"
+    - label: 日経 企业报道
+      query: "site:www.nikkei.com (三菱商事 OR 三井物産 OR 伊藤忠 OR 住友商事 OR 丸紅 OR デンソー OR 日本郵船 OR 大和証券)"
       priority: 18
-    - label: 电装邮船大和
-      query: "Denso OR NYK OR Daiwa Securities Japan news"
-      priority: 16
+    - label: PR TIMES 企业稿
+      query: "site:prtimes.jp (三菱商事 OR 三井物産 OR 伊藤忠 OR 住友商事 OR 丸紅 OR デンソー OR 日本郵船 OR 大和証券)"
+      priority: 14
+    - label: 英文 IR 补充
+      query: "(Mitsubishi Corp OR Mitsui & Co OR Itochu OR Sumitomo Corp OR Marubeni OR Denso OR NYK OR Daiwa Securities) (IR OR disclosure OR earnings)"
+      priority: 12
   D:
     - label: 原油 LNG
       query: "oil price OR crude OR LNG market news"
@@ -51,7 +93,7 @@ feeds:
     modules: [B, D]
     type: direct
     priority: 30
-    enabled: true
+    enabled: false
   - label: Reuters Business
     url: "https://feeds.reuters.com/reuters/businessNews"
     modules: [C, D, A]
@@ -64,9 +106,25 @@ feeds:
     type: direct
     priority: 25
     enabled: true
-  - label: NHK 国际
-    url: "https://www3.nhk.or.jp/rss/news/cat0.xml"
+  # NHK 経済（cat5）；原 cat0 为综合头条，易混入无关内容
+  - label: NHK 経済
+    url: "https://www3.nhk.or.jp/rss/news/cat5.xml"
     modules: [C, D]
     type: direct
-    priority: 25
+    priority: 28
     enabled: true
+  - label: NHK 国際
+    url: "https://www3.nhk.or.jp/rss/news/cat6.xml"
+    modules: [B, D]
+    type: direct
+    priority: 22
+    enabled: true
+  # PR TIMES 总线噪声大，改由 queries.C 的 site:prtimes.jp 查询接入
+  - label: PR TIMES
+    url: "https://prtimes.jp/index.rdf"
+    modules: [C]
+    type: direct
+    priority: 16
+    enabled: false
+  # 企业官网多数不公开稳定 RSS；通过 Google 日本版 + site: 查询接入（见 queries.C）
+  # TDnet / EDINET 无公开企业过滤 RSS，流水线保留门户人工核对链接；披露关键词见 queries.C

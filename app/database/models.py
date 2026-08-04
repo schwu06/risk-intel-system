@@ -33,12 +33,19 @@ class DomainBlacklist(Base):
 
 
 class ModuleDataSource(Base):
-    """各日报模块的权威数据源（文件/模板/网址）。"""
+    """权威数据源（文件/模板/网址）。
+
+    - entity_id 为空：全站共用（风险日报等）
+    - entity_id 有值：主体评估页当前主体的专属参考素材
+    """
 
     __tablename__ = "module_data_sources"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     module_code: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    entity_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("target_entities.id"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)  # file, url, template
     file_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
@@ -137,6 +144,8 @@ class PipelineJob(Base):
     funnel_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 任务启动时冻结的权威数据源等快照；运行中上传/删除不影响本次采集
+    snapshot_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

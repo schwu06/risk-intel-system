@@ -6,8 +6,11 @@ __pycache__/
 
 # 本地数据库与上传文件夹（保证各自电脑数据独立）
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
 data/uploads/
+data/exports/
 .env
 .idea/
 .vscode/

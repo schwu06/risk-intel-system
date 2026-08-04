@@ -37,6 +37,7 @@ from app.services.news_quality import (
 from app.services.recency import is_within_hours, parse_published_at
 from app.services.rss_news import RssNewsCollector
 from app.services.scrapers.official_portals import OfficialPortalScraper
+from app.services.scrapers.tdnet_collector import TdnetCollector
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,8 @@ class RiskPipeline:
         deepseek: Optional[DeepSeekAnalyzer] = None,
         rss: Optional[RssNewsCollector] = None,
         job_id: Optional[str] = None,
+        authority_text: Optional[str] = None,
+        entity_id: Optional[int] = None,
     ) -> None:
         self.db = db
         self.mita = mita or MitaSearchClient()
@@ -60,6 +63,9 @@ class RiskPipeline:
         self.settings = get_settings()
         self.window_hours = int(getattr(self.settings, "news_window_hours", 24) or 24)
         self.job_id = job_id
+        # None = 实时读取数据源；非 None（含空串）= 任务启动时冻结的快照，运行中变更不影响本次
+        self._authority_snapshot = authority_text
+        self.entity_id = entity_id
         self.llm_top_k = int(getattr(self.settings, "pipeline_llm_top_k", 12) or 12)
         self.cache_hours = int(getattr(self.settings, "pipeline_llm_cache_hours", 168) or 168)
         self.mita_pause = float(getattr(self.settings, "pipeline_mita_query_pause_seconds", 0.8) or 0)
@@ -113,7 +119,10 @@ class RiskPipeline:
             self.db.commit()
 
             batches: list[dict[str, Any]] = []
-            authority_text = get_module_authoritative_text(self.db, module_code) or ""
+            if self._authority_snapshot is not None:
+                authority_text = self._authority_snapshot
+            else:
+                authority_text = get_module_authoritative_text(self.db, module_code) or ""
 
             if authority_text.strip():
                 batches.append(
@@ -144,53 +153,118 @@ class RiskPipeline:
 
             if module_code == "C":
                 try:
-                    # 门户链接仅作人工核对备注，不进入资讯发布流
+                    tdnet_batch = self._collect_tdnet(module_code, funnel)
+                    if tdnet_batch["items"]:
+                        batches.append(tdnet_batch)
+                        source_ok += 1
+                    elif tdnet_batch.get("error"):
+                        source_fail += 1
+                        fail_notes.append(f"TDnet: {tdnet_batch['error']}")
+                        funnel["source_fail"].append("tdnet")
+                except Exception as exc:
+                    source_fail += 1
+                    fail_notes.append(f"TDnet: {exc}")
+                    funnel["source_fail"].append("tdnet")
+                    logger.warning("模块 %s TDnet 采集失败（已跳过）: %s", module_code, exc)
+                try:
+                    # EDINET 仍作人工核对备注（需正式 API Key 后才能正文入库）
                     portal_note = self._collect_portals_as_notes(
                         module_code, report_date, funnel
                     )
                     if portal_note:
                         authority_text = (
-                            f"{authority_text}\n\n=== 披露门户核对入口（非新闻正文，勿直接作为条目）===\n"
+                            f"{authority_text}\n\n=== EDINET 核对入口（非新闻正文）===\n"
                             f"{portal_note}"
                         ).strip()
                 except Exception as exc:
-                    source_fail += 1
-                    fail_notes.append(f"官方门户: {exc}")
-                    funnel["source_fail"].append("portal")
-                    logger.warning("官方门户补充失败: %s", exc)
+                    logger.warning("EDINET 门户备注失败: %s", exc)
 
             mita_ok = 0
             mita_fail = 0
-            queries = module_search_queries(module_code, report_date.isoformat())
-            for idx, qcfg in enumerate(queries):
-                try:
-                    batch = self._collect_mita(
-                        module_code=module_code,
-                        query=qcfg["query"],
-                        metadata=qcfg.get("metadata") or {},
-                        whitelist=whitelist,
-                        blacklist=blacklist,
-                        funnel=funnel,
-                    )
-                    if batch["items"]:
-                        batches.append(batch)
-                        mita_ok += 1
-                    if self.mita_pause > 0 and idx + 1 < len(queries):
-                        time.sleep(self.mita_pause)
-                except Exception as exc:
-                    mita_fail += 1
-                    logger.warning("单条检索失败，已跳过: %s | %s", qcfg.get("query", ""), exc)
-            if mita_ok:
-                source_ok += 1
-            if mita_fail:
-                source_fail += 1
-                if not mita_ok:
-                    fail_notes.append(f"秘塔: {mita_fail}/{mita_fail + mita_ok} 条查询失败")
-                    funnel["source_fail"].append("mita")
+            entity_targets = self._entity_search_targets() if module_code in ENTITY_MODULES else None
+            from app.services.api_keys import is_placeholder_key
+
+            skip_mita = is_placeholder_key(getattr(self.settings, "mita_api_key", None))
+            if skip_mita:
+                funnel["source_fail"].append("mita_unconfigured")
+                fail_notes.append("秘塔未配置，已跳过检索")
+            else:
+                queries = module_search_queries(
+                    module_code,
+                    report_date.isoformat(),
+                    entity_targets=entity_targets,
+                )
+                for idx, qcfg in enumerate(queries):
+                    try:
+                        batch = self._collect_mita(
+                            module_code=module_code,
+                            query=qcfg["query"],
+                            metadata=qcfg.get("metadata") or {},
+                            whitelist=whitelist,
+                            blacklist=blacklist,
+                            funnel=funnel,
+                        )
+                        if batch["items"]:
+                            batches.append(batch)
+                            mita_ok += 1
+                        else:
+                            mita_fail += 1
+                        if self.mita_pause > 0 and idx + 1 < len(queries):
+                            time.sleep(self.mita_pause)
+                    except Exception as exc:
+                        mita_fail += 1
+                        logger.warning("单条检索失败，已跳过: %s | %s", qcfg.get("query", ""), exc)
+                    # 主体采集：连续失败时提前结束，走演示降级，避免长时间空转
+                    if (
+                        module_code in ENTITY_MODULES
+                        and self.entity_id
+                        and mita_ok == 0
+                        and mita_fail >= 2
+                    ):
+                        fail_notes.append("秘塔连续失败，提前结束检索")
+                        break
+                if mita_ok:
+                    source_ok += 1
+                if mita_fail:
+                    source_fail += 1
+                    if not mita_ok:
+                        fail_notes.append(f"秘塔: {mita_fail}/{mita_fail + mita_ok} 条查询失败")
+                        funnel["source_fail"].append("mita")
 
             self._save_artifact(
                 report_date, module_code, "collect", "all", {"batches": batches}, item_count=_batch_item_total(batches)
             )
+
+            # 主体评估 + 外部能力未配置且无有效批次：直接演示降级，避免空转 LLM
+            from app.services.api_keys import is_placeholder_key as _ph
+            external_offline = _ph(getattr(self.settings, "mita_api_key", None)) and _ph(
+                getattr(self.settings, "deepseek_api_key", None)
+            )
+            has_external_items = any(
+                (b.get("items") or b.get("source") == "authority") for b in batches
+            )
+            if (
+                module_code in ENTITY_MODULES
+                and self.entity_id
+                and external_offline
+                and not has_external_items
+            ):
+                from app.services.entity_mock import refresh_entity_demo_for_collect
+
+                saved = refresh_entity_demo_for_collect(
+                    self.db, entity_id=self.entity_id, report_date=report_date
+                )
+                funnel["saved"] = saved
+                funnel["demo_fallback"] = True
+                run.entry_count = saved
+                run.kept_previous = False
+                run.status = "completed" if saved > 0 else "empty"
+                run.phase = "done"
+                run.notes = "外部检索未配置，已写入近24小时演示样本并刷新授信"
+                run.finished_at = datetime.utcnow()
+                self._set_funnel(run, funnel)
+                self.db.commit()
+                return saved
 
             # ---- phase: analyze ----
             run.phase = "analyze"
@@ -199,15 +273,25 @@ class RiskPipeline:
             self.db.commit()
 
             pending_rows: list[dict[str, Any]] = []
-            for batch in batches:
-                rows = self._analyze_batch(
-                    batch,
+            merge_llm = bool(getattr(self.settings, "pipeline_merge_llm", True))
+            if merge_llm:
+                pending_rows = self._analyze_merged(
+                    batches,
                     module_code=module_code,
                     report_date=report_date,
                     authority_text=authority_text,
                     funnel=funnel,
                 )
-                pending_rows.extend(rows)
+            else:
+                for batch in batches:
+                    rows = self._analyze_batch(
+                        batch,
+                        module_code=module_code,
+                        report_date=report_date,
+                        authority_text=authority_text,
+                        funnel=funnel,
+                    )
+                    pending_rows.extend(rows)
 
             pending_rows = self._dedupe_structured(pending_rows, module_code, funnel)
             pending_rows = filter_publishable_rows(pending_rows)
@@ -260,22 +344,40 @@ class RiskPipeline:
                     note += f"（缓存命中 {funnel['llm_cached']}）"
                 run.notes = note
             else:
-                # 无新产出：保留旧数据，避免页面变空白
-                funnel["kept_previous"] = True
-                run.kept_previous = True
-                run.entry_count = previous_count
-                if source_fail and not source_ok:
-                    run.status = "failed"
-                    run.notes = (
-                        "请求失败，已保留上次结果｜"
-                        + "；".join(fail_notes[:3])
+                # 主体评估：无真实产出时写入演示数据，保证页面可刷新
+                if module_code in ENTITY_MODULES and self.entity_id:
+                    from app.services.entity_mock import refresh_entity_demo_for_collect
+
+                    saved = refresh_entity_demo_for_collect(
+                        self.db, entity_id=self.entity_id, report_date=report_date
                     )
-                elif previous_count > 0:
-                    run.status = "completed"
-                    run.notes = "今日无新增动态，已保留上次结果"
+                    funnel["saved"] = saved
+                    funnel["demo_fallback"] = True
+                    run.entry_count = saved
+                    run.kept_previous = False
+                    run.status = "completed" if saved > 0 else "empty"
+                    run.notes = (
+                        f"近{self.window_hours}小时采集无新增源数据，已写入演示样本并刷新授信"
+                        if saved
+                        else "今日无动态"
+                    )
                 else:
-                    run.status = "empty"
-                    run.notes = "今日无动态"
+                    # 无新产出：保留旧数据，避免页面变空白
+                    funnel["kept_previous"] = True
+                    run.kept_previous = True
+                    run.entry_count = previous_count
+                    if source_fail and not source_ok:
+                        run.status = "failed"
+                        run.notes = (
+                            "请求失败，已保留上次结果｜"
+                            + "；".join(fail_notes[:3])
+                        )
+                    elif previous_count > 0:
+                        run.status = "completed"
+                        run.notes = "今日无新增动态，已保留上次结果"
+                    else:
+                        run.status = "empty"
+                        run.notes = "今日无动态"
 
             run.phase = "done"
             run.finished_at = datetime.utcnow()
@@ -356,14 +458,58 @@ class RiskPipeline:
             "error": None if detailed.fetch_ok else "全部 feed 失败",
         }
 
+    def _collect_tdnet(self, module_code: str, funnel: dict[str, Any]) -> dict[str, Any]:
+        """采集监控企业 TDnet 适时应披露，作为可分析/可入库资讯源。"""
+        collector = TdnetCollector()
+        hits = collector.collect(hours=self.window_hours, max_items=36)
+        funnel["tdnet_fetched"] = len(hits)
+        items = [
+            {
+                "title": h.title,
+                "url": h.url,
+                "snippet": h.snippet,
+                "published_at": h.published_at,
+                "source_domain": "release.tdnet.info",
+                "company": h.company_name,
+                "company_code": h.company_code,
+                "fingerprint": content_fingerprint(
+                    module_code=module_code,
+                    title=h.title,
+                    url=h.url,
+                    published_at=h.published_at,
+                ),
+            }
+            for h in hits
+        ]
+        if items and self.settings.news_fetch_body:
+            items = enrich_items_with_body(
+                items,
+                max_items=min(8, int(self.settings.news_max_body_items or 8)),
+            )
+        log = SearchLog(
+            module_code=module_code,
+            query_text=f"[TDnet适时应披露近{self.window_hours}小时]",
+            status="completed" if items else "empty",
+            result_count=len(items),
+            raw_response=json.dumps({"items": items}, ensure_ascii=False)[:50000],
+        )
+        self.db.add(log)
+        self.db.flush()
+        return {
+            "source": "tdnet",
+            "items": items,
+            "search_log_id": log.id,
+            "metadata": {"source": "tdnet", "category": "適時開示"},
+            "error": None if items else "近窗内无监控企业披露",
+        }
+
     def _collect_portals_as_notes(
         self, module_code: str, report_date: date, funnel: dict[str, Any]
     ) -> str:
-        """生成披露门户核对备注；不产出可发布资讯条目。"""
+        """生成 EDINET 核对备注；TDnet 正文已走独立采集通道。"""
         scraper = OfficialPortalScraper()
         from app.config import MODULE_C_TARGETS
 
-        # 去重：MODULE_C_TARGETS 含中英别名，只取前若干中文主体名
         seen: set[str] = set()
         companies: list[str] = []
         for name in MODULE_C_TARGETS:
@@ -378,7 +524,10 @@ class RiskPipeline:
 
         hits = []
         for company in companies:
-            hits.extend(scraper.collect_reference_hits(company, report_date))
+            # 仅保留 EDINET 入口；TDnet 已正文采集
+            for h in scraper.collect_reference_hits(company, report_date):
+                if h.source == "EDINET":
+                    hits.append(h)
         funnel["portal_fetched"] = len(hits)
         funnel["portal_reference_only"] = True
 
@@ -389,7 +538,7 @@ class RiskPipeline:
         note = "\n".join(lines)
         log = SearchLog(
             module_code=module_code,
-            query_text="[官方门户核对入口-不入库]",
+            query_text="[EDINET核对入口-不入库]",
             status="completed",
             result_count=0,
             raw_response=note[:20000],
@@ -475,6 +624,108 @@ class RiskPipeline:
     # analyze helpers
     # ------------------------------------------------------------------
 
+    def _analyze_merged(
+        self,
+        batches: list[dict[str, Any]],
+        *,
+        module_code: str,
+        report_date: date,
+        authority_text: str,
+        funnel: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """同一模块多源合并为少量 LLM 调用，显著缩短耗时。"""
+        rows: list[dict[str, Any]] = []
+        auth_batches = [b for b in batches if b.get("source") == "authority"]
+        other_batches = [b for b in batches if b.get("source") != "authority"]
+
+        for batch in auth_batches:
+            rows.extend(
+                self._analyze_batch(
+                    batch,
+                    module_code=module_code,
+                    report_date=report_date,
+                    authority_text=authority_text,
+                    funnel=funnel,
+                )
+            )
+
+        merged_items: list[dict[str, Any]] = []
+        for batch in other_batches:
+            for it in batch.get("items") or []:
+                if not is_substantive_news_item(it):
+                    continue
+                item = dict(it)
+                item["_batch_source"] = batch.get("source")
+                item["_batch_meta"] = batch.get("metadata") or {}
+                merged_items.append(item)
+
+        if not merged_items and not auth_batches:
+            return []
+        if not merged_items:
+            return rows
+
+        # 去重后取 Top-K
+        seen: set[str] = set()
+        unique: list[dict[str, Any]] = []
+        for it in merged_items:
+            fp = it.get("fingerprint") or content_fingerprint(
+                module_code=module_code,
+                title=it.get("title"),
+                url=it.get("url"),
+                published_at=it.get("published_at"),
+            )
+            if fp in seen:
+                continue
+            seen.add(fp)
+            it["fingerprint"] = fp
+            unique.append(it)
+        ranked = self._prefilter_items(unique, self.llm_top_k)
+        funnel["sent_llm"] = int(funnel.get("sent_llm") or 0) + len(ranked)
+
+        web_text = json.dumps(ranked, ensure_ascii=False, indent=2)
+        combined = web_text
+        if authority_text:
+            combined = (
+                f"=== 权威数据源（优先参考）===\n{authority_text[:20000]}\n\n"
+                f"=== RSS/秘塔合并候选（近{self.window_hours}小时）===\n{web_text}"
+            )
+        metadata = {"source": "merged"}
+        try:
+            structured = self._llm_analyze(
+                combined,
+                module_code=module_code,
+                report_date=report_date,
+                source="merged",
+                authority_first=bool(authority_text),
+                funnel=funnel,
+                context={
+                    "report_date": report_date.isoformat(),
+                    "source": "merged",
+                    "window_hours": self.window_hours,
+                },
+            )
+            if structured:
+                rows.extend(
+                    filter_publishable_rows(
+                        self._tag_rows(
+                            structured,
+                            metadata,
+                            ranked,
+                            module_code=module_code,
+                            degraded=False,
+                        )
+                    )
+                )
+            else:
+                logger.info("合并材料 LLM 返回空，视为无资讯")
+        except Exception as exc:
+            logger.warning("合并 LLM 失败，降级实质条目: %s", exc)
+            degraded = self._degrade_items(ranked, metadata)
+            funnel["degraded"] = int(funnel.get("degraded") or 0) + len(degraded)
+            funnel["source_fail"].append("merged_llm")
+            rows.extend(degraded)
+        return rows
+
     def _analyze_batch(
         self,
         batch: dict[str, Any],
@@ -554,8 +805,8 @@ class RiskPipeline:
             logger.info("来源 %s LLM 返回空结果，视为无资讯", source)
             return []
         except Exception as exc:
-            # 仅 rss / mita 在异常时降级；且只降级有实质内容的条目
-            if source not in ("rss", "mita"):
+            # rss / mita / tdnet 在异常时降级；且只降级有实质内容的条目
+            if source not in ("rss", "mita", "tdnet"):
                 logger.warning("LLM 分析失败（%s），不降级: %s", source, exc)
                 funnel["source_fail"].append(f"{source}_llm")
                 return []
@@ -782,6 +1033,18 @@ class RiskPipeline:
         self.db.commit()
         return run
 
+    def _entity_search_targets(self) -> list[str] | None:
+        """主体评估限定检索目标；未指定 entity_id 则搜全部默认主体。"""
+        if not self.entity_id:
+            return None
+        from app.database.models import TargetEntity
+
+        ent = self.db.query(TargetEntity).filter(TargetEntity.id == self.entity_id).first()
+        if not ent:
+            return None
+        names = [ent.display_name or ent.name, ent.name]
+        return [n for n in dict.fromkeys(names) if n]
+
     def _count_existing(self, report_date: date, module_code: str) -> int:
         if module_code in NEWS_MODULES:
             return (
@@ -790,11 +1053,10 @@ class RiskPipeline:
                 .count()
             )
         if module_code in ENTITY_MODULES:
-            return (
-                self.db.query(EntityRisk)
-                .filter(EntityRisk.report_date == report_date)
-                .count()
-            )
+            q = self.db.query(EntityRisk).filter(EntityRisk.report_date == report_date)
+            if self.entity_id:
+                q = q.filter(EntityRisk.entity_id == self.entity_id)
+            return q.count()
         return (
             self.db.query(DailyRiskEntry)
             .filter(DailyRiskEntry.report_date == report_date, DailyRiskEntry.module_code == module_code)
@@ -812,12 +1074,10 @@ class RiskPipeline:
         if module_code in ENTITY_MODULES:
             from app.database.models import CreditUpdate
 
-            risk_ids = [
-                r[0]
-                for r in self.db.query(EntityRisk.id)
-                .filter(EntityRisk.report_date == report_date)
-                .all()
-            ]
+            q = self.db.query(EntityRisk.id).filter(EntityRisk.report_date == report_date)
+            if self.entity_id:
+                q = q.filter(EntityRisk.entity_id == self.entity_id)
+            risk_ids = [r[0] for r in q.all()]
             if risk_ids:
                 self.db.query(CreditUpdate).filter(
                     CreditUpdate.trigger_risk_id.in_(risk_ids)
@@ -826,10 +1086,12 @@ class RiskPipeline:
                     synchronize_session=False
                 )
 
-        self.db.query(DailyRiskEntry).filter(
-            DailyRiskEntry.report_date == report_date,
-            DailyRiskEntry.module_code == module_code,
-        ).delete(synchronize_session=False)
+        # 主体限定采集时不整模块清空 DailyRiskEntry，避免误删其他主体对应旧条目
+        if not (module_code in ENTITY_MODULES and self.entity_id):
+            self.db.query(DailyRiskEntry).filter(
+                DailyRiskEntry.report_date == report_date,
+                DailyRiskEntry.module_code == module_code,
+            ).delete(synchronize_session=False)
         self.db.commit()
 
     def _save_artifact(
@@ -1007,12 +1269,22 @@ class RiskPipeline:
                     )
                 )
             elif module_code in ENTITY_MODULES:
-                ent = resolve_entity(
-                    self.db,
-                    name_hint=target_hint,
-                    related_company=row.get("关联企业"),
-                    create_if_missing=True,
-                )
+                ent = None
+                if self.entity_id:
+                    from app.database.models import TargetEntity
+
+                    ent = (
+                        self.db.query(TargetEntity)
+                        .filter(TargetEntity.id == self.entity_id)
+                        .first()
+                    )
+                if not ent:
+                    ent = resolve_entity(
+                        self.db,
+                        name_hint=target_hint,
+                        related_company=row.get("关联企业"),
+                        create_if_missing=True,
+                    )
                 if ent:
                     risk = EntityRisk(
                         entity_id=ent.id,

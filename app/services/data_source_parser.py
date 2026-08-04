@@ -73,7 +73,7 @@ def _parse_pdf(path: Path) -> str:
     return "\n\n".join(parts)
 
 
-def fetch_url_text(url: str, timeout: int = 60) -> str:
+def fetch_url_text(url: str, timeout: int = 20) -> str:
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
         resp = client.get(url, headers={"User-Agent": "RiskIntelBot/1.0"})
         resp.raise_for_status()

@@ -106,9 +106,10 @@ class RssNewsCollector:
             reverse=True,
         )
         for q in queries:
-            url = google_news_rss_url(
-                q.query, hl=cfg.google_hl, gl=cfg.google_gl, ceid=cfg.google_ceid
+            hl, gl, ceid = cfg.resolve_google_locale(
+                code, hl=q.google_hl, gl=q.google_gl, ceid=q.google_ceid
             )
+            url = google_news_rss_url(q.query, hl=hl, gl=gl, ceid=ceid)
             hits, health = self._fetch_feed_safe(url, feed_label=q.label)
             result.feed_health.append(health)
             if health.ok:
@@ -139,9 +140,10 @@ class RssNewsCollector:
                 break
             feed_url = feed.url
             if feed.feed_type == "google":
-                feed_url = google_news_rss_url(
-                    feed.url, hl=cfg.google_hl, gl=cfg.google_gl, ceid=cfg.google_ceid
+                hl, gl, ceid = cfg.resolve_google_locale(
+                    code, hl=feed.google_hl, gl=feed.google_gl, ceid=feed.google_ceid
                 )
+                feed_url = google_news_rss_url(feed.url, hl=hl, gl=gl, ceid=ceid)
             hits, health = self._fetch_feed_safe(feed_url, feed_label=feed.label)
             result.feed_health.append(health)
             if health.ok:

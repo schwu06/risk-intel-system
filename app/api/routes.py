@@ -20,7 +20,11 @@ from app.database.models import (
     TargetEntity,
 )
 from app.database.session import get_db
-from app.exporters.docx_report import export_daily_report_to_path, export_industry_report_to_path
+from app.exporters.docx_report import (
+    export_daily_report_to_path,
+    export_entity_assessment_to_path,
+    export_industry_report_to_path,
+)
 from app.schemas import (
     CreditUpdateOut,
     DataSourceOut,
@@ -53,10 +57,39 @@ from app.services.data_source_service import (
 )
 from app.services.domain_rules import seed_default_domains
 from app.services.industry_analysis import IndustryAnalysisService
-from app.services.pipeline_runner import get_job_status, run_modules_sync, start_pipeline_job
+from app.services.pipeline_runner import (
+    get_current_job,
+    get_job_status,
+    get_running_job_id,
+    run_modules_sync,
+    start_pipeline_job,
+)
 from app.services.rss_config import load_rss_config, reload_rss_config
 
 router = APIRouter()
+
+
+def _source_mutation_payload(row, *, message: str) -> dict:
+    """上传/添加数据源的统一响应；采集进行中时标明下次生效。"""
+    running = get_running_job_id()
+    deferred = bool(running)
+    return {
+        "message": (
+            f"{message}（当前有采集任务在运行，将在下次采集时生效）"
+            if deferred
+            else message
+        ),
+        "id": row.id,
+        "name": row.name,
+        "source_type": row.source_type,
+        "original_filename": row.original_filename,
+        "url": row.url,
+        "priority": getattr(row, "priority", 0) or 0,
+        "chars": len(row.extracted_text or ""),
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "deferred_to_next_run": deferred,
+        "running_job_id": running,
+    }
 
 
 @router.get("/health")
@@ -102,7 +135,9 @@ def run_pipeline(body: PipelineRunRequest, db: Session = Depends(get_db)):
 
     if use_async:
         try:
-            started = start_pipeline_job(report_date=rd, module_codes=codes)
+            started = start_pipeline_job(
+                report_date=rd, module_codes=codes, entity_id=body.entity_id
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not started.get("accepted"):
@@ -121,9 +156,10 @@ def run_pipeline(body: PipelineRunRequest, db: Session = Depends(get_db)):
             job_id=started["job_id"],
             async_mode=True,
             status=started.get("status") or "queued",
+            entity_id=body.entity_id,
         )
 
-    outcome = run_modules_sync(report_date=rd, module_codes=codes)
+    outcome = run_modules_sync(report_date=rd, module_codes=codes, entity_id=body.entity_id)
     if not outcome.get("ok") and all(v == -1 for v in (outcome.get("results") or {}).values()):
         raise HTTPException(status_code=502, detail=outcome.get("message") or "采集失败")
     return PipelineRunResponse(
@@ -132,6 +168,7 @@ def run_pipeline(body: PipelineRunRequest, db: Session = Depends(get_db)):
         message=outcome.get("message") or "",
         async_mode=False,
         status="completed" if outcome.get("ok") else "failed",
+        entity_id=body.entity_id,
     )
 
 
@@ -141,6 +178,15 @@ def pipeline_job_status(job_id: str):
     if not row:
         raise HTTPException(status_code=404, detail="任务不存在")
     return PipelineJobStatusOut(**row)
+
+
+@router.get("/pipeline/running")
+def pipeline_running_job():
+    """当前是否有采集任务在跑（供前端恢复轮询，不阻断其它操作）。"""
+    row = get_current_job()
+    if not row:
+        return {"job_id": None, "status": "idle", "message": ""}
+    return row
 
 
 @router.get("/pipeline/rss-config")
@@ -210,23 +256,29 @@ def search_logs(limit: int = 50, db: Session = Depends(get_db)):
 
 
 def _source_to_out(r, *, include_full: bool = False) -> DataSourceOut:
+    text = r.extracted_text or ""
     return DataSourceOut(
         id=r.id,
         module_code=r.module_code,
+        entity_id=getattr(r, "entity_id", None),
         name=r.name,
         source_type=r.source_type,
         original_filename=r.original_filename,
         url=r.url,
         priority=r.priority,
         created_at=r.created_at,
-        text_preview=(r.extracted_text or "")[:200] or None,
-        extracted_text=(r.extracted_text if include_full else None),
+        text_preview=text[:200] or None,
+        extracted_text=(text if include_full else None),
+        chars=len(text),
     )
 
 
 @router.get("/data-sources", response_model=list[DataSourceOut])
-def get_all_data_sources(db: Session = Depends(get_db)):
-    return [_source_to_out(r) for r in list_all_sources(db)]
+def get_all_data_sources(
+    entity_id: int | None = Query(None, description="主体专属数据源；缺省返回全站共用源"),
+    db: Session = Depends(get_db),
+):
+    return [_source_to_out(r) for r in list_all_sources(db, entity_id=entity_id)]
 
 
 @router.get("/data-sources/item/{source_id}", response_model=DataSourceOut)
@@ -239,8 +291,8 @@ def get_data_source_detail(source_id: int, db: Session = Depends(get_db)):
 
 @router.get("/data-sources/{module_code}", response_model=list[DataSourceOut])
 def get_module_data_sources(module_code: str, db: Session = Depends(get_db)):
-    """兼容旧路径：忽略模块代码，返回统一列表。"""
-    return [_source_to_out(r) for r in list_all_sources(db)]
+    """兼容旧路径：忽略模块代码，返回全站共用列表。"""
+    return [_source_to_out(r) for r in list_all_sources(db, entity_id=None)]
 
 
 @router.post("/data-sources/upload")
@@ -249,6 +301,7 @@ async def upload_module_data_source(
     priority: int = Form(0),
     file: UploadFile = File(...),
     module_code: str = Form(""),  # 兼容旧表单，忽略
+    entity_id: int | None = Form(None),
     db: Session = Depends(get_db),
 ):
     filename = file.filename or "upload.bin"
@@ -258,36 +311,47 @@ async def upload_module_data_source(
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="文件为空")
+    if entity_id is not None and not db.query(TargetEntity).filter(TargetEntity.id == entity_id).first():
+        raise HTTPException(status_code=404, detail="主体不存在")
     try:
-        row = save_module_file_source(db, None, name or filename, filename, content, priority)
+        row = save_module_file_source(
+            db, None, name or filename, filename, content, priority, entity_id=entity_id
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {
-        "message": "数据源已上传",
-        "id": row.id,
-        "name": row.name,
-        "chars": len(row.extracted_text or ""),
-    }
+    return _source_mutation_payload(row, message="数据源已上传")
 
 
 @router.post("/data-sources/url")
 def add_module_url_source(body: DataSourceUrlIn, db: Session = Depends(get_db)):
+    if body.entity_id is not None and not db.query(TargetEntity).filter(
+        TargetEntity.id == body.entity_id
+    ).first():
+        raise HTTPException(status_code=404, detail="主体不存在")
     try:
-        row = save_module_url_source(db, None, body.name, body.url, body.priority)
+        row = save_module_url_source(
+            db, None, body.name, body.url, body.priority, entity_id=body.entity_id
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {
-        "message": "网址数据源已添加",
-        "id": row.id,
-        "chars": len(row.extracted_text or ""),
-    }
+    return _source_mutation_payload(row, message="网址数据源已添加")
 
 
 @router.delete("/data-sources/{source_id}")
 def remove_module_data_source(source_id: int, db: Session = Depends(get_db)):
+    running = get_running_job_id()
     if not delete_module_source(db, source_id):
         raise HTTPException(status_code=404, detail="数据源不存在")
-    return {"message": "已删除"}
+    deferred = bool(running)
+    return {
+        "message": (
+            "已删除（当前有采集任务在运行，将在下次采集时生效）"
+            if deferred
+            else "已删除"
+        ),
+        "deferred_to_next_run": deferred,
+        "running_job_id": running,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +522,57 @@ def list_credit_updates(entity_id: int, limit: int = 50, db: Session = Depends(g
         .limit(min(limit, 200))
         .all()
     )
+
+
+@router.get("/entities/{entity_id}/export/docx")
+def export_entity_assessment_docx(
+    entity_id: int,
+    report_date: date | None = Query(None, description="评估日期，缺省为今天"),
+    db: Session = Depends(get_db),
+):
+    """导出当前主体的《企业主体风险评估简报》。"""
+    entity = db.query(TargetEntity).filter(TargetEntity.id == entity_id).first()
+    if not entity:
+        raise HTTPException(status_code=404, detail="主体不存在")
+    rd = report_date or date.today()
+    risks = (
+        db.query(EntityRisk)
+        .filter(EntityRisk.entity_id == entity_id)
+        .order_by(EntityRisk.report_date.desc(), EntityRisk.id.desc())
+        .limit(100)
+        .all()
+    )
+    credit_logs = (
+        db.query(CreditUpdate)
+        .filter(CreditUpdate.entity_id == entity_id)
+        .order_by(CreditUpdate.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    display = entity.display_name or entity.name
+    safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in display).strip() or "entity"
+    filename = f"企业主体风险评估简报_{safe_name}_{rd.isoformat()}.docx"
+    out_path = Path("data/exports") / filename
+    export_entity_assessment_to_path(
+        entity,
+        report_date=rd,
+        risks=risks,
+        credit_logs=credit_logs,
+        output_path=out_path,
+    )
+    return FileResponse(
+        out_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=filename,
+    )
+
+
+@router.post("/admin/seed-entity-demo")
+def seed_entity_demo(force: bool = False, db: Session = Depends(get_db)):
+    from app.services.entity_mock import seed_entity_demo_data
+
+    stats = seed_entity_demo_data(db, force=force)
+    return {"message": "主体演示数据已写入", **stats}
 
 
 @router.get("/credit-levels")

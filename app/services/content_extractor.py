@@ -22,17 +22,26 @@ def extract_article_text(url: str, timeout: int = 25, max_chars: int = 8000) -> 
     if not url or not url.startswith(("http://", "https://")):
         return ""
     host = urlparse(url).netloc.lower()
-    # 跳过明显不可抓的门户检索入口
-    if any(x in host for x in ("edinet-fsa.go.jp", "release.tdnet.info")):
+    url_l = url.lower()
+    # 跳过检索入口页；允许 TDnet PDF
+    if any(x in host for x in ("edinet-fsa.go.jp",)):
         return ""
+    if "release.tdnet.info" in host and (
+        "query=" in url_l or "i_main_" in url_l or "i_list_" in url_l
+    ):
+        return ""
+    if "release.tdnet.info" in host and url_l.endswith(".pdf"):
+        return _extract_pdf_text(url, timeout=timeout, max_chars=max_chars)
 
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
             resp = client.get(url, headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
             if resp.status_code >= 400:
                 return ""
-            html = resp.text or ""
             content_type = (resp.headers.get("content-type") or "").lower()
+            if "pdf" in content_type or url_l.endswith(".pdf"):
+                return _extract_pdf_bytes(resp.content, max_chars=max_chars)
+            html = resp.text or ""
             if "html" not in content_type and "<html" not in html[:500].lower():
                 return (html or "")[:max_chars].strip()
     except httpx.HTTPError as exc:
@@ -44,6 +53,46 @@ def extract_article_text(url: str, timeout: int = 25, max_chars: int = 8000) -> 
     if len(text) > max_chars:
         return text[:max_chars] + "…"
     return text
+
+
+def _extract_pdf_text(url: str, *, timeout: int, max_chars: int) -> str:
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            resp = client.get(
+                url,
+                headers={"User-Agent": _UA, "Accept": "application/pdf,*/*"},
+            )
+            if resp.status_code >= 400:
+                return ""
+            return _extract_pdf_bytes(resp.content, max_chars=max_chars)
+    except httpx.HTTPError as exc:
+        logger.debug("PDF 抓取失败 %s: %s", url, exc)
+        return ""
+
+
+def _extract_pdf_bytes(data: bytes, *, max_chars: int) -> str:
+    if not data:
+        return ""
+    try:
+        from io import BytesIO
+
+        from pypdf import PdfReader
+    except ImportError:
+        return ""
+    try:
+        reader = PdfReader(BytesIO(data))
+        parts: list[str] = []
+        for page in reader.pages[:8]:
+            parts.append(page.extract_text() or "")
+            if sum(len(p) for p in parts) >= max_chars:
+                break
+        text = re.sub(r"\s+", " ", " ".join(parts)).strip()
+        if len(text) > max_chars:
+            return text[:max_chars] + "…"
+        return text
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("PDF 解析失败: %s", exc)
+        return ""
 
 
 def _extract_with_trafilatura(html: str, url: str) -> Optional[str]:

@@ -21,6 +21,9 @@ class RssQuerySpec:
     priority: int = 10
     enabled: bool = True
     max_items: Optional[int] = None
+    google_hl: Optional[str] = None
+    google_gl: Optional[str] = None
+    google_ceid: Optional[str] = None
 
 
 @dataclass
@@ -32,6 +35,16 @@ class RssFeedSpec:
     priority: int = 10
     enabled: bool = True
     max_items: Optional[int] = None
+    google_hl: Optional[str] = None
+    google_gl: Optional[str] = None
+    google_ceid: Optional[str] = None
+
+
+@dataclass
+class ModuleRssLocale:
+    google_hl: Optional[str] = None
+    google_gl: Optional[str] = None
+    google_ceid: Optional[str] = None
 
 
 @dataclass
@@ -42,6 +55,22 @@ class RssConfig:
     google_hl: str = "zh-CN"
     google_gl: str = "CN"
     google_ceid: str = "CN:zh-Hans"
+    module_defaults: dict[str, ModuleRssLocale] = field(default_factory=dict)
+
+    def resolve_google_locale(
+        self,
+        module_code: str,
+        *,
+        hl: Optional[str] = None,
+        gl: Optional[str] = None,
+        ceid: Optional[str] = None,
+    ) -> tuple[str, str, str]:
+        """优先级：条目覆盖 > 模块默认 > 全局默认。"""
+        mod = self.module_defaults.get(str(module_code).upper())
+        out_hl = hl or (mod.google_hl if mod else None) or self.google_hl
+        out_gl = gl or (mod.google_gl if mod else None) or self.google_gl
+        out_ceid = ceid or (mod.google_ceid if mod else None) or self.google_ceid
+        return out_hl, out_gl, out_ceid
 
 
 def _parse_config(data: dict[str, Any]) -> RssConfig:
@@ -52,6 +81,15 @@ def _parse_config(data: dict[str, Any]) -> RssConfig:
         google_gl=str(defaults.get("google_gl") or "CN"),
         google_ceid=str(defaults.get("google_ceid") or "CN:zh-Hans"),
     )
+    for code, row in (data.get("module_defaults") or {}).items():
+        if not isinstance(row, dict):
+            continue
+        cfg.module_defaults[str(code).upper()] = ModuleRssLocale(
+            google_hl=str(row["google_hl"]) if row.get("google_hl") else None,
+            google_gl=str(row["google_gl"]) if row.get("google_gl") else None,
+            google_ceid=str(row["google_ceid"]) if row.get("google_ceid") else None,
+        )
+
     for code, rows in (data.get("queries") or {}).items():
         specs: list[RssQuerySpec] = []
         for row in rows or []:
@@ -64,6 +102,9 @@ def _parse_config(data: dict[str, Any]) -> RssConfig:
                     priority=int(row.get("priority") or 10),
                     enabled=bool(row.get("enabled", True)),
                     max_items=row.get("max_items"),
+                    google_hl=str(row["google_hl"]) if row.get("google_hl") else None,
+                    google_gl=str(row["google_gl"]) if row.get("google_gl") else None,
+                    google_ceid=str(row["google_ceid"]) if row.get("google_ceid") else None,
                 )
             )
         cfg.queries[str(code).upper()] = specs
@@ -82,6 +123,9 @@ def _parse_config(data: dict[str, Any]) -> RssConfig:
                 priority=int(row.get("priority") or 10),
                 enabled=bool(row.get("enabled", True)),
                 max_items=row.get("max_items"),
+                google_hl=str(row["google_hl"]) if row.get("google_hl") else None,
+                google_gl=str(row["google_gl"]) if row.get("google_gl") else None,
+                google_ceid=str(row["google_ceid"]) if row.get("google_ceid") else None,
             )
         )
     return cfg

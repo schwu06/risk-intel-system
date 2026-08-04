@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 # 标题/摘要中的非新闻模板
@@ -11,11 +11,23 @@ _NON_NEWS_TITLE = re.compile(
     r"(披露检索|法定披露|检索入口|请在\s*TDnet|请人工复核|DeepSeek\s*暂不可用)",
     re.I,
 )
-_PORTAL_HOST_MARKERS = (
-    "release.tdnet.info",
-    "edinet-fsa.go.jp",
-    "disclosure.edinet",
+_PORTAL_ENTRY_MARKERS = re.compile(
+    r"(query=|I_main_|BLMainController|I_search|WJEWZZ)",
+    re.I,
 )
+_DOC_URL = re.compile(r"\.(pdf|zip)(?:$|\?)", re.I)
+
+
+def _is_disclosure_document_url(url: str) -> bool:
+    """TDnet PDF / 转发链接视为真实披露文档，而非检索入口。"""
+    u = (url or "").strip()
+    if not u:
+        return False
+    if _DOC_URL.search(u):
+        return True
+    if "/inbs/" in u.lower() and not _PORTAL_ENTRY_MARKERS.search(u):
+        return True
+    return False
 
 
 def is_reference_only_item(item: dict[str, Any]) -> bool:
@@ -31,12 +43,15 @@ def is_reference_only_item(item: dict[str, Any]) -> bool:
     url = str(item.get("url") or item.get("来源链接") or "")
     if _NON_NEWS_TITLE.search(title) or _NON_NEWS_TITLE.search(snippet):
         return True
+    # 真实披露 PDF / 文档链接允许入库
+    if _is_disclosure_document_url(url):
+        return False
     host = (urlparse(url).netloc or "").lower()
-    if any(m in host for m in _PORTAL_HOST_MARKERS):
+    url_l = url.lower()
+    if any(m in host for m in ("release.tdnet.info", "edinet-fsa.go.jp", "disclosure.edinet")):
         return True
-    if "tdnet" in url.lower() or "edinet" in url.lower():
-        # 查询页（含 query=）视为入口，非单篇公告
-        if "query=" in url.lower() or "BLMainController" in url:
+    if "tdnet" in url_l or "edinet" in url_l:
+        if _PORTAL_ENTRY_MARKERS.search(url):
             return True
     return False
 
