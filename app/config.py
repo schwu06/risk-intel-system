@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     pipeline_llm_top_k: int = 8
     pipeline_llm_cache_hours: int = 168
     pipeline_mita_query_pause_seconds: float = 0.3
+    # 秘塔「不足才补」：主源有效候选达标则跳过。0 = 跟随 pipeline_llm_top_k
+    pipeline_mita_min_items: int = 0
+    # 主源整类失败（RSS/TDnet 硬故障）时强制跑秘塔补缺
+    pipeline_mita_force_on_primary_fail: bool = True
     # SQLite 下默认串行，避免并行写库拖慢侧栏/上传等其它接口
     pipeline_module_parallel: bool = False
     pipeline_merge_llm: bool = True
@@ -69,7 +73,7 @@ PAGE_MODULES = {
 PAGE_META = {
     "daily_news": {
         "path": "/daily-news",
-        "title": "风险日报",
+        "title": "新闻日报",
         "subtitle": "近24小时重要资讯 · 区域 · 机构 · 宏观",
     },
     "entity_assessment": {
@@ -181,6 +185,7 @@ STRUCTURED_FIELDS_CN = [
     "核心摘要",
     "影响分析",
     "来源链接",
+    "来源名称",
     "发布时间",
 ]
 

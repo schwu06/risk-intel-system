@@ -15,7 +15,7 @@
       <span class="brand-sub">{% block brand_sub %}{{ page_subtitle }}{% endblock %}</span>
     </div>
     <nav class="main-nav" aria-label="主导航">
-      <a href="/daily-news" class="nav-link {% if active_page == 'daily_news' %}active{% endif %}">风险日报</a>
+      <a href="/daily-news" class="nav-link {% if active_page == 'daily_news' %}active{% endif %}">新闻日报</a>
       <a href="/entity-assessment" class="nav-link {% if active_page == 'entity_assessment' %}active{% endif %}">主体评估</a>
       <a href="/deep-reports" class="nav-link {% if active_page == 'deep_reports' %}active{% endif %}">深度研报</a>
     </nav>
@@ -24,11 +24,13 @@
     </div>
   </header>
 
+  {# 三栏顺序：操作/统计侧栏 → 主内容 → 数据源；各栏独立滚动 #}
   <div class="app-shell" id="app-shell">
-    {% include "partials/source_drawer.html" %}
+    {% block page_sidebar %}{% endblock %}
     <div class="app-main">
       {% block content %}{% endblock %}
     </div>
+    {% include "partials/source_drawer.html" %}
   </div>
 
   <script src="/static/js/dashboard.js"></script>

@@ -70,7 +70,7 @@
     }
   }
 
-  /* ---------- 左侧数据源面板 / 关于 ---------- */
+  /* ---------- 数据源面板 / 关于 ---------- */
   const drawer = document.getElementById("source-drawer");
   const toggleBtn = document.getElementById("btn-toggle-source-drawer");
   const aboutModal = document.getElementById("about-modal");
@@ -549,23 +549,62 @@
   }
 
   var REFRESH_MSG_KEY = "pipeline_collect_status_msg";
+  var REFRESH_AT_KEY = "pipeline_collect_finished_at";
 
-  function pad2(n) {
-    return String(n).padStart(2, "0");
-  }
-
-  /** 24 小时制本地时间：YYYY-MM-DD HH:mm:ss */
+  /** 东京时间（Asia/Tokyo）24 小时制：YYYY-MM-DD HH:mm:ss */
   function formatRefreshTime(isoOrDate) {
-    var d = isoOrDate ? new Date(isoOrDate) : new Date();
+    var d;
+    if (isoOrDate instanceof Date) {
+      d = isoOrDate;
+    } else if (isoOrDate) {
+      var s = String(isoOrDate).trim();
+      // 后端返回东京墙钟；无时区后缀时按 +09:00 解析，避免被当作浏览器本地/UTC
+      if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) {
+        s = s.replace(" ", "T") + "+09:00";
+      }
+      d = new Date(s);
+    } else {
+      d = new Date();
+    }
     if (isNaN(d.getTime())) d = new Date();
+
+    var parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Tokyo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(d);
+
+    var map = {};
+    parts.forEach(function (p) {
+      if (p.type !== "literal") map[p.type] = p.value;
+    });
     return (
-      d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) +
-      " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds())
+      map.year + "-" + map.month + "-" + map.day +
+      " " + map.hour + ":" + map.minute + ":" + map.second
     );
   }
 
   function persistPipelineMsg(text) {
     try { sessionStorage.setItem(REFRESH_MSG_KEY, text); } catch (e) { /* ignore */ }
+  }
+
+  function persistRefreshAt(isoOrDate) {
+    try {
+      if (!isoOrDate) {
+        sessionStorage.setItem(REFRESH_AT_KEY, new Date().toISOString());
+        return;
+      }
+      if (isoOrDate instanceof Date) {
+        sessionStorage.setItem(REFRESH_AT_KEY, isoOrDate.toISOString());
+        return;
+      }
+      sessionStorage.setItem(REFRESH_AT_KEY, String(isoOrDate));
+    } catch (e) { /* ignore */ }
   }
 
   function setPipelineMsg(msgEl, text) {
@@ -579,6 +618,7 @@
 
   function setRefreshSuccessMsg(msgEl, finishedAt) {
     setPipelineMsg(msgEl, "最近刷新时间（" + formatRefreshTime(finishedAt) + "）");
+    persistRefreshAt(finishedAt);
   }
 
   function setCollectFailMsg(msgEl) {
@@ -589,8 +629,21 @@
     var msg = pipelineMsgEl();
     if (!msg) return;
     try {
+      var at = sessionStorage.getItem(REFRESH_AT_KEY);
+      if (at) {
+        setRefreshSuccessMsg(msg, at);
+        return;
+      }
       var saved = sessionStorage.getItem(REFRESH_MSG_KEY);
-      if (saved) msg.textContent = saved;
+      if (!saved) return;
+      saved = saved.replace("最近更新时间", "最近刷新时间");
+      // 旧版文案：把 UTC 墙钟误标为本地时间，恢复时按 UTC 转东京
+      var m = saved.match(/^最近刷新时间[（(](\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})[）)]$/);
+      if (m) {
+        setRefreshSuccessMsg(msg, m[1].replace(" ", "T") + "Z");
+        return;
+      }
+      msg.textContent = saved;
     } catch (e) { /* ignore */ }
   })();
 

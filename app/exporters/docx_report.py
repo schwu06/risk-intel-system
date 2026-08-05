@@ -2,26 +2,42 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable, Optional
+from urllib.parse import urlparse
 
 from docx import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Cm, Inches, Pt, RGBColor
 
 from app.config import MODULE_CODES
 from app.database.models import CreditUpdate, DailyRiskEntry, EntityRisk, IndustryReport, TargetEntity
 from app.services.chart_generator import extract_chart_specs, render_chart_png
 
+# 24小时核心新闻情报汇总 — 视觉规范色
+COLOR_PRIMARY = RGBColor(0x1B, 0x36, 0x5D)  # 深蓝标题/分割线
+COLOR_TITLE = RGBColor(0x2C, 0x3E, 0x50)  # 新闻标题
+COLOR_META = RGBColor(0x7F, 0x8C, 0x8D)  # 元信息/副标题灰
+COLOR_BODY = RGBColor(0x33, 0x33, 0x33)
+COLOR_DIVIDER = "BDC3C7"
 
-def _set_run_font(run, size_pt: int = 11, bold: bool = False, color: Optional[RGBColor] = None):
+
+def _set_run_font(
+    run,
+    size_pt: float = 11,
+    bold: bool = False,
+    italic: bool = False,
+    color: Optional[RGBColor] = None,
+):
     run.font.name = "宋体"
     run._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
     run.font.size = Pt(size_pt)
     run.font.bold = bold
+    run.font.italic = italic
     if color:
         run.font.color.rgb = color
 
@@ -32,7 +48,7 @@ def _add_heading(doc: Document, text: str, level: int = 1) -> None:
     p.paragraph_format.space_after = Pt(6)
     run = p.add_run(text)
     sizes = {1: 18, 2: 14, 3: 12}
-    _set_run_font(run, size_pt=sizes.get(level, 12), bold=True, color=RGBColor(0x1A, 0x23, 0x4A))
+    _set_run_font(run, size_pt=sizes.get(level, 12), bold=True, color=COLOR_PRIMARY)
 
 
 def _add_body(doc: Document, text: str, indent: bool = False) -> None:
@@ -41,7 +57,7 @@ def _add_body(doc: Document, text: str, indent: bool = False) -> None:
         p.paragraph_format.left_indent = Pt(18)
     p.paragraph_format.line_spacing = 1.25
     run = p.add_run(text)
-    _set_run_font(run, size_pt=11, color=RGBColor(0x33, 0x33, 0x33))
+    _set_run_font(run, size_pt=11, color=COLOR_BODY)
 
 
 def _add_meta_line(doc: Document, label: str, value: str) -> None:
@@ -49,7 +65,50 @@ def _add_meta_line(doc: Document, label: str, value: str) -> None:
     r1 = p.add_run(f"{label}：")
     _set_run_font(r1, bold=True, color=RGBColor(0x44, 0x44, 0x44))
     r2 = p.add_run(value)
-    _set_run_font(r2, color=RGBColor(0x33, 0x33, 0x33))
+    _set_run_font(r2, color=COLOR_BODY)
+
+
+def _add_light_divider(doc: Document) -> None:
+    """浅灰色细分割线（段后间距约 6pt）。"""
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(2)
+    p.paragraph_format.space_after = Pt(6)
+    p_pr = p._p.get_or_add_pPr()
+    p_bdr = OxmlElement("w:pBdr")
+    bottom = OxmlElement("w:bottom")
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), "6")
+    bottom.set(qn("w:space"), "1")
+    bottom.set(qn("w:color"), COLOR_DIVIDER)
+    p_bdr.append(bottom)
+    p_pr.append(p_bdr)
+
+
+def _source_label(entry: DailyRiskEntry) -> str:
+    if entry.source_title and entry.source_title.strip():
+        return entry.source_title.strip()
+    if entry.source_url:
+        host = urlparse(entry.source_url).netloc
+        if host:
+            return host.removeprefix("www.")
+    return "未知来源"
+
+
+def _format_published_at(entry: DailyRiskEntry, fallback_date: date) -> str:
+    if entry.published_at:
+        return entry.published_at.strftime("%Y-%m-%d %H:%M")
+    return fallback_date.isoformat()
+
+
+def _category_tag(entry: DailyRiskEntry, module_name: str) -> str:
+    parts: list[str] = []
+    if entry.pillar_or_topic:
+        parts.append(entry.pillar_or_topic)
+    elif entry.risk_category:
+        parts.append(entry.risk_category)
+    if module_name and module_name not in parts:
+        parts.append(module_name)
+    return " / ".join(parts) if parts else "未分类"
 
 
 def build_daily_report_docx(
@@ -58,12 +117,16 @@ def build_daily_report_docx(
     institution_name: str = "风险管理部",
     module_codes: Optional[list[str]] = None,
 ) -> Document:
+    """生成《24小时核心新闻情报汇总》（仅标题/元数据/概要，不含风险研判与图表）。"""
+    _ = institution_name  # 新版版式不再展示机构署名
+
     doc = Document()
     section = doc.sections[0]
-    section.top_margin = Pt(72)
-    section.bottom_margin = Pt(72)
-    section.left_margin = Pt(72)
-    section.right_margin = Pt(72)
+    # 标准 Word 页边距：上下 2.54cm，左右 3.18cm
+    section.top_margin = Cm(2.54)
+    section.bottom_margin = Cm(2.54)
+    section.left_margin = Cm(3.18)
+    section.right_margin = Cm(3.18)
 
     if module_codes:
         codes = [c.upper() for c in module_codes if c.upper() in MODULE_CODES]
@@ -71,93 +134,94 @@ def build_daily_report_docx(
     else:
         module_map = dict(MODULE_CODES)
 
+    items = [e for e in entries if e.module_code in module_map]
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    tr = title_p.add_run("企业风险情报日报")
-    _set_run_font(tr, size_pt=22, bold=True, color=RGBColor(0x0F, 0x17, 0x2A))
+    title_p.paragraph_format.space_after = Pt(4)
+    tr = title_p.add_run("24小时核心新闻情报汇总")
+    _set_run_font(tr, size_pt=22, bold=True, color=COLOR_PRIMARY)
 
     sub = doc.add_paragraph()
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    sr = sub.add_run(f"{institution_name} | 报告日期 {report_date.isoformat()}")
-    _set_run_font(sr, size_pt=11, color=RGBColor(0x55, 0x55, 0x55))
+    sub.paragraph_format.space_after = Pt(10)
+    sr = sub.add_run(f"生成时间：{generated_at}  |  资讯总量：{len(items)} 条")
+    _set_run_font(sr, size_pt=9, color=COLOR_META)
 
-    doc.add_paragraph()
-    _add_body(
-        doc,
-        "本报告由自动化风险情报平台生成，涵盖所选业务模块的风险情报条目。"
-        "条目均附来源链接，供后续人工复核。",
-    )
+    # 标题下主色细分割线
+    rule = doc.add_paragraph()
+    rule.paragraph_format.space_before = Pt(0)
+    rule.paragraph_format.space_after = Pt(12)
+    rule_pr = rule._p.get_or_add_pPr()
+    rule_bdr = OxmlElement("w:pBdr")
+    rule_bottom = OxmlElement("w:bottom")
+    rule_bottom.set(qn("w:val"), "single")
+    rule_bottom.set(qn("w:sz"), "12")
+    rule_bottom.set(qn("w:space"), "1")
+    rule_bottom.set(qn("w:color"), "1B365D")
+    rule_bdr.append(rule_bottom)
+    rule_pr.append(rule_bdr)
 
-    grouped: dict[str, list[DailyRiskEntry]] = {k: [] for k in module_map}
-    footnotes: list[tuple[int, str, str]] = []
-    fn_index = 1
+    if not items:
+        empty = doc.add_paragraph()
+        empty.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        er = empty.add_run("本日暂无核心资讯条目。")
+        _set_run_font(er, size_pt=10.5, color=COLOR_META)
+        return doc
 
-    for entry in entries:
-        if entry.module_code in module_map:
-            grouped.setdefault(entry.module_code, []).append(entry)
+    for idx, e in enumerate(items, start=1):
+        module_name = module_map.get(e.module_code, e.module_code)
 
-    for module_code, module_name in module_map.items():
-        mod_entries = grouped.get(module_code) or []
-        _add_heading(doc, module_name, level=1)
-        if not mod_entries:
-            _add_body(doc, "本日无新增风险条目或未触发有效检索结果。", indent=True)
-            continue
+        # 【序号与标题】小四 12pt 加粗 #2C3E50
+        title_line = doc.add_paragraph()
+        title_line.paragraph_format.space_before = Pt(4)
+        title_line.paragraph_format.space_after = Pt(2)
+        tr_item = title_line.add_run(f"{idx}. {e.title}")
+        _set_run_font(tr_item, size_pt=12, bold=True, color=COLOR_TITLE)
 
-        for idx, e in enumerate(mod_entries, start=1):
-            _add_heading(doc, f"{idx}. {e.title}", level=2)
-            _add_meta_line(doc, "风险等级", e.risk_level)
-            if e.related_company:
-                _add_meta_line(doc, "关联企业", e.related_company)
-            if e.risk_category:
-                _add_meta_line(doc, "风险类别", e.risk_category)
-            if e.target_entity:
-                _add_meta_line(doc, "监控对象", e.target_entity)
-            if e.country_or_region:
-                _add_meta_line(doc, "国家或地区", e.country_or_region)
-            _add_meta_line(doc, "核心摘要", e.summary)
-            if e.impact_analysis:
-                _add_meta_line(doc, "影响分析", e.impact_analysis)
-            chart_specs = _entry_chart_specs(e)
-            for idx_c, spec in enumerate(chart_specs[:2]):
-                img_path = render_chart_png(spec, Path(f"data/exports/charts/entry_{e.id}_{idx_c}.png"))
-                if img_path and img_path.is_file():
-                    doc.add_picture(str(img_path), width=Inches(5.5))
-            if e.source_url:
-                mark = fn_index
-                footnotes.append((mark, e.title, e.source_url))
-                _add_meta_line(doc, "来源", f"见脚注 [{mark}]")
-                fn_index += 1
+        # 【元数据行】五号 10.5pt 斜体浅灰：来源 / 发布时间 / 分类标签
+        meta = doc.add_paragraph()
+        meta.paragraph_format.space_before = Pt(0)
+        meta.paragraph_format.space_after = Pt(2)
+        meta_text = (
+            f"来源：{_source_label(e)}  |  "
+            f"发布时间：{_format_published_at(e, report_date)}  |  "
+            f"分类标签：{_category_tag(e, module_name)}"
+        )
+        mr = meta.add_run(meta_text)
+        _set_run_font(mr, size_pt=10.5, italic=True, color=COLOR_META)
 
-    if footnotes:
-        _add_heading(doc, "来源脚注", level=1)
-        for mark, title, url in footnotes:
-            _add_body(doc, f"[{mark}] {title} — {url}")
+        # 数据源网络连接
+        link_p = doc.add_paragraph()
+        link_p.paragraph_format.space_before = Pt(0)
+        link_p.paragraph_format.space_after = Pt(4)
+        if e.source_url:
+            lr = link_p.add_run(f"数据源网络连接：{e.source_url}")
+        else:
+            lr = link_p.add_run("数据源网络连接：暂无")
+        _set_run_font(lr, size_pt=10.5, italic=True, color=COLOR_META)
+
+        # 【核心概要】五号 10.5pt，1.25 倍行距，首行缩进 2 字符，两端对齐
+        summary = doc.add_paragraph()
+        summary.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        summary.paragraph_format.line_spacing = 1.25
+        summary.paragraph_format.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+        summary.paragraph_format.first_line_indent = Pt(21)  # 10.5pt × 2 字符
+        summary.paragraph_format.space_before = Pt(0)
+        summary.paragraph_format.space_after = Pt(2)
+        sr_body = summary.add_run(e.summary or "")
+        _set_run_font(sr_body, size_pt=10.5, color=COLOR_BODY)
+
+        _add_light_divider(doc)
 
     footer = doc.add_paragraph()
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    footer.paragraph_format.space_before = Pt(8)
     fr = footer.add_run("— 内部资料，未经许可不得对外传播 —")
-    _set_run_font(fr, size_pt=9, color=RGBColor(0x77, 0x77, 0x77))
+    _set_run_font(fr, size_pt=9, color=COLOR_META)
 
     return doc
-
-
-def _entry_chart_specs(entry: DailyRiskEntry) -> list[dict]:
-    import json
-
-    if not entry.structured_json:
-        return extract_chart_specs(entry.summary or "")
-    try:
-        data = json.loads(entry.structured_json)
-        if isinstance(data, dict) and data.get("_chart_specs"):
-            raw = data["_chart_specs"]
-            if isinstance(raw, str):
-                return json.loads(raw)
-            if isinstance(raw, list):
-                return raw
-    except (json.JSONDecodeError, TypeError):
-        pass
-    return extract_chart_specs(entry.summary or "")
-
 
 def build_industry_report_docx(report: IndustryReport) -> Document:
     import json

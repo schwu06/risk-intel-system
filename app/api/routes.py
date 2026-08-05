@@ -40,6 +40,7 @@ from app.schemas import (
     PipelineRunRequest,
     PipelineRunResponse,
     RiskEntryOut,
+    RssSourceItemOut,
     TargetEntityOut,
 )
 from app.services.data_source_parser import SUPPORTED_EXTENSIONS
@@ -65,6 +66,7 @@ from app.services.pipeline_runner import (
     start_pipeline_job,
 )
 from app.services.rss_config import load_rss_config, reload_rss_config
+from app.services.rss_source_service import list_rss_sources_24h
 
 router = APIRouter()
 
@@ -352,6 +354,17 @@ def remove_module_data_source(source_id: int, db: Session = Depends(get_db)):
         "deferred_to_next_run": deferred,
         "running_job_id": running,
     }
+
+
+@router.get("/sources/rss", response_model=list[RssSourceItemOut])
+def list_rss_sources(
+    hours: int = Query(24, ge=1, le=168, description="近 N 小时 RSS 动态"),
+    limit: int = Query(200, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """近 N 小时内后端 RSS 管道抓取的动态列表（供侧栏勾选）。"""
+    rows = list_rss_sources_24h(db, hours=hours, limit=limit)
+    return [RssSourceItemOut(**row) for row in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -645,7 +658,7 @@ def export_docx(
 
     out_dir = Path("data/exports")
     suffix = "_" + "".join(codes) if codes else ""
-    filename = f"风险情报日报_{report_date.isoformat()}{suffix}.docx"
+    filename = f"24小时核心新闻情报汇总_{report_date.isoformat()}{suffix}.docx"
     path = export_daily_report_to_path(
         entries, report_date, out_dir / filename, module_codes=codes
     )

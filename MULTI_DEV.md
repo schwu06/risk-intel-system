@@ -74,6 +74,7 @@ git pull
 
 ```powershell
 git add .
+git status
 git commit -m "记录这次改了什么（例如：更新主体评估接口）"
 git push
 ```

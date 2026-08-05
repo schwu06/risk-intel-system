@@ -19,38 +19,40 @@
 </form>
 {% endblock %}
 
-{% block content %}
-<main class="layout" data-modules="{{ module_codes_csv }}" data-page-path="{{ page_path }}">
-  <aside class="sidebar">
-    <h2>风险等级分布</h2>
-    <ul class="stat-list">
-      {% for level, count in stats.items() %}
-      <li><span class="level level-{{ level }}">{{ level }}</span><span class="count">{{ count }}</span></li>
-      {% endfor %}
-    </ul>
-    <h2>运行状态</h2>
-    <ul class="run-list">
-      {% for code, name in modules.items() %}
-      {% set run = run_map.get(code) %}
-      <li>
-        <span class="mod-name">{{ name }}</span>
-        <span class="run-status status-{{ run.status if run else 'pending' }}">
-          {% if run %}
-            {% if run.status == 'failed' %}请求失败
-            {% elif run.status == 'empty' or (run.status == 'completed' and run.entry_count == 0) %}今日无动态
-            {% else %}{{ run.status }} ({{ run.entry_count }}){% endif %}
-          {% else %}未运行{% endif %}
-        </span>
-      </li>
-      {% endfor %}
-    </ul>
-    <div class="actions">
-      <a class="btn" href="/api/v1/export/docx?report_date={{ report_date }}&module_codes={{ module_codes_csv }}">导出 Word</a>
-      <button type="button" class="btn secondary" id="btn-run-pipeline">采集近24小时资讯</button>
-    </div>
-    <p class="hint" id="pipeline-msg">点击后异步采集近 24 小时资讯（RSS + 秘塔 + DeepSeek）；失败保留上次结果，不落空白页。</p>
-  </aside>
+{% block page_sidebar %}
+<aside class="sidebar page-rail" data-modules="{{ module_codes_csv }}" data-page-path="{{ page_path }}">
+  <h2>风险等级分布</h2>
+  <ul class="stat-list">
+    {% for level, count in stats.items() %}
+    <li><span class="level level-{{ level }}">{{ level }}</span><span class="count">{{ count }}</span></li>
+    {% endfor %}
+  </ul>
+  <h2>运行状态</h2>
+  <ul class="run-list">
+    {% for code, name in modules.items() %}
+    {% set run = run_map.get(code) %}
+    <li>
+      <span class="mod-name">{{ name }}</span>
+      <span class="run-status status-{{ run.status if run else 'pending' }}">
+        {% if run %}
+          {% if run.status == 'failed' %}请求失败
+          {% elif run.status == 'empty' or (run.status == 'completed' and run.entry_count == 0) %}今日无动态
+          {% else %}{{ run.status }} ({{ run.entry_count }}){% endif %}
+        {% else %}未运行{% endif %}
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  <div class="actions">
+    <a class="btn" href="/api/v1/export/docx?report_date={{ report_date }}&module_codes={{ module_codes_csv }}">导出 Word</a>
+    <button type="button" class="btn secondary" id="btn-run-pipeline">采集近24小时资讯</button>
+  </div>
+  <p class="hint" id="pipeline-msg">点击采集数据</p>
+</aside>
+{% endblock %}
 
+{% block content %}
+<main class="layout content-shell" data-modules="{{ module_codes_csv }}" data-page-path="{{ page_path }}">
   <section class="content">
     <h1>{{ page_title }} — {{ report_date }}</h1>
 
@@ -78,9 +80,20 @@
           <p class="summary">{{ e.summary }}</p>
           {% if e.published_at %}<p class="meta"><strong>发布时间：</strong>{{ e.published_at }}</p>{% endif %}
           {% if e.impact_analysis %}<p class="impact"><strong>影响分析：</strong>{{ e.impact_analysis }}</p>{% endif %}
-          {% if e.source_url %}
-          <p class="source"><a href="{{ e.source_url }}" target="_blank" rel="noopener noreferrer">来源链接</a></p>
-          {% endif %}
+          <div class="entry-source-row">
+            {% if e.source_url %}
+            <p class="source"><a href="{{ e.source_url }}" target="_blank" rel="noopener noreferrer">来源链接</a></p>
+            {% else %}
+            <p class="source muted">来源链接：暂无</p>
+            {% endif %}
+            <p class="meta media-source">
+              {% if e.social_source_url and e.social_source_label and e.social_source_label != "暂无" %}
+              <a href="{{ e.social_source_url }}" target="_blank" rel="noopener noreferrer">{{ e.social_source_label }}</a>
+              {% else %}
+              <span>{{ e.social_source_label or "暂无" }}</span>
+              {% endif %}
+            </p>
+          </div>
           <div class="chart-host" id="chart-entry-{{ e.id }}"></div>
         </article>
         {% endfor %}
@@ -99,7 +112,7 @@
     {% endfor %}
 
     {% if not entries %}
-    <p class="empty">当前筛选条件下暂无条目。可通过侧边栏运行流水线，或从左侧「数据源」上传权威材料。</p>
+    <p class="empty">当前筛选条件下暂无条目。可通过侧边栏运行流水线，或从右侧「数据源」上传权威材料。</p>
     {% endif %}
   </section>
 </main>

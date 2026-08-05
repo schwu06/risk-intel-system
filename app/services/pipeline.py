@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from datetime import date, datetime
 from typing import Any, Optional
@@ -38,6 +39,7 @@ from app.services.recency import is_within_hours, parse_published_at
 from app.services.rss_news import RssNewsCollector
 from app.services.scrapers.official_portals import OfficialPortalScraper
 from app.services.scrapers.tdnet_collector import TdnetCollector
+from app.timeutil import tokyo_now
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +94,10 @@ class RiskPipeline:
             "rss_feeds_ok": 0,
             "rss_feeds_fail": 0,
             "mita_fetched": 0,
+            "mita_skipped": None,
+            "mita_forced": False,
+            "mita_target": 0,
+            "primary_valid": 0,
             "portal_fetched": 0,
             "authority": 0,
             "after_dedup": 0,
@@ -158,9 +164,12 @@ class RiskPipeline:
                         batches.append(tdnet_batch)
                         source_ok += 1
                     elif tdnet_batch.get("error"):
-                        source_fail += 1
-                        fail_notes.append(f"TDnet: {tdnet_batch['error']}")
-                        funnel["source_fail"].append("tdnet")
+                        # 近窗无披露不算硬故障；仅 API/解析失败记入 source_fail
+                        err = str(tdnet_batch.get("error") or "")
+                        if "无监控企业披露" not in err:
+                            source_fail += 1
+                            fail_notes.append(f"TDnet: {err}")
+                            funnel["source_fail"].append("tdnet")
                 except Exception as exc:
                     source_fail += 1
                     fail_notes.append(f"TDnet: {exc}")
@@ -185,17 +194,50 @@ class RiskPipeline:
             from app.services.api_keys import is_placeholder_key
 
             skip_mita = is_placeholder_key(getattr(self.settings, "mita_api_key", None))
+            primary_valid = self._count_primary_valid(batches, module_code)
+            mita_target = self._mita_target(module_code, batches)
+            force_mita = self._should_force_mita(module_code, funnel)
+            funnel["primary_valid"] = primary_valid
+            funnel["mita_target"] = mita_target
+            funnel["mita_forced"] = force_mita
+
             if skip_mita:
                 funnel["source_fail"].append("mita_unconfigured")
+                funnel["mita_skipped"] = "unconfigured"
                 fail_notes.append("秘塔未配置，已跳过检索")
+            elif not force_mita and primary_valid >= mita_target:
+                funnel["mita_skipped"] = "enough"
+                logger.info(
+                    "模块 %s 主源有效候选 %s ≥ 目标 %s，跳过秘塔补缺",
+                    module_code,
+                    primary_valid,
+                    mita_target,
+                )
             else:
+                if force_mita and primary_valid >= mita_target:
+                    funnel["mita_skipped"] = None
+                    fail_notes.append("主源硬故障，强制秘塔补缺")
                 queries = module_search_queries(
                     module_code,
                     report_date.isoformat(),
                     entity_targets=entity_targets,
                 )
+                gap = max(1, mita_target - primary_valid) if not force_mita else max(
+                    mita_target, 1
+                )
+                # 去重余量：约缺口 1.5 倍即停；查询条数按缺口限流
+                fill_budget = max(gap, int(math.ceil(gap * 1.5)))
+                max_queries = self._mita_query_budget(module_code, len(queries), gap, force_mita)
+                queries = queries[:max_queries]
+                funnel["mita_fill_budget"] = fill_budget
+                funnel["mita_queries_planned"] = len(queries)
+                mita_valid_added = 0
                 for idx, qcfg in enumerate(queries):
+                    if mita_valid_added >= fill_budget:
+                        funnel["mita_early_stop"] = "fill_budget"
+                        break
                     try:
+                        per_query = min(12, max(3, fill_budget - mita_valid_added + 2))
                         batch = self._collect_mita(
                             module_code=module_code,
                             query=qcfg["query"],
@@ -203,10 +245,14 @@ class RiskPipeline:
                             whitelist=whitelist,
                             blacklist=blacklist,
                             funnel=funnel,
+                            max_results=per_query,
                         )
                         if batch["items"]:
                             batches.append(batch)
                             mita_ok += 1
+                            mita_valid_added += self._count_valid_items(
+                                batch["items"], module_code
+                            )
                         else:
                             mita_fail += 1
                         if self.mita_pause > 0 and idx + 1 < len(queries):
@@ -261,7 +307,7 @@ class RiskPipeline:
                 run.status = "completed" if saved > 0 else "empty"
                 run.phase = "done"
                 run.notes = "外部检索未配置，已写入近24小时演示样本并刷新授信"
-                run.finished_at = datetime.utcnow()
+                run.finished_at = tokyo_now()
                 self._set_funnel(run, funnel)
                 self.db.commit()
                 return saved
@@ -380,7 +426,7 @@ class RiskPipeline:
                         run.notes = "今日无动态"
 
             run.phase = "done"
-            run.finished_at = datetime.utcnow()
+            run.finished_at = tokyo_now()
             self._set_funnel(run, funnel)
             self.db.commit()
             return int(run.entry_count or 0)
@@ -393,7 +439,7 @@ class RiskPipeline:
             run.status = "failed"
             run.phase = "done"
             run.notes = f"请求失败，已保留上次结果｜{exc}"
-            run.finished_at = datetime.utcnow()
+            run.finished_at = tokyo_now()
             self._set_funnel(run, funnel)
             self.db.commit()
             raise
@@ -430,6 +476,7 @@ class RiskPipeline:
                 "source_domain": h.source_domain,
                 "feed": h.feed_label,
                 "fingerprint": h.fingerprint,
+                "publisher": h.publisher,
             }
             for h in detailed.items
         ]
@@ -564,6 +611,7 @@ class RiskPipeline:
         whitelist: list[str],
         blacklist: list[str],
         funnel: dict[str, Any],
+        max_results: int = 12,
     ) -> dict[str, Any]:
         log = SearchLog(
             module_code=module_code,
@@ -579,7 +627,7 @@ class RiskPipeline:
             query=query,
             whitelist_domains=whitelist or None,
             blacklist_domains=blacklist or None,
-            max_results=12,
+            max_results=max(1, min(12, int(max_results or 12))),
         )
         recent_items = [
             i
@@ -619,6 +667,82 @@ class RiskPipeline:
             "metadata": {"source": "mita", **metadata},
             "query": query,
         }
+
+    def _count_valid_items(self, items: list[dict[str, Any]], module_code: str) -> int:
+        """近窗内、有实质内容、按指纹去重后的条数。"""
+        seen: set[str] = set()
+        n = 0
+        for it in items or []:
+            if not is_substantive_news_item(it):
+                continue
+            if not is_within_hours(
+                it.get("published_at"), self.window_hours, allow_unknown=True
+            ):
+                continue
+            fp = it.get("fingerprint") or content_fingerprint(
+                module_code=module_code,
+                title=it.get("title"),
+                url=it.get("url"),
+                published_at=it.get("published_at"),
+            )
+            if fp in seen:
+                continue
+            seen.add(fp)
+            n += 1
+        return n
+
+    def _count_primary_valid(
+        self, batches: list[dict[str, Any]], module_code: str
+    ) -> int:
+        """主源（RSS / TDnet）有效候选数；不含秘塔与权威上传正文。"""
+        primary_items: list[dict[str, Any]] = []
+        for batch in batches:
+            if batch.get("source") not in ("rss", "tdnet"):
+                continue
+            primary_items.extend(batch.get("items") or [])
+        return self._count_valid_items(primary_items, module_code)
+
+    def _mita_target(self, module_code: str, batches: list[dict[str, Any]]) -> int:
+        """秘塔补齐目标条数。"""
+        configured = int(getattr(self.settings, "pipeline_mita_min_items", 0) or 0)
+        base = configured if configured > 0 else self.llm_top_k
+        if module_code in ENTITY_MODULES:
+            # 主体评估：更严，有几条相关资讯即可，避免空窗也硬扛全量 query
+            return min(base, 3)
+        if module_code == "C":
+            tdnet_n = 0
+            for batch in batches:
+                if batch.get("source") == "tdnet":
+                    tdnet_n += self._count_valid_items(batch.get("items") or [], module_code)
+            # 已有正式披露时，搜索补缺门槛略降
+            if tdnet_n >= 1:
+                return min(base, 6)
+        return max(1, base)
+
+    def _should_force_mita(self, module_code: str, funnel: dict[str, Any]) -> bool:
+        if not bool(getattr(self.settings, "pipeline_mita_force_on_primary_fail", True)):
+            return False
+        fails = set(funnel.get("source_fail") or [])
+        rss_hard = "rss" in fails
+        if module_code == "C":
+            return rss_hard and "tdnet" in fails
+        # B/D/A：RSS 全挂则强制补；主体无 RSS 条目时仍可能靠秘塔，不因空结果强制
+        return rss_hard
+
+    def _mita_query_budget(
+        self, module_code: str, total_queries: int, gap: int, force: bool
+    ) -> int:
+        """按缺口限流秘塔查询条数，避免模块 C/D 全量串行。"""
+        if total_queries <= 0:
+            return 0
+        if force:
+            # 硬故障时多跑一些，但仍设上限
+            cap = {"A": 4, "B": 2, "C": 4, "D": 4, "E": 2}.get(module_code, 4)
+            return min(total_queries, max(2, cap))
+        # 正常补缺：约每查询贡献 2～3 条有效结果估算
+        needed = max(1, int(math.ceil(gap / 2.0)))
+        soft_cap = {"A": 4, "B": 2, "C": 4, "D": 4, "E": 2}.get(module_code, 4)
+        return min(total_queries, max(1, min(needed, soft_cap)))
 
     # ------------------------------------------------------------------
     # analyze helpers
@@ -690,13 +814,15 @@ class RiskPipeline:
                 f"=== RSS/秘塔合并候选（近{self.window_hours}小时）===\n{web_text}"
             )
         metadata = {"source": "merged"}
+        # 仅用户权威上传触发 authority_first；EDINET 备注等不应占用该模式
+        authority_first = bool(funnel.get("authority"))
         try:
             structured = self._llm_analyze(
                 combined,
                 module_code=module_code,
                 report_date=report_date,
                 source="merged",
-                authority_first=bool(authority_text),
+                authority_first=authority_first,
                 funnel=funnel,
                 context={
                     "report_date": report_date.isoformat(),
@@ -879,6 +1005,7 @@ class RiskPipeline:
                     "核心摘要": snippet[:800],
                     "影响分析": "结构化分析暂不可用，已按原始摘要入库，请人工复核。",
                     "来源链接": it.get("url") or "",
+                    "来源名称": "",
                     "发布时间": it.get("published_at") or "",
                     "_degraded": True,
                     "_fingerprint": it.get("fingerprint"),
@@ -1023,7 +1150,7 @@ class RiskPipeline:
             self.db.add(run)
         else:
             run.status = "running"
-        run.started_at = datetime.utcnow()
+        run.started_at = tokyo_now()
         run.finished_at = None
         run.entry_count = 0
         run.kept_previous = False

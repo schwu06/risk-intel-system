@@ -89,6 +89,18 @@ class DataSourceOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RssSourceItemOut(BaseModel):
+    """近 24 小时 RSS 管道抓取条目（API 查询用）。"""
+
+    id: str
+    title: str
+    source_name: str
+    published_at: Optional[datetime] = None
+    type: str = "rss"
+    is_selected: bool = True
+    url: Optional[str] = None
+
+
 class DataSourceUrlIn(BaseModel):
     name: str
     url: str = Field(..., min_length=8)

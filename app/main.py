@@ -17,10 +17,12 @@ from app.database.session import get_db, init_db
 from app.services.api_keys import is_placeholder_key
 from app.services.data_bridge import migrate_legacy_data
 from app.services.data_source_service import list_all_sources, list_industry_sources, list_module_sources
+from app.services.display_zh import build_display_cards
 from app.services.domain_rules import seed_default_domains
 from app.services.industry_analysis import IndustryAnalysisService
 from app.services.pipeline import RISK_LEVEL_ORDER
 from app.services.scheduler import shutdown_scheduler, start_scheduler
+from app.services.social_source import resolve_social_source
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
@@ -153,6 +155,14 @@ def _daily_news_context(
         q = q.filter(NewsArticle.module_code == selected)
     entries = _sort_news(q.all())
 
+    def _social_for(e: NewsArticle) -> dict:
+        return resolve_social_source(
+            source_url=e.source_url,
+            structured_json=e.structured_json,
+        )
+
+    display_cards = build_display_cards(db, entries, social_resolver=_social_for)
+
     runs = (
         db.query(ReportRun)
         .filter(ReportRun.report_date == rd)
@@ -166,9 +176,9 @@ def _daily_news_context(
         if e.risk_level in stats:
             stats[e.risk_level] += 1
 
-    grouped: dict[str, list[NewsArticle]] = {k: [] for k in allowed_codes}
-    for e in entries:
-        grouped.setdefault(e.module_code, []).append(e)
+    grouped: dict[str, list] = {k: [] for k in allowed_codes}
+    for card in display_cards:
+        grouped.setdefault(card.module_code, []).append(card)
 
     # 兼容旧跑批：completed+0 但当日检索日志全失败 → 仍显示请求失败
     failed_log_modules: set[str] = set()
@@ -231,7 +241,7 @@ def _daily_news_context(
         "modules": allowed,
         "module_codes_csv": ",".join(allowed_codes),
         "selected_module": selected or "",
-        "entries": entries,
+        "entries": display_cards,
         "grouped_entries": grouped,
         "stats": stats,
         "run_map": run_map,

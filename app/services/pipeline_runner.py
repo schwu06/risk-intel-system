@@ -20,6 +20,7 @@ from app.services.data_source_service import (
 )
 from app.services.pipeline import RiskPipeline
 from app.services.rss_news import RssNewsCollector
+from app.timeutil import tokyo_isoformat, tokyo_now
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ def recover_stale_jobs() -> int:
             row.status = "failed"
             row.error_message = "服务重启，任务中断"
             row.message = "任务已中断，请重新采集"
-            row.finished_at = datetime.utcnow()
+            row.finished_at = tokyo_now()
             count += 1
         if count:
             db.commit()
@@ -201,8 +202,8 @@ def get_job_status(job_id: str) -> Optional[dict[str, Any]]:
             "funnel": funnel,
             "message": row.message or "",
             "error_message": row.error_message,
-            "started_at": row.started_at.isoformat() if row.started_at else None,
-            "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+            "started_at": tokyo_isoformat(row.started_at),
+            "finished_at": tokyo_isoformat(row.finished_at),
             "running_job_id": _running_job_id,
             "snapshot": snapshot_meta,
             "entity_id": (snapshot_meta or {}).get("entity_id") if isinstance(snapshot_meta, dict) else None,
@@ -307,7 +308,7 @@ def _execute_job(job_id: str, report_date: date, codes: list[str]) -> None:
         row = db.query(PipelineJob).filter(PipelineJob.job_id == job_id).first()
         if row:
             row.status = "running"
-            row.started_at = datetime.utcnow()
+            row.started_at = tokyo_now()
             n = len(snapshot.get("source_ids") or [])
             row.message = f"采集进行中…（已冻结 {n} 个数据源）"
             db.commit()
@@ -320,7 +321,7 @@ def _execute_job(job_id: str, report_date: date, codes: list[str]) -> None:
         if row:
             row.results_json = json.dumps(results, ensure_ascii=False)
             row.funnel_json = json.dumps(funnels, ensure_ascii=False)
-            row.finished_at = datetime.utcnow()
+            row.finished_at = tokyo_now()
             if errors and all(v == -1 for v in results.values()):
                 row.status = "failed"
                 row.error_message = "; ".join(errors)
@@ -339,7 +340,7 @@ def _execute_job(job_id: str, report_date: date, codes: list[str]) -> None:
                 row.status = "failed"
                 row.error_message = str(exc)
                 row.message = "任务异常结束"
-                row.finished_at = datetime.utcnow()
+                row.finished_at = tokyo_now()
                 db.commit()
         except Exception:
             db.rollback()

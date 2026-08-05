@@ -15,66 +15,66 @@
 </form>
 {% endblock %}
 
+{% block page_sidebar %}
+<aside class="sidebar page-rail" data-modules="{{ module_codes_csv }}">
+  <h2>授信等级分布</h2>
+  <ul class="stat-list">
+    {% for level in credit_levels %}
+    <li>
+      <span class="credit credit-{{ level }}">{{ level }}</span>
+      <span class="count">{{ credit_counts.get(level, 0) }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+
+  <h2>监控主体</h2>
+  <ul class="entity-list">
+    {% for ent in entities %}
+    <li>
+      <a
+        href="/entity-assessment?entity_id={{ ent.id }}&report_date={{ report_date }}"
+        class="entity-link {% if selected_entity and selected_entity.id == ent.id %}active{% endif %}"
+      >
+        <span class="entity-name">{{ ent.display_name or ent.name }}</span>
+        <span class="credit credit-{{ ent.credit_level }}">{{ ent.credit_level }}</span>
+      </a>
+    </li>
+    {% else %}
+    <li class="empty-source">暂无监控主体</li>
+    {% endfor %}
+  </ul>
+
+  <h2>运行状态</h2>
+  <ul class="run-list">
+    {% for code, name in modules.items() %}
+    {% set run = run_map.get(code) %}
+    <li>
+      <span class="mod-name">{{ name }}</span>
+      <span class="run-status status-{{ run.status if run else 'pending' }}">
+        {% if run %}{{ run.status }} ({{ run.entry_count }}){% else %}未运行{% endif %}
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+
+  <div class="actions">
+    <button
+      type="button"
+      class="btn"
+      id="btn-export-entity-docx"
+      {% if not selected_entity %}disabled{% endif %}
+      data-entity-id="{{ selected_entity.id if selected_entity else '' }}"
+      data-report-date="{{ report_date }}"
+    >导出 Word</button>
+    <button type="button" class="btn secondary" id="btn-run-pipeline">采集近24小时资讯</button>
+  </div>
+  <p class="hint" id="pipeline-msg">异步采集近 24 小时主体相关资讯；失败时保留上次结果，必要时回填演示样本。</p>
+  <p class="hint" id="export-msg" hidden></p>
+</aside>
+{% endblock %}
+
 {% block content %}
-<main class="layout" data-modules="{{ module_codes_csv }}">
-  {# —— 中间栏：授信分布 / 监控主体 / 操作 —— #}
-  <aside class="sidebar">
-    <h2>授信等级分布</h2>
-    <ul class="stat-list">
-      {% for level in credit_levels %}
-      <li>
-        <span class="credit credit-{{ level }}">{{ level }}</span>
-        <span class="count">{{ credit_counts.get(level, 0) }}</span>
-      </li>
-      {% endfor %}
-    </ul>
-
-    <h2>监控主体</h2>
-    <ul class="entity-list">
-      {% for ent in entities %}
-      <li>
-        <a
-          href="/entity-assessment?entity_id={{ ent.id }}&report_date={{ report_date }}"
-          class="entity-link {% if selected_entity and selected_entity.id == ent.id %}active{% endif %}"
-        >
-          <span class="entity-name">{{ ent.display_name or ent.name }}</span>
-          <span class="credit credit-{{ ent.credit_level }}">{{ ent.credit_level }}</span>
-        </a>
-      </li>
-      {% else %}
-      <li class="empty-source">暂无监控主体</li>
-      {% endfor %}
-    </ul>
-
-    <h2>运行状态</h2>
-    <ul class="run-list">
-      {% for code, name in modules.items() %}
-      {% set run = run_map.get(code) %}
-      <li>
-        <span class="mod-name">{{ name }}</span>
-        <span class="run-status status-{{ run.status if run else 'pending' }}">
-          {% if run %}{{ run.status }} ({{ run.entry_count }}){% else %}未运行{% endif %}
-        </span>
-      </li>
-      {% endfor %}
-    </ul>
-
-    <div class="actions">
-      <button
-        type="button"
-        class="btn"
-        id="btn-export-entity-docx"
-        {% if not selected_entity %}disabled{% endif %}
-        data-entity-id="{{ selected_entity.id if selected_entity else '' }}"
-        data-report-date="{{ report_date }}"
-      >导出 Word</button>
-      <button type="button" class="btn secondary" id="btn-run-pipeline">采集近24小时资讯</button>
-    </div>
-    <p class="hint" id="pipeline-msg">异步采集近 24 小时主体相关资讯；失败时保留上次结果，必要时回填演示样本。</p>
-    <p class="hint" id="export-msg" hidden></p>
-  </aside>
-
-  {# —— 右侧：主体评估主视图 —— #}
+<main class="layout content-shell" data-modules="{{ module_codes_csv }}">
   <section class="content entity-assessment-view">
     {% if selected_entity %}
     <header class="entity-header">
@@ -204,7 +204,7 @@
           </svg>
         </div>
         <p class="ea-empty-title">该主体暂无风险事件</p>
-        <p class="ea-empty-desc">可点击左侧「采集近24小时资讯」，或从最左侧「数据源」补充权威材料后再次采集。</p>
+        <p class="ea-empty-desc">可点击左侧「采集近24小时资讯」，或从右侧「数据源」补充权威材料后再次采集。</p>
       </div>
       {% endif %}
     </section>
@@ -212,7 +212,7 @@
     {% else %}
     <div class="ea-empty ea-empty-page" role="status">
       <p class="ea-empty-title">暂无监控主体</p>
-      <p class="ea-empty-desc">系统启动时将写入默认主体（Godiva / 普洛斯等）。写入后可在中间栏切换查看评估详情。</p>
+      <p class="ea-empty-desc">系统启动时将写入默认主体（Godiva / 普洛斯等）。写入后可在左侧栏切换查看评估详情。</p>
     </div>
     {% endif %}
   </section>

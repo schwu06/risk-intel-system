@@ -14,7 +14,7 @@ app/
   api/routes.py           REST API
   database/               ORM、schema.sql、会话（含自动补列迁移）
   services/               MiTa、DeepSeek、流水线、异步任务、RSS、授信、行业分析
-  exporters/docx_report.py Word 导出（含图表）
+  exporters/docx_report.py Word 导出（日报为纯新闻汇总；行业/主体报告可含图表）
   templates/              中文 HTML 页面（base + 三页）
   static/                 CSS / JS（含异步流水线轮询）
 config/
@@ -33,9 +33,11 @@ scripts/init_db.py        初始化与演示数据
 | `NEWS_WINDOW_HOURS` | 近 N 小时资讯窗口 | `24` |
 | `NETWORK_RETRY_ATTEMPTS` | 外网请求重试次数 | `3` |
 | `PIPELINE_ASYNC_DEFAULT` | 流水线默认异步 | `true` |
-| `PIPELINE_LLM_TOP_K` | 送入 DeepSeek 前粗筛条数 | `12` |
+| `PIPELINE_LLM_TOP_K` | 送入 DeepSeek 前粗筛条数 | `8` |
 | `PIPELINE_LLM_CACHE_HOURS` | LLM 结果缓存小时数 | `168` |
-| `PIPELINE_MITA_QUERY_PAUSE_SECONDS` | 秘塔查询间隔（秒） | `0.8` |
+| `PIPELINE_MITA_QUERY_PAUSE_SECONDS` | 秘塔查询间隔（秒） | `0.3` |
+| `PIPELINE_MITA_MIN_ITEMS` | 主源有效候选达标则跳过秘塔；`0` = 跟随 `PIPELINE_LLM_TOP_K` | `0` |
+| `PIPELINE_MITA_FORCE_ON_PRIMARY_FAIL` | 主源硬故障时强制秘塔补缺 | `true` |
 | `RSS_CONFIG_PATH` | RSS 配置文件路径 | `config/rss_feeds.yaml` |
 | `DAILY_PIPELINE_CRON` | 定时采集 cron | `0 6 * * *` |
 
@@ -88,7 +90,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | 权威数据源 | 各模块支持上传 txt/xlsx/docx/pdf 及网址 |
 | 近24小时采集 | 点击后异步采集：RSS/Google News + TDnet（模块 C）+ 秘塔 + 正文提取 + DeepSeek；失败保留上次结果；LLM 失败则降级入库原始条目 |
 | 分阶段流水线 | collect → analyze → publish；仅有新结果时替换，避免页面变空白 |
-| 秘塔搜索 | 作为广度补充，始终与 RSS 并行采集 |
+| 秘塔搜索 | 作为广度补充：**主源有效候选不足时才补**；主源硬故障则强制补；依赖 `MITA_API_KEY` |
 | RSS 外置配置 | `config/rss_feeds.yaml` 管理查询与直连源，支持启用/禁用与优先级 |
 | 深度研报 | 长篇结构化报告，在线预览与 Word 导出 |
 | 韧性增强 | LLM 缓存、Top-K 粗筛、调度防重入、feed 级成败统计 |
@@ -106,7 +108,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | **直连 RSS Direct feeds** | YAML `feeds` 中 `type: direct` 的固定 Feed URL | 见下表 See below |
 | **TDnet 適時開示** | 模块 C 专用：やのしん列表 API + 官方日列表页回退；按证券代码拉 PDF 披露 | 启用 Enabled |
 | **EDINET** | 法定披露检索入口备注，**不入库正文**（需官方 API Key 后可扩展） | 仅核对 Reference only |
-| **秘塔搜索 MiTa / Metaso** | 各模块关键词检索广度补充；依赖 `MITA_API_KEY` | 启用（密钥有效时） |
+| **秘塔搜索 MiTa / Metaso** | 各模块关键词检索；**RSS/TDnet 有效候选不足或主源硬故障时才调用**；依赖 `MITA_API_KEY` | 启用（密钥有效时；不足才补） |
 | **网页/PDF 正文提取** | trafilatura / pypdf 等，对命中条目抓正文再送 LLM | 启用 Enabled |
 | **DeepSeek 结构化分析** | 输出中文字段资讯条目；依赖 `DEEPSEEK_API_KEY`；失败则降级原始摘要入库 | 启用（密钥有效时） |
 
@@ -167,7 +169,14 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ### 5. 秘塔补充检索要点 / MiTa Supplement Queries
 
-流水线按模块生成近窗检索词（见 `app/config.py` → `module_search_queries`）：
+流水线先采 RSS（及模块 C 的 TDnet），再统计近窗内**实质性有效候选** `primary_valid`：
+
+- `primary_valid ≥ target` 且主源无硬故障 → **跳过秘塔**（`mita_skipped=enough`）
+- 否则按缺口限流查询条数补齐；达标或用尽查询预算后提前结束
+- `target`：默认等于 `PIPELINE_LLM_TOP_K`；模块 A 上限 3；模块 C 已有 TDnet 实质披露时上限 6
+- RSS 全挂（模块 C 另需 TDnet API 也失败）且 `PIPELINE_MITA_FORCE_ON_PRIMARY_FAIL=true` → **强制补**
+
+按模块生成近窗检索词（见 `app/config.py` → `module_search_queries`）：
 
 | 模块 | 检索侧重 Query focus |
 |------|----------------------|
@@ -192,6 +201,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/v1/news` | 资讯列表（`news_articles`） |
+| GET | `/api/v1/sources/rss` | 近 24 小时 RSS 采集动态（供程序查询；侧栏不展示） |
 | GET | `/api/v1/entities` | 监控主体列表 |
 | GET | `/api/v1/entities/{id}/risks` | 主体风险事件 |
 | GET | `/api/v1/entities/{id}/credit-updates` | 授信变更日志 |
@@ -200,5 +210,5 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | GET | `/api/v1/pipeline/rss-config` | 查看当前 RSS 配置摘要 |
 | POST | `/api/v1/pipeline/rss-config/reload` | 重新加载 `rss_feeds.yaml` |
 | POST | `/api/v1/industry/analyze` | 生成深度研报 |
-| GET | `/api/v1/export/docx?report_date=...&module_codes=B,C,D` | 导出 Word（B=中东日报，C=日本企业，D=每日宏观） |
+| GET | `/api/v1/export/docx?report_date=...&module_codes=B,C,D` | 导出《24小时核心新闻情报汇总》Word（B=中东日报，C=日本企业，D=每日宏观） |
 | GET | `/api/v1/health` | 健康检查 |

@@ -8,39 +8,41 @@
 <span class="header-placeholder" aria-hidden="true"></span>
 {% endblock %}
 
+{% block page_sidebar %}
+<aside class="industry-sidebar page-rail">
+  <h2>新建分析</h2>
+  <form id="analysis-form" class="stack-form">
+    <label>行业名称</label>
+    <input type="text" name="industry_name" placeholder="例如：航空运输" required />
+    <label>企业名称（可选）</label>
+    <input type="text" name="company_name" placeholder="例如：某航空公司" />
+    <label class="checkbox-row">
+      <input type="checkbox" name="supplement_search" checked />
+      本地数据源不足时补充网络检索
+    </label>
+    <button type="submit" class="btn">生成分析报告</button>
+  </form>
+  <p class="hint" id="analysis-msg"></p>
+  <p class="hint">权威材料请在右侧「数据源」统一上传；生成报告时会优先读取。</p>
+
+  <h2>历史报告</h2>
+  <ul class="report-list">
+    {% for r in reports %}
+    <li>
+      <a href="/deep-reports?report_id={{ r.id }}" class="report-link {% if selected_report and selected_report.id == r.id %}active{% endif %}">
+        {{ r.industry_name }}{% if r.company_name %} / {{ r.company_name }}{% endif %}
+        <span class="report-status status-{{ r.status }}">{{ r.status }}</span>
+      </a>
+    </li>
+    {% else %}
+    <li class="empty-source">暂无报告</li>
+    {% endfor %}
+  </ul>
+</aside>
+{% endblock %}
+
 {% block content %}
-<main class="industry-layout">
-  <aside class="industry-sidebar">
-    <h2>新建分析</h2>
-    <form id="analysis-form" class="stack-form">
-      <label>行业名称</label>
-      <input type="text" name="industry_name" placeholder="例如：航空运输" required />
-      <label>企业名称（可选）</label>
-      <input type="text" name="company_name" placeholder="例如：某航空公司" />
-      <label class="checkbox-row">
-        <input type="checkbox" name="supplement_search" checked />
-        本地数据源不足时补充网络检索
-      </label>
-      <button type="submit" class="btn">生成分析报告</button>
-    </form>
-    <p class="hint" id="analysis-msg"></p>
-    <p class="hint">权威材料请在左侧「数据源」统一上传；生成报告时会优先读取。</p>
-
-    <h2>历史报告</h2>
-    <ul class="report-list">
-      {% for r in reports %}
-      <li>
-        <a href="/deep-reports?report_id={{ r.id }}" class="report-link {% if selected_report and selected_report.id == r.id %}active{% endif %}">
-          {{ r.industry_name }}{% if r.company_name %} / {{ r.company_name }}{% endif %}
-          <span class="report-status status-{{ r.status }}">{{ r.status }}</span>
-        </a>
-      </li>
-      {% else %}
-      <li class="empty-source">暂无报告</li>
-      {% endfor %}
-    </ul>
-  </aside>
-
+<main class="industry-layout content-shell">
   <section class="industry-content">
     {% if selected_report and selected_report.status == 'completed' %}
     <div class="report-toolbar">
@@ -55,7 +57,7 @@
     {% elif selected_report and selected_report.status == 'running' %}
     <p class="empty">报告生成中，请刷新页面…</p>
     {% else %}
-    <p class="empty">请在左侧输入行业名称并生成分析报告；权威材料可在「数据源」分栏上传。</p>
+    <p class="empty">请在左侧输入行业名称并生成分析报告；权威材料可在右侧「数据源」分栏上传。</p>
     {% endif %}
   </section>
 </main>

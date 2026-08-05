@@ -31,6 +31,8 @@ class RssNewsItem:
     source_domain: Optional[str] = None
     feed_label: Optional[str] = None
     fingerprint: Optional[str] = None
+    # Google News <source> 或标题后缀解析出的真实媒体名
+    publisher: Optional[str] = None
 
 
 @dataclass
@@ -246,6 +248,7 @@ class RssNewsCollector:
             summary = re_strip_tags(summary)[:500]
             published = _entry_published(entry)
             domain = urlparse(link).netloc if link else None
+            publisher = _entry_publisher(entry, title=title, snippet=summary, domain=domain)
             out.append(
                 RssNewsItem(
                     title=title,
@@ -254,6 +257,7 @@ class RssNewsCollector:
                     published_at=published.isoformat() if published else None,
                     source_domain=domain,
                     feed_label=feed_label,
+                    publisher=publisher,
                 )
             )
         return out
@@ -264,6 +268,43 @@ def re_strip_tags(html: str) -> str:
 
     text = re.sub(r"(?is)<[^>]+>", " ", html or "")
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _entry_publisher(
+    entry,
+    *,
+    title: str,
+    snippet: str,
+    domain: Optional[str],
+) -> Optional[str]:
+    """尽量解析真实媒体名（Google News <source> / 标题后缀 / 域名）。"""
+    src = getattr(entry, "source", None)
+    if src is not None:
+        name = ""
+        if isinstance(src, dict):
+            name = str(src.get("title") or "").strip()
+        else:
+            name = str(getattr(src, "title", "") or "").strip()
+        if name:
+            return name[:128]
+
+    # Google News 常见标题：正文 - 媒体名
+    if " - " in (title or ""):
+        tail = title.rsplit(" - ", 1)[-1].strip()
+        if 1 < len(tail) <= 64 and "http" not in tail.lower():
+            return tail
+
+    # 摘要里偶发 "...  MediaName"
+    if snippet:
+        import re
+
+        m = re.search(r"(?:\u00a0|\s){2,}([^\n|]{2,64})\s*$", snippet)
+        if m:
+            return m.group(1).strip()[:128]
+
+    if domain and "news.google." not in domain.lower():
+        return domain.removeprefix("www.")[:128]
+    return None
 
 
 def _entry_published(entry) -> Optional[datetime]:
