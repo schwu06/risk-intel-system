@@ -42,7 +42,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | 新闻日报 | 按模块 B/C/D 汇总近 24 小时资讯，可导出 Word |
 | 主体评估 | 监控企业风险与授信变化（模块 A），可导出 Word |
 | 深度研报 | 按行业/主体生成长篇报告；右侧可上传权威材料 |
-| 国际评级 | 发行体评级监测表（当前为演示数据），可导出 Excel |
+| 国际评级 | 发行体评级监测（`GET/POST /api/v1/intl-ratings` + 流水线），可导出 Excel |
 
 授信等级：正常 → 关注 → 预警 → 高风险。
 
@@ -69,10 +69,14 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ```
 app/           页面、接口、采集与分析
-config/        rss_feeds.yaml、direct_sites.yaml
+config/        rss_feeds.yaml、direct_sites.yaml、intl_ratings.yaml
+intl_ratings/  界面四：发行体评级监测流水线（CLI）
+data/intl_ratings/  发行体清单 input / 报表 output
 scripts/       init_db.py 等
 DATA_SOURCES.md  各页功能与数据源说明
 ```
+
+国际评级流水线：将清单放入 `data/intl_ratings/input/`，执行 `python -m intl_ratings.main`。详见 `intl_ratings/README.md`。
 
 ---
 

@@ -273,13 +273,92 @@ ROUTING_PROMPT = """你是风险与新闻情报系统的自动化分类与路由
 只输出 JSON：{"sections":["B"],"reason":"简短理由"}"""
 
 
-@dataclass(frozen=True)
-class RouteResult:
-    sections: tuple[str, ...]
-    reason: str
+# 新闻日报范围外：娱乐/体育/科普趣味/奇闻等（命中即丢弃）
+EXCLUDED_TOPICS: tuple[str, ...] = (
+    "娱乐",
+    "综艺",
+    "明星",
+    "八卦",
+    "绯闻",
+    "celebrity",
+    "hollywood",
+    "体育",
+    "足球",
+    "篮球",
+    "网球",
+    "奥运",
+    "世界杯",
+    "fifa",
+    "英超",
+    "nba",
+    "mlb",
+    "彩票",
+    "乐透",
+    "lottery",
+    "中奖",
+    "时尚",
+    "美食",
+    "旅游",
+    "生活方式",
+    "lifestyle",
+    "科普",
+    "趣味",
+    "奇闻",
+    "科学家感到兴奋",
+    "感到兴奋",
+    "为什么一些科学家",
+    "撞上月球",
+    "撞月",
+    "thrilled",
+    "scientists are",
+    "collides with the moon",
+    "rocket hitting the moon",
+    "lottery ticket",
+    "lottery",
+    "garbage worker",
+    "human interest",
+    "人类趣闻",
+    "暖心",
+    "萌宠",
+    "电影",
+    "电视剧",
+    "演唱会",
+    "选秀",
+)
 
-    def includes(self, module_code: str) -> bool:
-        return module_code.upper() in self.sections
+# 非中东南亚/其它易误入 B 的地理词（无中东词时加强排除）
+NON_ME_REGION_HINTS: tuple[str, ...] = (
+    "印度",
+    "india",
+    "莫迪",
+    "modi",
+    "孟加拉",
+    "bangladesh",
+    "哈西娜",
+    "hasina",
+    "巴基斯坦",
+    "pakistan",
+    "斯里兰卡",
+    "阿富汗",
+    "afghanistan",
+    "意大利",
+    "italy",
+    "罗马",
+    "法国",
+    "巴黎",
+    "德国",
+    "柏林",
+    "英国",
+    "伦敦",
+    "日本",
+    "东京",
+    "韩国",
+    "首尔",
+    "巴西",
+    "阿根廷",
+    "澳大利亚",
+    "加拿大",
+)
 
 
 def _norm(text: str) -> str:
@@ -288,6 +367,57 @@ def _norm(text: str) -> str:
 
 def _contains_any(text: str, keywords: Iterable[str]) -> bool:
     return any(k.lower() in text for k in keywords if k)
+
+
+def is_excluded_news_topic(*, title: str = "", content: str = "") -> bool:
+    """是否属于新闻日报范围外主题（娱乐/体育/科普趣味等）。"""
+    blob = _norm(f"{title} {content}")
+    if not blob:
+        return False
+    return _contains_any(blob, EXCLUDED_TOPICS)
+
+
+def item_in_module_scope(
+    module_code: str,
+    *,
+    title: str = "",
+    content: str = "",
+    source: str = "",
+    related_company: str = "",
+) -> tuple[bool, str]:
+    """采集/入库前的板块范围判断。返回 (是否保留, 原因)。"""
+    code = (module_code or "").upper()
+    if is_excluded_news_topic(title=title, content=content):
+        return False, "排除：非新闻日报主题（娱乐/体育/科普趣味等）"
+    if code not in NEWS_SECTIONS:
+        return True, "非新闻三板块，跳过板块校验"
+    result = route_news_sections(
+        title=title,
+        content=content,
+        source=source,
+        related_company=related_company,
+    )
+    if code in result.sections:
+        return True, result.reason
+    # B：无中东命中但含明显其它地区 → 明确剔除
+    if code == SECTION_B:
+        blob = _norm(f"{title} {content} {source} {related_company}")
+        if _contains_any(blob, NON_ME_REGION_HINTS) and not _contains_any(
+            blob, MIDDLE_EAST_GEO
+        ):
+            return False, "排除：非中东区域内容"
+    if not result.sections:
+        return False, f"排除：未命中{code}板块规则"
+    return False, f"排除：路由至{','.join(result.sections)}，不属于{code}"
+
+
+@dataclass(frozen=True)
+class RouteResult:
+    sections: tuple[str, ...]
+    reason: str
+
+    def includes(self, module_code: str) -> bool:
+        return module_code.upper() in self.sections
 
 
 def _matched_company(text: str, related: str = "") -> Optional[str]:
@@ -323,6 +453,9 @@ def route_news_sections(
 
     返回 sections 为有序去重后的板块代码；无法判断时默认空（由调用方决定是否保留原模块）。
     """
+    if is_excluded_news_topic(title=title, content=content):
+        return RouteResult(sections=(), reason="排除：非新闻日报主题")
+
     title_n = _norm(title)
     content_n = _norm(content)
     source_n = _norm(source)
@@ -418,42 +551,86 @@ def route_structured_row(row: dict[str, Any]) -> RouteResult:
     )
 
 
+def filter_candidate_items(
+    items: list[dict[str, Any]],
+    module_code: str,
+) -> tuple[list[dict[str, Any]], int]:
+    """采集候选进入 LLM 前按板块范围预过滤。"""
+    code = (module_code or "").upper()
+    if code not in NEWS_SECTIONS:
+        return items, 0
+    kept: list[dict[str, Any]] = []
+    dropped = 0
+    for it in items:
+        title = str(it.get("title") or "")
+        content = str(it.get("snippet") or it.get("body") or "")
+        ok, _reason = item_in_module_scope(
+            code,
+            title=title,
+            content=content,
+            source=str(it.get("feed") or it.get("source_domain") or ""),
+            related_company=str(it.get("company") or ""),
+        )
+        if ok:
+            kept.append(it)
+        else:
+            dropped += 1
+    return kept, dropped
+
+
 def filter_rows_for_module(
     rows: list[dict[str, Any]],
     module_code: str,
     *,
-    keep_unmatched: bool = True,
+    keep_unmatched: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """保留应归属当前模块的行；为每行写入 _route_sections / _route_reason。
 
-    keep_unmatched: 规则未命中时是否保留在原采集模块（避免误杀）。
+    keep_unmatched 默认 False：未命中板块规则的条目一律剔除（避免串板块）。
     """
     code = module_code.upper()
     kept: list[dict[str, Any]] = []
-    stats = {"routed_in": 0, "routed_out": 0, "unmatched_kept": 0, "dual": 0}
+    stats = {
+        "routed_in": 0,
+        "routed_out": 0,
+        "unmatched_kept": 0,
+        "excluded_topic": 0,
+        "dual": 0,
+    }
 
     for row in rows:
+        title = str(row.get("标题") or row.get("title") or "")
+        content = str(
+            row.get("核心摘要")
+            or row.get("影响分析")
+            or row.get("summary")
+            or ""
+        )
+        if is_excluded_news_topic(title=title, content=content):
+            stats["excluded_topic"] += 1
+            stats["routed_out"] += 1
+            continue
+
+        ok, reason = item_in_module_scope(
+            code,
+            title=title,
+            content=content,
+            source=str(row.get("来源名称") or row.get("来源链接") or ""),
+            related_company=str(row.get("关联企业") or ""),
+        )
         result = route_structured_row(row)
         enriched = dict(row)
         enriched["_route_sections"] = list(result.sections)
-        enriched["_route_reason"] = result.reason
+        enriched["_route_reason"] = reason or result.reason
 
-        if not result.sections:
-            if keep_unmatched and code in NEWS_SECTIONS:
-                kept.append(enriched)
-                stats["unmatched_kept"] += 1
-            else:
-                stats["routed_out"] += 1
+        if not ok:
+            stats["routed_out"] += 1
             continue
 
         if len(result.sections) > 1:
             stats["dual"] += 1
-
-        if code in result.sections:
-            kept.append(enriched)
-            stats["routed_in"] += 1
-        else:
-            stats["routed_out"] += 1
+        stats["routed_in"] += 1
+        kept.append(enriched)
 
     return kept, stats
 

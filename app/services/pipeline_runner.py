@@ -548,6 +548,83 @@ def get_last_news_refresh(
         db.close()
 
 
+def news_hour_slot_satisfied(
+    *,
+    window_hours: int = NEWS_WINDOW_HOURS_24,
+    module_codes: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """当前东京整点时段是否已有新闻采集（手动或自动），用于整点任务与手动合并。
+
+    规则：同作用域任务进行中，或本小时内已有成功完成的新闻采集 → 视为已满足，整点可跳过。
+    """
+    hours = int(window_hours or NEWS_WINDOW_HOURS_24)
+    codes = [c.upper() for c in (module_codes or ["B", "C", "D"])]
+    scope = job_scope(module_codes=codes, window_hours=hours)
+    running = get_running_job_id(scope)
+    if running:
+        return {
+            "satisfied": True,
+            "reason": "running",
+            "scope": scope,
+            "job_id": running,
+            "finished_at": None,
+        }
+
+    now = tokyo_now()
+    hour_start = now.replace(minute=0, second=0, microsecond=0)
+    db = SessionLocal()
+    try:
+        q = (
+            db.query(PipelineJob)
+            .filter(PipelineJob.status == "completed")
+            .filter(PipelineJob.window_hours == hours)
+            .filter(PipelineJob.finished_at.isnot(None))
+            .filter(PipelineJob.finished_at >= hour_start)
+            .order_by(PipelineJob.finished_at.desc())
+        )
+        for row in q.limit(30):
+            try:
+                job_codes = json.loads(row.module_codes or "[]")
+            except json.JSONDecodeError:
+                job_codes = []
+            job_codes_u = {str(c).upper() for c in job_codes}
+            if job_codes_u and job_codes_u <= set(codes):
+                return {
+                    "satisfied": True,
+                    "reason": "completed_this_hour",
+                    "scope": scope,
+                    "job_id": row.job_id,
+                    "finished_at": tokyo_isoformat(row.finished_at),
+                }
+        run = (
+            db.query(ReportRun)
+            .filter(ReportRun.module_code.in_(codes))
+            .filter(ReportRun.window_hours == hours)
+            .filter(ReportRun.finished_at.isnot(None))
+            .filter(ReportRun.finished_at >= hour_start)
+            .filter(ReportRun.status.in_(("completed", "empty")))
+            .order_by(ReportRun.finished_at.desc())
+            .first()
+        )
+        if run:
+            return {
+                "satisfied": True,
+                "reason": "completed_this_hour",
+                "scope": scope,
+                "job_id": None,
+                "finished_at": tokyo_isoformat(run.finished_at),
+            }
+        return {
+            "satisfied": False,
+            "reason": "none",
+            "scope": scope,
+            "job_id": None,
+            "finished_at": None,
+        }
+    finally:
+        db.close()
+
+
 def run_modules_sync(
     *,
     report_date: date,

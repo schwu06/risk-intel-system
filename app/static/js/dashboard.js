@@ -672,27 +672,39 @@
     setPipelineMsg(msgEl, "采集失败，请重新尝试。");
   }
 
-  (function restorePipelineMsg() {
-    var msg = pipelineMsgEl();
-    if (!msg) return;
-    try {
-      var at = sessionStorage.getItem(refreshAtKey());
-      if (at) {
-        setRefreshSuccessMsg(msg, at);
-        return;
-      }
-      var saved = sessionStorage.getItem(refreshMsgKey());
-      if (!saved) return;
-      saved = saved.replace("最近更新时间", "最近刷新时间");
-      // 旧版文案：把 UTC 墙钟误标为本地时间，恢复时按 UTC 转东京
-      var m = saved.match(/^最近刷新时间[（(](\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})[）)]$/);
-      if (m) {
-        setRefreshSuccessMsg(msg, m[1].replace(" ", "T") + "Z");
-        return;
-      }
-      msg.textContent = saved;
-    } catch (e) { /* ignore */ }
-  })();
+  function whenPageGlobalsReady(fn) {
+    // base.html 先加载本文件，再执行 {% block scripts %} 注入 window.*；
+    // 依赖全局变量的初始化必须延后，否则补采/恢复轮询会静默跳过。
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", fn);
+    } else {
+      setTimeout(fn, 0);
+    }
+  }
+
+  whenPageGlobalsReady(function () {
+    (function restorePipelineMsg() {
+      var msg = pipelineMsgEl();
+      if (!msg) return;
+      try {
+        var at = sessionStorage.getItem(refreshAtKey());
+        if (at) {
+          setRefreshSuccessMsg(msg, at);
+          return;
+        }
+        var saved = sessionStorage.getItem(refreshMsgKey());
+        if (!saved) return;
+        saved = saved.replace("最近更新时间", "最近刷新时间");
+        // 旧版文案：把 UTC 墙钟误标为本地时间，恢复时按 UTC 转东京
+        var m = saved.match(/^最近刷新时间[（(](\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})[）)]$/);
+        if (m) {
+          setRefreshSuccessMsg(msg, m[1].replace(" ", "T") + "Z");
+          return;
+        }
+        msg.textContent = saved;
+      } catch (e) { /* ignore */ }
+    })();
+  });
 
   async function pollJob(jobId, msgEl, maxRounds) {
     const rounds = maxRounds || 900; // ~30 分钟（2s 间隔），长任务不再误报超时
@@ -857,13 +869,20 @@
   })();
 
   // 页面加载时若有本作用域未完成任务，恢复轮询（不阻断侧栏/其它界面）
-  (async function resumeActiveJob() {
+  whenPageGlobalsReady(async function resumeActiveJob() {
     try {
       const resp = await fetch(runningQueryUrl());
       const cur = await resp.json();
       let jobId = cur && cur.job_id ? cur.job_id : null;
       if (!jobId) {
         try { jobId = sessionStorage.getItem(jobStorageKey()); } catch (e) { jobId = null; }
+      }
+      // 兼容旧版全局 key，避免遗留“采集中”幽灵轮询
+      if (!jobId) {
+        try {
+          jobId = sessionStorage.getItem("pipeline_active_job_id");
+          if (jobId) sessionStorage.removeItem("pipeline_active_job_id");
+        } catch (e) { jobId = null; }
       }
       if (!jobId) return;
 
@@ -872,6 +891,21 @@
       const jd = await jr.json();
       if (!jr.ok || (jd.status !== "queued" && jd.status !== "running")) {
         rememberJob(null);
+        // 任务已结束：清掉可能残留的「采集中...」文案
+        try {
+          var stale = sessionStorage.getItem(refreshMsgKey());
+          if (stale && stale.indexOf("采集中") === 0) {
+            sessionStorage.removeItem(refreshMsgKey());
+            var msgDone = pipelineMsgEl();
+            if (msgDone && msgDone.textContent && msgDone.textContent.indexOf("采集中") === 0) {
+              if (jd.status === "completed" && jd.finished_at) {
+                setRefreshSuccessMsg(msgDone, jd.finished_at);
+              } else if (jd.status === "failed") {
+                setCollectFailMsg(msgDone);
+              }
+            }
+          }
+        } catch (e2) { /* ignore */ }
         return;
       }
       // 任务作用域须与当前页一致，避免接管其它界面采集
@@ -898,23 +932,41 @@
       setCollectingMsg(msg);
       trackJob(jobId, msg).catch(function () { /* 已在 trackJob 内提示 */ });
     } catch (e) { /* ignore */ }
-  })();
+  });
 
-  // 后台整点采集：只同步「最近刷新时间」，不强制打断当前操作
-  (function syncBackgroundRefreshTime() {
+  // 后台整点采集：数据采完后刷新主内容；手动采集中则不打断
+  whenPageGlobalsReady(function syncBackgroundRefreshTime() {
     var page = window.ACTIVE_PAGE || "";
     if (page !== "daily_news" && page !== "news_7x24") return;
     if (currentEntityId()) return;
+
+    var lastFinishedAt = null;
+    var bootstrapped = false;
+    var CONTENT_REFRESH_KEY = "pipeline_content_refreshed_at:" + collectScopeKey();
 
     function isUserCollectingMsg(text) {
       var t = String(text || "");
       return t.indexOf("采集中") === 0 || t.indexOf("采集失败") === 0;
     }
 
-    async function tick() {
-      if (polling) return;
+    function userCollectBusy() {
+      if (polling) return true;
       var msg = pipelineMsgEl();
-      if (msg && isUserCollectingMsg(msg.textContent)) return;
+      return !!(msg && isUserCollectingMsg(msg.textContent));
+    }
+
+    function softReloadForNewData(finishedAt) {
+      try {
+        var prev = sessionStorage.getItem(CONTENT_REFRESH_KEY);
+        if (prev && prev === String(finishedAt)) return;
+        sessionStorage.setItem(CONTENT_REFRESH_KEY, String(finishedAt));
+      } catch (e) { /* ignore */ }
+      // 仅刷新当前页主内容；不改 URL，不抢手动采集
+      window.location.reload();
+    }
+
+    async function tick() {
+      if (userCollectBusy()) return;
       try {
         var hours = currentWindowHours() || 24;
         var codes = (currentModuleCodes() || []).join(",") || "B,C,D";
@@ -925,21 +977,36 @@
             encodeURIComponent(codes)
         );
         var data = await resp.json();
-        if (!resp.ok || !data || !data.finished_at) return;
+        if (!resp.ok || !data) return;
+        // 后台整点任务进行中：不锁按钮、不改「采集中」文案，等结束后再同步
         if (data.running) return;
-        if (polling) return;
-        msg = pipelineMsgEl();
-        if (msg && isUserCollectingMsg(msg.textContent)) return;
-        setRefreshSuccessMsg(msg, data.finished_at);
+        if (!data.finished_at) return;
+        if (userCollectBusy()) return;
+
+        var finishedAt = String(data.finished_at);
+        var msg = pipelineMsgEl();
+        setRefreshSuccessMsg(msg, finishedAt);
+
+        if (!bootstrapped) {
+          bootstrapped = true;
+          lastFinishedAt = finishedAt;
+          return;
+        }
+        if (lastFinishedAt && lastFinishedAt !== finishedAt) {
+          lastFinishedAt = finishedAt;
+          softReloadForNewData(finishedAt);
+          return;
+        }
+        lastFinishedAt = finishedAt;
       } catch (e) { /* ignore */ }
     }
 
     tick();
     setInterval(tick, 30000);
-  })();
+  });
 
   // 7×24：某日无快照时自动补采并写回数据库
-  (function autoBackfillDaySnapshot() {
+  whenPageGlobalsReady(function autoBackfillDaySnapshot() {
     if (!window.AUTO_BACKFILL) return;
     if (window.ACTIVE_PAGE !== "news_7x24") return;
     var key = "news_7x24_backfill:" + (window.REPORT_DATE || "");
@@ -948,12 +1015,14 @@
       sessionStorage.setItem(key, "1");
     } catch (e) { /* ignore */ }
     var msg = pipelineMsgEl();
+    if (msg) setCollectingMsg(msg);
     setCollectBusy(true);
     runPipeline(null, msg).catch(function () {
       setCollectBusy(false);
+      setCollectFailMsg(msg);
       try { sessionStorage.removeItem(key); } catch (e2) { /* ignore */ }
     });
-  })();
+  });
 
   renderEntryCharts();
 })();

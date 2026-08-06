@@ -34,6 +34,10 @@ from app.schemas import (
     IndustryAnalysisRequest,
     IndustryDataSourceUrlIn,
     IndustryReportOut,
+    IntlRatingRowOut,
+    IntlRatingsJobOut,
+    IntlRatingsRefreshOut,
+    IntlRatingsSnapshotOut,
     ManualEntryIn,
     NewsArticleOut,
     PipelineJobStatusOut,
@@ -72,6 +76,7 @@ from app.services.direct_site_config import (
 )
 from app.services.rss_config import load_rss_config, reload_rss_config
 from app.services.rss_source_service import list_rss_sources_24h
+from app.services.intl_ratings_service import get_job, load_snapshot, start_refresh_job
 from app.timeutil import tokyo_today
 
 router = APIRouter()
@@ -752,3 +757,53 @@ def export_docx(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=filename,
     )
+
+
+# ---------------------------------------------------------------------------
+# 国际评级
+# ---------------------------------------------------------------------------
+
+
+@router.get("/intl-ratings", response_model=IntlRatingsSnapshotOut)
+def get_intl_ratings():
+    """返回最新评级快照；若尚未跑流水线则为占位行。"""
+    snap = load_snapshot()
+    rows = []
+    for r in snap.get("rows") or []:
+        try:
+            rows.append(IntlRatingRowOut.model_validate(r))
+        except Exception:
+            continue
+    return IntlRatingsSnapshotOut(
+        updated_at=snap.get("updated_at"),
+        source=str(snap.get("source") or ""),
+        message=str(snap.get("message") or ""),
+        running=bool(snap.get("running")),
+        rows=rows,
+    )
+
+
+@router.post("/intl-ratings/refresh", response_model=IntlRatingsRefreshOut)
+def refresh_intl_ratings(
+    limit: int = Query(0, ge=0, le=500, description="0=全部；调试可限制家数"),
+    quick: bool = Query(
+        True,
+        description="true=跳过 Playwright/OpenFIGI/SEC（适合网页手动更新）",
+    ),
+):
+    """后台启动评级流水线刷新。"""
+    started = start_refresh_job(limit=limit, quick=quick)
+    return IntlRatingsRefreshOut(
+        job_id=started["job_id"],
+        status=started["status"],
+        message=started["message"],
+        accepted=bool(started.get("accepted", True)),
+    )
+
+
+@router.get("/intl-ratings/jobs/{job_id}", response_model=IntlRatingsJobOut)
+def intl_ratings_job_status(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return IntlRatingsJobOut.model_validate(job)

@@ -112,7 +112,7 @@
           {% if e.summary %}
           <p class="entry-news-summary">{{ e.summary }}</p>
           {% endif %}
-          {% if e.impact_analysis %}
+          {% if e.impact_analysis and '结构化分析暂不可用' not in (e.impact_analysis or '') and 'DeepSeek 暂不可用' not in (e.impact_analysis or '') %}
           <p class="entry-risk-analysis">{{ e.impact_analysis }}</p>
           {% endif %}
           <footer class="risk-event-footer">

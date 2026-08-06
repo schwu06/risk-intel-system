@@ -1,129 +1,19 @@
 /**
- * 国际评级页面：侧栏索引、表格联动、手动更新提示、Excel 导出。
+ * 国际评级页面：从 /api/v1/intl-ratings 拉取快照；手动更新触发后台流水线。
  */
 (function () {
   "use strict";
 
   var CATEGORY_SIMPLE = "简易分类债券";
   var CATEGORY_NON_SIMPLE = "非简易分类债券";
+  var API = "/api/v1/intl-ratings";
 
-  /** 附件发行体列表（已去重，保留分类绑定） */
-  var RAW_ISSUERS = [
-    // 简易分类债券
-    { name: "ABU DHABI COMMERCIAL BANK, ABU DHABI", category: CATEGORY_SIMPLE },
-    { name: "AGRICULTURAL DEVELOPMENT BANK OF CHINA, THE, BEIJING", category: CATEGORY_SIMPLE },
-    { name: "BARCLAYS BANK PLC (ALL U.K. OFFICES)", category: CATEGORY_SIMPLE },
-    { name: "CCBL(Cayman)1 Corporation Limited", category: CATEGORY_SIMPLE },
-    { name: "CDBL FUNDING 1", category: CATEGORY_SIMPLE },
-    { name: "CHINA CINDA FINANCE (2017) I LIMITED", category: CATEGORY_SIMPLE },
-    { name: "CSI_MTN_LIMITED", category: CATEGORY_SIMPLE },
-    { name: "DBS Bank Ltd, Australia Branch", category: CATEGORY_SIMPLE },
-    { name: "EMIRATES NBD BANK PJSC", category: CATEGORY_SIMPLE },
-    { name: "EXPORT-IMPORT BANK OF CHINA, THE, BEIJING", category: CATEGORY_SIMPLE },
-    { name: "EXPORT-IMPORT BANK OF KOREA, THE, SEOUL", category: CATEGORY_SIMPLE },
-    { name: "FIRST ABU DHABI BANK PJSC H.O.", category: CATEGORY_SIMPLE },
-    { name: "ICBCIL FINANCE CO. LIMITED", category: CATEGORY_SIMPLE },
-    { name: "INDUSTRIAL BANK OF KOREA", category: CATEGORY_SIMPLE },
-    { name: "KEB HANA BANK", category: CATEGORY_SIMPLE },
-    { name: "KOREA DEVELOPMENT BANK, THE, SEOUL", category: CATEGORY_SIMPLE },
-    { name: "MITSUBISHI HC CAPITAL INC", category: CATEGORY_SIMPLE },
-    { name: "MITSUBISHI HC CAPITAL UK PLC", category: CATEGORY_SIMPLE },
-    { name: "MIZUHO BANK, LTD", category: CATEGORY_SIMPLE },
-    { name: "NORINCHUKIN BANK,THE,TOKYO", category: CATEGORY_SIMPLE },
-    { name: "QNB Finance Ltd", category: CATEGORY_SIMPLE },
-    { name: "SHINHAN BANK, SEOUL", category: CATEGORY_SIMPLE },
-    { name: "SNB Funding Limited", category: CATEGORY_SIMPLE },
-    { name: "SOCIETE GENERALE, PARIS", category: CATEGORY_SIMPLE },
-    { name: "STANDARD CHARTERED BANK LONDON (ALL U.K. OFFICES)", category: CATEGORY_SIMPLE },
-    { name: "Sumitomo Mitsui Finance and Leasing Company, Limited", category: CATEGORY_SIMPLE },
-    { name: "WESTPAC BANKING CORPORATION", category: CATEGORY_SIMPLE },
-    { name: "交银租赁管理香港有限公司", category: CATEGORY_SIMPLE },
-    { name: "沙特阿拉伯王国政府", category: CATEGORY_SIMPLE },
-    { name: "三井住友信托银行股份有限公司", category: CATEGORY_SIMPLE },
-    { name: "中国光大银行股份有限公司卢森堡分行", category: CATEGORY_SIMPLE },
-    { name: "中银航空租赁有限公司", category: CATEGORY_SIMPLE },
-    { name: "法国BPCE银行", category: CATEGORY_SIMPLE },
-    { name: "法国国民互助信贷银行", category: CATEGORY_SIMPLE },
-    { name: "韩国政府", category: CATEGORY_SIMPLE },
-    // 非简易分类债券（附件中重复名称已去重）
-    { name: "CCCI TREASURE LIMITED", category: CATEGORY_NON_SIMPLE },
-    { name: "CHINA HUANENG GROUP CO., LTD.", category: CATEGORY_NON_SIMPLE },
-    { name: "CHINA SOUTHERN POWER GRID CO., LTD", category: CATEGORY_NON_SIMPLE },
-    { name: "CHINA THREE GORGES CORPORATION", category: CATEGORY_NON_SIMPLE },
-    { name: "CNOOC Limited", category: CATEGORY_NON_SIMPLE },
-    { name: "DENSO CORPORATION", category: CATEGORY_NON_SIMPLE },
-    { name: "Haitong UT Brilliant Limited", category: CATEGORY_NON_SIMPLE },
-    { name: "ITOCHU CORPORATION", category: CATEGORY_NON_SIMPLE },
-    { name: "MARUBENI CORPORATION", category: CATEGORY_NON_SIMPLE },
-    { name: "Mitsubishi Corporation", category: CATEGORY_NON_SIMPLE },
-    { name: "MITSUI & CO.,LTD.", category: CATEGORY_NON_SIMPLE },
-    { name: "ORIX CORPORATION", category: CATEGORY_NON_SIMPLE },
-    { name: "SUMITOMO CORPORATION", category: CATEGORY_NON_SIMPLE },
-    { name: "Suntory Holdings Limited", category: CATEGORY_NON_SIMPLE },
-    { name: "TAKEDA PHARMACEUTICAL COMPANY LIMITED", category: CATEGORY_NON_SIMPLE },
-  ];
-
-  var MOODY_POOL = ["Aaa", "Aa1", "Aa2", "Aa3", "A1", "A2", "A3", "Baa1", "Baa2", "—"];
-  var SP_POOL = ["AAA", "AA+", "AA", "AA-", "A+", "A", "A-", "BBB+", "BBB", "—"];
-  var FITCH_POOL = ["AAA", "AA+", "AA", "AA-", "A+", "A", "A-", "BBB+", "BBB", "—"];
-  var YN = ["是", "否"];
-  var CHANGE_POOL = ["无变化", "上调", "下调", "新评"];
-
-  function hashStr(s) {
-    var h = 0;
-    for (var i = 0; i < s.length; i++) {
-      h = (h << 5) - h + s.charCodeAt(i);
-      h |= 0;
-    }
-    return Math.abs(h);
-  }
-
-  function pick(pool, seed) {
-    return pool[seed % pool.length];
-  }
-
-  function buildMockRow(issuer, index) {
-    var seed = hashStr(issuer.name + "|" + issuer.category);
-    var moodys = pick(MOODY_POOL, seed);
-    var sp = pick(SP_POOL, seed >> 2);
-    var fitch = pick(FITCH_POOL, seed >> 4);
-    var allBlank = moodys === "—" && sp === "—" && fitch === "—";
-    var listed = pick(YN, seed >> 6);
-    var delisted = listed === "是" ? pick(YN, seed >> 8) : "—";
-    return {
-      id: "ir-" + (index + 1),
-      issuer: issuer.name,
-      category: issuer.category,
-      moodys: moodys,
-      sp: sp,
-      fitch: fitch,
-      loss: pick(YN, seed >> 3),
-      listed: listed,
-      delisted: delisted,
-      priceDrop: pick(YN, seed >> 5),
-      noRatingReason: allBlank ? "暂未获公开评级信息，待补充官方披露" : "",
-      ratingChanged: pick(CHANGE_POOL, seed >> 7),
-      rssUrl: "",
-    };
-  }
-
-  function dedupeIssuers(list) {
-    var seen = {};
-    var out = [];
-    list.forEach(function (item) {
-      var key = item.category + "\0" + item.name;
-      if (seen[key]) return;
-      seen[key] = true;
-      out.push(item);
-    });
-    return out;
-  }
-
-  var rows = dedupeIssuers(RAW_ISSUERS).map(buildMockRow);
+  var rows = [];
   var selectedId = null;
   var groupCollapsed = {};
   groupCollapsed[CATEGORY_SIMPLE] = false;
   groupCollapsed[CATEGORY_NON_SIMPLE] = false;
+  var pollTimer = null;
 
   var els = {
     search: document.getElementById("ir-search-input"),
@@ -143,6 +33,12 @@
     els.msg.classList.toggle("is-error", !!isError);
   }
 
+  function setLoading(on) {
+    if (!els.btnRefresh) return;
+    els.btnRefresh.classList.toggle("is-loading", !!on);
+    els.btnRefresh.disabled = !!on;
+  }
+
   function getQuery() {
     return (els.search && els.search.value ? els.search.value : "").trim().toLowerCase();
   }
@@ -151,7 +47,7 @@
     var q = getQuery();
     if (!q) return rows.slice();
     return rows.filter(function (r) {
-      return r.issuer.toLowerCase().indexOf(q) !== -1;
+      return (r.issuer || "").toLowerCase().indexOf(q) !== -1;
     });
   }
 
@@ -257,11 +153,8 @@
               '" title="' +
               escapeHtml(r.issuer) +
               '">' +
-              '<span class="ir-tree-name">' +
               escapeHtml(r.issuer) +
-              "</span>" +
-              "</button>" +
-              "</li>"
+              "</button></li>"
             );
           })
           .join("");
@@ -271,23 +164,17 @@
           '" data-group="' +
           escapeHtml(g.name) +
           '">' +
-          '<button type="button" class="ir-tree-group-head" data-toggle-group="' +
+          '<button type="button" class="ir-tree-group-title" data-toggle-group="' +
           escapeHtml(g.name) +
-          '" aria-expanded="' +
-          (!collapsed ? "true" : "false") +
           '">' +
-          '<span class="ir-tree-chevron" aria-hidden="true"></span>' +
-          '<span class="ir-tree-group-title">' +
+          '<span class="ir-tree-caret" aria-hidden="true"></span>' +
           escapeHtml(g.name) +
-          "</span>" +
-          '<span class="ir-tree-count">' +
+          ' <span class="ir-tree-count">' +
           count +
-          "</span>" +
-          "</button>" +
+          "</span></button>" +
           '<ul class="ir-tree-list" role="group">' +
           itemsHtml +
-          "</ul>" +
-          "</div>"
+          "</ul></div>"
         );
       })
       .join("");
@@ -312,88 +199,65 @@
     });
     if (scroll) {
       var row = document.getElementById("row-" + issuerId);
-      if (row) {
-        row.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
+      if (row) row.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }
 
-  /**
-   * 预留：对接官方 RSS 模块。
-   * @param {string} issuerId
-   */
   function handleOpenRssFeed(issuerId) {
     var row = rows.find(function (r) {
       return r.id === issuerId;
     });
     var name = row ? row.issuer : issuerId;
-    if (row && row.rssUrl) {
-      window.open(row.rssUrl, "_blank", "noopener,noreferrer");
+    var url = row && row.rssUrl ? row.rssUrl : "";
+    if (url) {
+      window.open(url, "_blank", "noopener,noreferrer");
       return;
     }
-    setMsg("「" + name + "」官方 RSS 入口尚未配置，后续可在此对接订阅模块。");
+    setMsg("「" + name + "」暂无官方 RSS 链接，请后续在映射表补充。", true);
   }
-
-  window.handleOpenRssFeed = handleOpenRssFeed;
 
   function exportExcel() {
     if (typeof XLSX === "undefined") {
-      setMsg("导出组件未加载，请检查网络后重试。", true);
+      setMsg("导出组件未加载", true);
       return;
     }
     var list = filteredRows();
     if (!list.length) {
-      setMsg("当前无数据可导出。", true);
+      setMsg("无数据可导出", true);
       return;
     }
-    var sheetData = [
-      [
-        "发行体",
-        "分类",
-        "穆迪评级",
-        "标普评级",
-        "惠誉评级",
-        "债务人最近一期決算是否亏损(是/否)",
-        "是否上市（是/否）",
-        "若上市，债务人是否被上市废止(是/否)",
-        "债券价格是否大幅下跌（月环比跌幅超过5%）",
-        "皆无评级的話请写明理由",
-        "评级是否变化",
-        "官方 RSS 链接",
-      ],
+    var header = [
+      "发行体",
+      "分类",
+      "穆迪评级",
+      "标普评级",
+      "惠誉评级",
+      "债务人最近一期決算是否亏损(是/否)",
+      "是否上市（是/否）",
+      "若上市，债务人是否被上市废止(是/否)",
+      "债券价格是否大幅下跌（月环比跌幅超过5%）等",
+      "皆无评级的話请写明理由",
+      "评级是否变化",
     ];
-    list.forEach(function (r) {
-      sheetData.push([
-        r.issuer,
-        r.category,
-        r.moodys,
-        r.sp,
-        r.fitch,
-        r.loss,
-        r.listed,
-        r.delisted,
-        r.priceDrop,
-        r.noRatingReason,
-        r.ratingChanged,
-        r.rssUrl || "",
-      ]);
-    });
+    var data = [header].concat(
+      list.map(function (r) {
+        return [
+          r.issuer,
+          r.category,
+          r.moodys,
+          r.sp,
+          r.fitch,
+          r.loss,
+          r.listed,
+          r.delisted,
+          r.priceDrop,
+          r.noRatingReason,
+          r.ratingChanged,
+        ];
+      })
+    );
+    var ws = XLSX.utils.aoa_to_sheet(data);
     var wb = XLSX.utils.book_new();
-    var ws = XLSX.utils.aoa_to_sheet(sheetData);
-    ws["!cols"] = [
-      { wch: 42 },
-      { wch: 14 },
-      { wch: 10 },
-      { wch: 10 },
-      { wch: 10 },
-      { wch: 18 },
-      { wch: 12 },
-      { wch: 18 },
-      { wch: 22 },
-      { wch: 28 },
-      { wch: 12 },
-      { wch: 24 },
-    ];
     XLSX.utils.book_append_sheet(wb, ws, "国际评级");
     var stamp = new Date();
     var pad = function (n) {
@@ -412,21 +276,89 @@
     setMsg("已导出 " + list.length + " 条记录：" + filename);
   }
 
-  function manualRefresh() {
-    if (els.btnRefresh) {
-      els.btnRefresh.classList.add("is-loading");
-      els.btnRefresh.disabled = true;
+  function applySnapshot(data) {
+    rows = (data.rows || []).slice();
+    refresh();
+    var tip = data.message || "";
+    if (data.updated_at) {
+      tip = (tip ? tip + " " : "") + "更新于 " + data.updated_at + " · 共 " + rows.length + " 家";
+    } else if (!tip) {
+      tip = "共 " + rows.length + " 家发行体";
     }
-    setMsg("正在更新评级数据…");
-    window.setTimeout(function () {
-      rows = dedupeIssuers(RAW_ISSUERS).map(buildMockRow);
-      refresh();
-      if (els.btnRefresh) {
-        els.btnRefresh.classList.remove("is-loading");
-        els.btnRefresh.disabled = false;
-      }
-      setMsg("评级数据已更新（演示样本）。共 " + rows.length + " 家发行体。");
-    }, 600);
+    setMsg(tip, data.source === "skeleton");
+  }
+
+  function loadSnapshot() {
+    return fetch(API)
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(applySnapshot)
+      .catch(function (err) {
+        setMsg("加载评级数据失败：" + (err.message || err), true);
+      });
+  }
+
+  function stopPoll() {
+    if (pollTimer) {
+      window.clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function pollJob(jobId) {
+    stopPoll();
+    pollTimer = window.setInterval(function () {
+      fetch(API + "/jobs/" + encodeURIComponent(jobId))
+        .then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        })
+        .then(function (job) {
+          setMsg(job.message || job.status);
+          if (job.status === "succeeded" || job.status === "failed") {
+            stopPoll();
+            setLoading(false);
+            if (job.status === "failed") {
+              setMsg("更新失败：" + (job.error || job.message), true);
+            }
+            return loadSnapshot().then(function () {
+              if (job.status === "succeeded") {
+                setMsg(job.message || "评级数据已更新");
+              }
+            });
+          }
+        })
+        .catch(function (err) {
+          stopPoll();
+          setLoading(false);
+          setMsg("查询任务失败：" + (err.message || err), true);
+        });
+    }, 2000);
+  }
+
+  function manualRefresh() {
+    setLoading(true);
+    setMsg("正在启动评级流水线（快速模式）…");
+    // quick=true：网页刷新跳过 Playwright，避免长时间阻塞
+    fetch(API + "/refresh?quick=true", { method: "POST" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        setMsg(data.message || "任务已启动");
+        if (data.job_id) {
+          pollJob(data.job_id);
+        } else {
+          setLoading(false);
+        }
+      })
+      .catch(function (err) {
+        setLoading(false);
+        setMsg("启动刷新失败：" + (err.message || err), true);
+      });
   }
 
   function bindEvents() {
@@ -480,5 +412,6 @@
   }
 
   bindEvents();
-  refresh();
+  setMsg("正在加载评级数据…");
+  loadSnapshot();
 })();

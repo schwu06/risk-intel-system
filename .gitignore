@@ -11,6 +11,13 @@ __pycache__/
 *.sqlite3
 data/uploads/
 data/exports/
+data/intl_ratings/output/
+data/intl_ratings/sec_edgar/
+data/intl_ratings/latest.json
+data/intl_ratings/entity_map_cache.json
+logs/raw_responses/
+logs/intl_ratings/
+logs/error.log
 .env
 .idea/
 .vscode/

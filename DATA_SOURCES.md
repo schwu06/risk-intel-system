@@ -138,12 +138,23 @@
 
 | 功能 | 数据来源 | 链接方式 |
 |------|----------|----------|
-| 发行体列表与评级表 | 前端样例数据 | `app/static/js/intl_ratings.js` 本地生成 |
+| 发行体列表与评级表 | 流水线快照 `data/intl_ratings/latest.json` | `GET /api/v1/intl-ratings` |
 | 搜索 / 侧栏索引 | 同上 | 浏览器内过滤 |
-| 手动更新 | 重新生成演示样本 | 不拉外网评级接口 |
+| 手动更新 | `intl_ratings` 后台任务（默认 quick） | `POST /api/v1/intl-ratings/refresh` |
 | 导出 Excel | 当前表格 | 浏览器端导出 |
+| CLI 全量 | `python -m intl_ratings.main` | 含 Playwright 等完整源 |
+| 近 90 日评级变动 | **待补充** | `rating_change_feed` |
+| 归母净利润 | `yfinance.Ticker.financials['Net Income']`；A股 `ak.stock_financial_abstract`；美股另存 SEC 原文 | SPV 继承母公司 |
+| 国内公告 | AkShare 巨潮 `stock_zh_a_disclosure_report_cninfo` 等 | 落盘 `logs/raw_responses/` |
+| 美股 SEC 财报 | `sec-edgar-downloader`（10-K/10-Q） | `data/intl_ratings/sec_edgar/`，需 `us_ticker`/`cik` |
+| 债券月环比跌幅 | `tvDatafeed.get_hist` 优先；其次 `yfinance.history(period="1mo")` | `issuers.json` 填 `tv_symbol`/`tv_exchange` |
+| 皆无评级理由 | DeepSeek `temperature=0.1` JSON | 三大均为 NR 时触发 |
+| 导出 Excel | 灰底表头、居中、列宽自适应 | `data/intl_ratings/output/` |
+| 溯源 | `logs/raw_responses/`、`logs/error.log` | |
 
-说明：当前为演示界面，未接入穆迪 / 标普 / 惠誉等真实数据源。
+CLI：`python -m intl_ratings.main`。配置：`config/intl_ratings.yaml`、`config/issuers.json`。
+
+说明：`ak.stock_comment_detail_zjl_em` 为资金流接口，**不是**三大机构主体评级，代码仅探测落盘，不写入评级列。
 
 ---
 

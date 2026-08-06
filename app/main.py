@@ -20,10 +20,11 @@ from app.services.data_source_service import list_all_sources, list_industry_sou
 from app.services.display_zh import build_display_cards
 from app.services.domain_rules import seed_default_domains
 from app.services.industry_analysis import IndustryAnalysisService
+from app.services.news_section_router import item_in_module_scope
 from app.services.pipeline import RISK_LEVEL_ORDER
 from app.services.scheduler import shutdown_scheduler, start_scheduler
-from app.timeutil import tokyo_day_tabs, tokyo_today
 from app.services.social_source import resolve_social_source
+from app.timeutil import tokyo_day_tabs, tokyo_today
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
@@ -177,7 +178,19 @@ def _daily_news_context(
     )
     if selected:
         q = q.filter(NewsArticle.module_code == selected)
-    entries = _sort_news(q.all())
+    raw_entries = _sort_news(q.all())
+    # 展示层再滤一遍，立刻隐藏历史越界旧数据（科普/彩票/非本板块等）
+    entries: list[NewsArticle] = []
+    for e in raw_entries:
+        ok, _ = item_in_module_scope(
+            e.module_code,
+            title=e.title or "",
+            content=f"{e.summary or ''} {e.impact_analysis or ''}",
+            source=str(e.source_title or e.source_url or ""),
+            related_company=str(e.related_company or ""),
+        )
+        if ok:
+            entries.append(e)
 
     def _social_for(e: NewsArticle) -> dict:
         return resolve_social_source(

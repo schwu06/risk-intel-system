@@ -200,3 +200,46 @@ class CreditUpdateOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class IntlRatingRowOut(BaseModel):
+    id: str
+    issuer: str
+    category: str = ""
+    moodys: str = "NR"
+    sp: str = "NR"
+    fitch: str = "NR"
+    loss: str = ""
+    listed: str = ""
+    delisted: str = ""
+    priceDrop: str = ""
+    noRatingReason: str = ""
+    ratingChanged: str = ""
+    rssUrl: str = ""
+
+
+class IntlRatingsSnapshotOut(BaseModel):
+    updated_at: Optional[str] = None
+    source: str = ""
+    message: str = ""
+    running: bool = False
+    rows: list[IntlRatingRowOut] = Field(default_factory=list)
+
+
+class IntlRatingsRefreshOut(BaseModel):
+    job_id: str
+    status: str
+    message: str
+    accepted: bool = True
+
+
+class IntlRatingsJobOut(BaseModel):
+    job_id: str
+    status: str
+    message: str = ""
+    total: int = 0
+    done: int = 0
+    error: str = ""
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    excel: str = ""

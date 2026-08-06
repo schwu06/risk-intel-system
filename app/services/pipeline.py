@@ -42,7 +42,9 @@ from app.services.news_quality import (
     is_substantive_news_item,
 )
 from app.services.news_section_router import (
+    filter_candidate_items,
     filter_rows_for_module,
+    item_in_module_scope,
     route_news_sections,
 )
 from app.services.recency import is_within_hours, parse_published_at
@@ -61,6 +63,35 @@ NEWS_MODULES = set(PAGE_MODULES.get("daily_news", ("B", "C", "D"))) | set(
     PAGE_MODULES.get("news_7x24", ())
 )
 ENTITY_MODULES = set(PAGE_MODULES.get("entity_assessment", ("A",)))
+
+
+def _llm_failure_reason(exc: BaseException) -> str:
+    """将 DeepSeek/网络异常归纳为卡片可展示的短原因。"""
+    text = str(exc or "").strip()
+    low = text.lower()
+    if not text:
+        return "模型调用异常"
+    if "api key" in low or "鉴权" in text or "401" in text or "403" in text:
+        return "API密钥或鉴权失败"
+    if "429" in text or "rate" in low or "限流" in text:
+        return "接口限流"
+    if "timeout" in low or "timed out" in low or "超时" in text:
+        return "网络超时"
+    if "connect" in low or "dns" in low or "name resolution" in low or "连接" in text:
+        return "网络连接失败"
+    if "json" in low or "解析" in text or "parse" in low:
+        return "模型返回无法解析"
+    if "placeholder" in low or "未配置" in text:
+        return "DeepSeek未配置"
+    short = text.replace("\n", " ")
+    if len(short) > 48:
+        short = short[:48] + "…"
+    return short
+
+
+def _degraded_impact_text(reason: str) -> str:
+    r = (reason or "").strip() or "模型分析失败"
+    return f"结构化分析暂不可用（原因：{r}），已按原始摘要入库，请人工复核。"
 
 
 class RiskPipeline:
@@ -151,6 +182,7 @@ class RiskPipeline:
         run = self._ensure_run(report_date, module_code)
         # 先清掉历史误入库的检索入口占位，避免页面继续展示假新闻
         purged_early = self._purge_non_news_placeholders(report_date, module_code)
+        purged_scope = self._purge_out_of_scope_entries(report_date, module_code)
         previous_count = self._count_existing(report_date, module_code)
         funnel: dict[str, Any] = {
             "previous_count": previous_count,
@@ -173,6 +205,7 @@ class RiskPipeline:
             "kept_previous": False,
             "source_fail": [],
             "purged_placeholders": purged_early,
+            "purged_out_of_scope": purged_scope,
         }
 
         whitelist = get_active_whitelist(self.db, module_code)
@@ -464,15 +497,16 @@ class RiskPipeline:
             funnel["after_quality_filter"] = len(pending_rows)
             if module_code in NEWS_MODULES:
                 pending_rows, route_stats = filter_rows_for_module(
-                    pending_rows, module_code, keep_unmatched=True
+                    pending_rows, module_code, keep_unmatched=False
                 )
                 funnel["after_section_route"] = len(pending_rows)
                 funnel["section_route"] = route_stats
-                if route_stats.get("routed_out"):
+                if route_stats.get("routed_out") or route_stats.get("excluded_topic"):
                     logger.info(
-                        "模块 %s 分类路由剔除 %s 条（双投 %s）",
+                        "模块 %s 分类路由剔除 %s 条（主题排除 %s，双投 %s）",
                         module_code,
                         route_stats.get("routed_out"),
+                        route_stats.get("excluded_topic"),
                         route_stats.get("dual"),
                     )
             self._save_artifact(
@@ -543,7 +577,11 @@ class RiskPipeline:
                         else "今日无动态"
                     )
                 else:
-                    # 无新产出：保留旧数据，避免页面变空白
+                    # 无新产出：保留旧数据，但先清掉越界旧条目（娱乐/非本板块等）
+                    purged_scope = self._purge_out_of_scope_entries(report_date, module_code)
+                    if purged_scope:
+                        funnel["purged_out_of_scope"] = purged_scope
+                        previous_count = self._count_existing(report_date, module_code)
                     funnel["kept_previous"] = True
                     run.kept_previous = True
                     run.entry_count = previous_count
@@ -972,7 +1010,7 @@ class RiskPipeline:
         }
 
     def _count_valid_items(self, items: list[dict[str, Any]], module_code: str) -> int:
-        """近窗内、有实质内容、按指纹去重后的条数。"""
+        """近窗内、有实质内容、符合板块范围、按指纹去重后的条数。"""
         seen: set[str] = set()
         n = 0
         for it in items or []:
@@ -982,6 +1020,16 @@ class RiskPipeline:
                 it.get("published_at"), self.window_hours, allow_unknown=True
             ):
                 continue
+            if module_code in NEWS_MODULES:
+                ok, _ = item_in_module_scope(
+                    module_code,
+                    title=str(it.get("title") or ""),
+                    content=str(it.get("snippet") or it.get("body") or ""),
+                    source=str(it.get("feed") or it.get("source_domain") or ""),
+                    related_company=str(it.get("company") or ""),
+                )
+                if not ok:
+                    continue
             fp = it.get("fingerprint") or content_fingerprint(
                 module_code=module_code,
                 title=it.get("title"),
@@ -1098,6 +1146,19 @@ class RiskPipeline:
             return rows
 
         unique = self._unique_source_items(merged_items, module_code)
+        if module_code in NEWS_MODULES:
+            before = len(unique)
+            unique, dropped = filter_candidate_items(unique, module_code)
+            funnel["scope_prefilter_dropped"] = int(
+                funnel.get("scope_prefilter_dropped") or 0
+            ) + dropped
+            if dropped:
+                logger.info(
+                    "模块 %s LLM 前范围预过滤剔除 %s/%s 条",
+                    module_code,
+                    dropped,
+                    before,
+                )
         funnel["after_event_dedup"] = len(unique)
         metadata = {"source": "merged"}
         authority_first = bool(funnel.get("authority"))
@@ -1203,7 +1264,7 @@ class RiskPipeline:
         funnel: dict[str, Any],
         source_label: str,
     ) -> list[dict[str, Any]]:
-        """按批调用 LLM；漏掉的候选用原文降级补齐，保证不因截断丢条。"""
+        """按批调用 LLM；漏条再强制补分析一次，尽量避免「结构化分析暂不可用」。"""
         if not items:
             return []
         batch_size = max(1, self.llm_top_k)
@@ -1211,57 +1272,154 @@ class RiskPipeline:
         for start in range(0, len(items), batch_size):
             chunk = items[start : start + batch_size]
             funnel["sent_llm"] = int(funnel.get("sent_llm") or 0) + len(chunk)
-            web_text = json.dumps(chunk, ensure_ascii=False, indent=2)
-            combined = web_text
-            if authority_text:
-                combined = (
-                    f"=== 权威数据源（优先参考）===\n{authority_text[:20000]}\n\n"
-                    f"=== {source_label} 近{self.window_hours}小时候选 ===\n{web_text}"
+            try:
+                tagged = self._llm_tag_chunk(
+                    chunk,
+                    module_code=module_code,
+                    report_date=report_date,
+                    authority_text=authority_text,
+                    metadata=metadata,
+                    authority_first=authority_first,
+                    funnel=funnel,
+                    source_label=source_label,
+                    chunk_offset=start,
+                    force_cover=False,
                 )
+                missing = self._unmatched_chunk_items(chunk, tagged)
+                if missing:
+                    funnel["llm_cover_retry"] = int(funnel.get("llm_cover_retry") or 0) + len(
+                        missing
+                    )
+                    logger.info(
+                        "LLM 未覆盖 %s 条，强制补分析 (%s#%s)",
+                        len(missing),
+                        source_label,
+                        start,
+                    )
+                    retry_tagged = self._llm_tag_chunk(
+                        missing,
+                        module_code=module_code,
+                        report_date=report_date,
+                        authority_text="",
+                        metadata=metadata,
+                        authority_first=False,
+                        funnel=funnel,
+                        source_label=f"{source_label}_cover",
+                        chunk_offset=start,
+                        force_cover=True,
+                    )
+                    tagged = list(tagged) + list(retry_tagged)
+                filled = self._reconcile_chunk_rows(
+                    chunk, tagged, metadata, module_code=module_code, funnel=funnel
+                )
+                out.extend(filled)
+            except Exception as exc:
+                reason = _llm_failure_reason(exc)
+                logger.warning(
+                    "LLM 分析失败，改用原文结构化兜底 (%s#%s): %s [%s]",
+                    source_label,
+                    start,
+                    exc,
+                    reason,
+                )
+                fallback = self._fallback_structure_items(chunk, metadata)
+                funnel["structure_fallback"] = int(funnel.get("structure_fallback") or 0) + len(
+                    fallback
+                )
+                funnel["source_fail"].append(f"{source_label}_llm")
+                out.extend(fallback)
+        return out
+
+    def _llm_tag_chunk(
+        self,
+        chunk: list[dict[str, Any]],
+        *,
+        module_code: str,
+        report_date: date,
+        authority_text: str,
+        metadata: dict[str, Any],
+        authority_first: bool,
+        funnel: dict[str, Any],
+        source_label: str,
+        chunk_offset: int,
+        force_cover: bool,
+    ) -> list[dict[str, Any]]:
+        if not chunk:
+            return []
+        web_text = json.dumps(chunk, ensure_ascii=False, indent=2)
+        combined = web_text
+        if authority_text:
+            combined = (
+                f"=== 权威数据源（优先参考）===\n{authority_text[:20000]}\n\n"
+                f"=== {source_label} 近{self.window_hours}小时候选 ===\n{web_text}"
+            )
+        structured = None
+        last_exc: Optional[BaseException] = None
+        for attempt in range(2):
             try:
                 structured = self._llm_analyze(
                     combined,
                     module_code=module_code,
                     report_date=report_date,
-                    source=f"{source_label}:{start}",
+                    source=f"{source_label}:{chunk_offset}:c{int(force_cover)}",
                     authority_first=authority_first,
                     funnel=funnel,
                     context={
                         "report_date": report_date.isoformat(),
                         "source": source_label,
                         "window_hours": self.window_hours,
-                        "chunk_offset": start,
+                        "chunk_offset": chunk_offset,
                         "chunk_size": len(chunk),
+                        "attempt": attempt + 1,
+                        "force_cover": force_cover,
                     },
                 )
-                tagged = []
-                if structured:
-                    tagged = filter_publishable_rows(
-                        self._tag_rows(
-                            structured,
-                            metadata,
-                            chunk,
-                            module_code=module_code,
-                            degraded=False,
-                        )
-                    )
-                # LLM 漏掉的不重复候选 → 降级补齐
-                filled = self._reconcile_chunk_rows(
-                    chunk, tagged, metadata, module_code=module_code, funnel=funnel
-                )
-                out.extend(filled)
+                last_exc = None
+                break
             except Exception as exc:
-                logger.warning(
-                    "LLM 分析失败，降级入库实质原始条目 (%s#%s): %s",
-                    source_label,
-                    start,
-                    exc,
-                )
-                degraded = self._degrade_items(chunk, metadata)
-                funnel["degraded"] = int(funnel.get("degraded") or 0) + len(degraded)
-                funnel["source_fail"].append(f"{source_label}_llm")
-                out.extend(degraded)
-        return out
+                last_exc = exc
+                if attempt == 0:
+                    logger.warning(
+                        "LLM 分析失败将重试一次 (%s#%s): %s",
+                        source_label,
+                        chunk_offset,
+                        exc,
+                    )
+                    time.sleep(0.8)
+                    continue
+        if last_exc is not None:
+            raise last_exc
+        if not structured:
+            return []
+        return filter_publishable_rows(
+            self._tag_rows(
+                structured,
+                metadata,
+                chunk,
+                module_code=module_code,
+                degraded=False,
+            )
+        )
+
+    def _unmatched_chunk_items(
+        self,
+        chunk: list[dict[str, Any]],
+        tagged: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        used: set[int] = set()
+        for row in tagged:
+            src_url = (row.get("来源链接") or "").strip()
+            title = row.get("标题") or ""
+            for i, it in enumerate(chunk):
+                if i in used:
+                    continue
+                if src_url and (it.get("url") or "").strip() == src_url:
+                    used.add(i)
+                    break
+                if titles_similar(title, it.get("title")):
+                    used.add(i)
+                    break
+        return [it for i, it in enumerate(chunk) if i not in used]
 
     def _reconcile_chunk_rows(
         self,
@@ -1272,7 +1430,7 @@ class RiskPipeline:
         module_code: str,
         funnel: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """将 LLM 结果与候选对齐：有结构化的用结构化，没有的用原文降级保留。"""
+        """将 LLM 结果与候选对齐；仍缺的用原文生成可展示结构化行（不再展示系统失败提示）。"""
         used: set[int] = set()
         rows: list[dict[str, Any]] = []
         for row in tagged:
@@ -1290,13 +1448,53 @@ class RiskPipeline:
                     break
         missing = [it for i, it in enumerate(chunk) if i not in used]
         if missing:
-            extra = self._degrade_items(missing, metadata)
-            funnel["degraded"] = int(funnel.get("degraded") or 0) + len(extra)
+            # 末级兜底：用原文组装正常字段，避免页面出现「结构化分析暂不可用」
+            extra = self._fallback_structure_items(missing, metadata)
+            funnel["structure_fallback"] = int(funnel.get("structure_fallback") or 0) + len(
+                extra
+            )
             rows.extend(extra)
-        # 再按标题相似压一次（LLM 可能仍输出重复）
         return dedupe_by_title_similarity(
             rows, title_getter=lambda r: r.get("标题") or r.get("title")
         )
+
+    def _fallback_structure_items(
+        self,
+        items: list[dict[str, Any]],
+        metadata: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """LLM 仍未覆盖时，基于原文生成可展示条目（无系统失败提示）。"""
+        rows: list[dict[str, Any]] = []
+        for it in items:
+            if not is_substantive_news_item(it):
+                continue
+            title = (it.get("title") or "未命名条目").strip()
+            snippet = (it.get("snippet") or it.get("body") or "").strip()
+            if len(snippet) < 12:
+                continue
+            summary = snippet[:800]
+            rows.append(
+                {
+                    "标题": title,
+                    "关联企业": it.get("company")
+                    or metadata.get("company")
+                    or metadata.get("target")
+                    or "",
+                    "风险类别": metadata.get("category") or metadata.get("topic") or "资讯快讯",
+                    "风险等级": "中",
+                    "核心摘要": summary,
+                    "影响分析": summary[:280],
+                    "来源链接": it.get("url") or "",
+                    "来源名称": it.get("publisher") or it.get("feed") or "",
+                    "发布时间": it.get("published_at") or "",
+                    "_degraded": False,
+                    "_structure_fallback": True,
+                    "_fingerprint": it.get("fingerprint"),
+                    "_metadata": metadata,
+                    "_source_item": it,
+                }
+            )
+        return filter_publishable_rows(rows)
 
     def _llm_analyze(
         self,
@@ -1346,9 +1544,14 @@ class RiskPipeline:
         return ranked[: max(1, top_k)]
 
     def _degrade_items(
-        self, items: list[dict[str, Any]], metadata: dict[str, Any]
+        self,
+        items: list[dict[str, Any]],
+        metadata: dict[str, Any],
+        *,
+        reason: str = "模型分析失败",
     ) -> list[dict[str, Any]]:
         rows = []
+        impact = _degraded_impact_text(reason)
         for it in items:
             if not is_substantive_news_item(it):
                 continue
@@ -1366,17 +1569,85 @@ class RiskPipeline:
                     "风险类别": metadata.get("category") or metadata.get("topic") or "资讯快讯",
                     "风险等级": "中",
                     "核心摘要": snippet[:800],
-                    "影响分析": "结构化分析暂不可用，已按原始摘要入库，请人工复核。",
+                    "影响分析": impact,
                     "来源链接": it.get("url") or "",
                     "来源名称": it.get("publisher") or it.get("feed") or "",
                     "发布时间": it.get("published_at") or "",
                     "_degraded": True,
+                    "_degrade_reason": reason,
                     "_fingerprint": it.get("fingerprint"),
                     "_metadata": metadata,
                     "_source_item": it,
                 }
             )
         return filter_publishable_rows(rows)
+
+    def _purge_out_of_scope_entries(self, report_date: date, module_code: str) -> int:
+        """删除已入库但不符合当前板块范围的条目（如中东栏里的科普/彩票）。"""
+        if module_code not in NEWS_MODULES:
+            return 0
+        removed = 0
+        rows = (
+            self.db.query(NewsArticle)
+            .filter(
+                NewsArticle.report_date == report_date,
+                NewsArticle.module_code == module_code,
+                NewsArticle.window_hours == self.persist_hours,
+            )
+            .all()
+        )
+        for row in rows:
+            ok, _reason = item_in_module_scope(
+                module_code,
+                title=row.title or "",
+                content=f"{row.summary or ''} {row.impact_analysis or ''}",
+                source=str(row.source_title or row.source_url or ""),
+                related_company=str(row.related_company or ""),
+            )
+            if ok:
+                continue
+            legacy_id = row.legacy_entry_id
+            row.legacy_entry_id = None
+            self.db.flush()
+            self.db.delete(row)
+            self.db.flush()
+            if legacy_id:
+                self.db.query(DailyRiskEntry).filter(
+                    DailyRiskEntry.id == legacy_id
+                ).delete(synchronize_session=False)
+            removed += 1
+        legacy = (
+            self.db.query(DailyRiskEntry)
+            .filter(
+                DailyRiskEntry.report_date == report_date,
+                DailyRiskEntry.module_code == module_code,
+                DailyRiskEntry.window_hours == self.persist_hours,
+            )
+            .all()
+        )
+        for row in legacy:
+            still = (
+                self.db.query(NewsArticle)
+                .filter(NewsArticle.legacy_entry_id == row.id)
+                .first()
+            )
+            if still:
+                continue
+            ok, _reason = item_in_module_scope(
+                module_code,
+                title=row.title or "",
+                content=f"{row.summary or ''} {row.impact_analysis or ''}",
+                source=str(row.source_title or row.source_url or ""),
+                related_company=str(row.related_company or ""),
+            )
+            if ok:
+                continue
+            self.db.delete(row)
+            removed += 1
+        if removed:
+            self.db.commit()
+            logger.info("模块 %s 已清理越界条目 %d 条", module_code, removed)
+        return removed
 
     def _purge_non_news_placeholders(self, report_date: date, module_code: str) -> int:
         """删除已入库的披露检索等非新闻占位。"""

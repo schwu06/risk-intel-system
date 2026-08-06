@@ -7,7 +7,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import NEWS_WINDOW_HOURS_24, PAGE_MODULES, get_settings
-from app.services.pipeline_runner import run_modules_sync, start_pipeline_job
+from app.services.pipeline_runner import (
+    news_hour_slot_satisfied,
+    run_modules_sync,
+    start_pipeline_job,
+)
 from app.timeutil import TOKYO, tokyo_today
 
 logger = logging.getLogger(__name__)
@@ -27,8 +31,25 @@ def _daily_job():
 
 
 def _hourly_news_job():
-    """东京整点：仅采集近24小时新闻（B/C/D）。作用域忙碌时跳过，不打断界面操作。"""
+    """东京整点：采集近24小时新闻（B/C/D）并写库。
+
+    与手动采集合并：本小时已有手动/自动成功结果，或同作用域正在跑 → 跳过，
+    保证每个整点时段至少一次采集，且不被其它界面取消。
+    """
     rd = tokyo_today()
+    slot = news_hour_slot_satisfied(
+        window_hours=NEWS_WINDOW_HOURS_24,
+        module_codes=_NEWS_MODULES,
+    )
+    if slot.get("satisfied"):
+        logger.info(
+            "整点新闻采集跳过（本小时已由手动/自动满足）reason=%s job_id=%s finished_at=%s",
+            slot.get("reason"),
+            slot.get("job_id"),
+            slot.get("finished_at"),
+        )
+        return
+
     logger.info("整点新闻采集启动 report_date=%s", rd.isoformat())
     try:
         started = start_pipeline_job(
@@ -38,7 +59,7 @@ def _hourly_news_job():
         )
         if not started.get("accepted"):
             logger.info(
-                "整点新闻采集跳过（作用域忙）: %s job_id=%s",
+                "整点新闻采集跳过（手动或其他同作用域任务进行中）: %s job_id=%s",
                 started.get("message"),
                 started.get("job_id"),
             )

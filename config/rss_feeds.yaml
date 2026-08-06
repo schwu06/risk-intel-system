@@ -120,9 +120,15 @@ feeds:
     type: direct
     priority: 28
     enabled: true
+  - label: BBC Middle East
+    url: "http://feeds.bbci.co.uk/news/world/middle_east/rss.xml"
+    modules: [B, D]
+    type: direct
+    priority: 28
+    enabled: true
   - label: BBC World
     url: "http://feeds.bbci.co.uk/news/world/rss.xml"
-    modules: [B, D]
+    modules: [D]
     type: direct
     priority: 25
     enabled: true
@@ -135,7 +141,7 @@ feeds:
     enabled: true
   - label: NHK 国際
     url: "https://www3.nhk.or.jp/rss/news/cat6.xml"
-    modules: [B, D]
+    modules: [D]
     type: direct
     priority: 22
     enabled: true

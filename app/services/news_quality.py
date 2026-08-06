@@ -98,9 +98,8 @@ def filter_publishable_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # 影响分析若仅为降级提示且摘要也像占位，丢弃
         impact = str(row.get("影响分析") or "")
         summary = str(row.get("核心摘要") or "")
-        if "DeepSeek 暂不可用" in impact and (
-            is_reference_only_item(probe) or len(summary) < 20
-        ):
-            continue
+        if "DeepSeek 暂不可用" in impact or "结构化分析暂不可用" in impact:
+            if is_reference_only_item(probe) or len(summary) < 20:
+                continue
         out.append(row)
     return out

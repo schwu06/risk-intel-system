@@ -17,3 +17,14 @@ feedparser==6.0.11
 trafilatura==2.0.0
 PyYAML==6.0.2
 beautifulsoup4==4.12.3
+pandas==2.2.3
+openai==1.58.1
+
+# 界面四：开源数据抓取库
+yfinance==0.2.51
+akshare>=1.16.72
+sec-edgar-downloader>=5.0.2
+# TradingView（需本机已安装 git）
+# 若 git 安装失败，可改为: pip install git+https://github.com/rongardF/tvdatafeed.git
+tvdatafeed @ git+https://github.com/rongardF/tvdatafeed.git
+playwright==1.49.1
