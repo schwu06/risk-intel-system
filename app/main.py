@@ -12,14 +12,21 @@ from sqlalchemy.orm import Session
 
 from app.api.routes import router as api_router
 from app.config import CREDIT_LEVELS, MODULE_CODES, PAGE_META, get_settings, modules_for_page
-from app.database.models import CreditUpdate, EntityRisk, NewsArticle, ReportRun, SearchLog, TargetEntity
+from app.database.models import (
+    CreditUpdate, EntityRisk, IndustryGroundedReportRun, NewsArticle,
+    ReportRun, SearchLog, TargetEntity,
+)
 from app.database.session import get_db, init_db
 from app.services.api_keys import is_placeholder_key
 from app.services.data_bridge import migrate_legacy_data
-from app.services.data_source_service import list_all_sources, list_industry_sources, list_module_sources
+from app.services.data_source_service import list_industry_sources
 from app.services.display_zh import build_display_cards
 from app.services.domain_rules import seed_default_domains
 from app.services.industry_analysis import IndustryAnalysisService
+from app.services.citation_rendering import (
+    CitationPresentationError, build_citation_context, render_report_html,
+)
+from app.services.evidence_packet import build_evidence_packet
 from app.services.pipeline import RISK_LEVEL_ORDER
 from app.services.scheduler import shutdown_scheduler, start_scheduler
 from app.services.social_source import resolve_social_source
@@ -91,24 +98,6 @@ def _sort_news(entries: list[NewsArticle]) -> list[NewsArticle]:
             e.id,
         ),
     )
-
-
-def _source_drawer_context(
-    db: Session,
-    *,
-    industry_name: str | None = None,
-    entity_id: int | None = None,
-) -> dict:
-    """数据源抽屉：风险日报用全站源；主体评估用当前主体专属源。"""
-    sources = list_all_sources(db, entity_id=entity_id)
-    return {
-        "drawer_sources": sources,
-        "drawer_modules": dict(MODULE_CODES),
-        "drawer_module_sources": {},
-        "drawer_industry_sources": [],
-        "drawer_industry_name": industry_name or "",
-        "drawer_entity_id": entity_id,
-    }
 
 
 def _news_charts_json(entries: list[NewsArticle]) -> str:
@@ -228,8 +217,6 @@ def _daily_news_context(
         else:
             module_ui[code] = {"state": "idle", "message": "尚未采集，请点击侧边栏运行流水线。"}
 
-    module_sources = {code: list_module_sources(db, code) for code in allowed_codes}
-
     return {
         "request": request,
         "app_name": settings.app_name,
@@ -246,10 +233,8 @@ def _daily_news_context(
         "stats": stats,
         "run_map": run_map,
         "module_ui": module_ui,
-        "module_sources": module_sources,
         "entry_charts_json": _news_charts_json(entries),
         "pages": PAGE_META,
-        **_source_drawer_context(db),
     }
 
 
@@ -309,7 +294,6 @@ def _entity_assessment_context(
         if ent.credit_level in credit_counts:
             credit_counts[ent.credit_level] += 1
 
-    module_sources = {code: list_module_sources(db, code) for code in allowed_codes}
     runs = (
         db.query(ReportRun)
         .filter(ReportRun.report_date == rd)
@@ -335,12 +319,8 @@ def _entity_assessment_context(
         "credit_logs": credit_logs,
         "credit_levels": CREDIT_LEVELS,
         "credit_counts": credit_counts,
-        "module_sources": module_sources,
         "run_map": run_map,
         "pages": PAGE_META,
-        **_source_drawer_context(
-            db, entity_id=selected_entity.id if selected_entity else None
-        ),
     }
 
 
@@ -401,8 +381,44 @@ def deep_reports_page(
     elif reports:
         selected = reports[0]
 
-    industry_name = selected.industry_name if selected else None
-    industry_sources = list_industry_sources(db, industry_name) if industry_name else []
+    industry_sources = list_industry_sources(db, selected.id) if selected else []
+    display_report_html = selected.report_html if selected else ""
+    citation_context = None
+    candidate_preview = None
+    candidate_validation = None
+    candidate_stale = False
+    if selected and selected.status == "completed" and selected.generation_mode == "grounded":
+        try:
+            citation_context = build_citation_context(db, selected)
+            display_report_html = render_report_html(citation_context)
+        except CitationPresentationError:
+            display_report_html = (
+                '<aside class="citation-warning" role="alert">'
+                "证据约束报告当前无法安全解析，已停止展示正文。请重新生成并晋升报告。"
+                "</aside>"
+            )
+    elif (
+        selected and selected.status == "awaiting_approval" and selected.grounded_run_id
+    ):
+        run = db.query(IndustryGroundedReportRun).filter(
+            IndustryGroundedReportRun.report_id == selected.id,
+            IndustryGroundedReportRun.id == selected.grounded_run_id,
+        ).first()
+        if run and run.candidate_report_json:
+            try:
+                citation_context = build_citation_context(
+                    db, selected, run.candidate_report_json,
+                )
+                candidate_preview = render_report_html(citation_context)
+                candidate_validation = json.loads(run.validation_errors_json or "{}")
+                packet = build_evidence_packet(db, selected.id)
+                candidate_stale = (
+                    run.status != "validated"
+                    or run.evidence_snapshot_hash != packet["evidence_snapshot_hash"]
+                    or run.conflict_snapshot_hash != packet["conflict_snapshot_hash"]
+                )
+            except (CitationPresentationError, json.JSONDecodeError, ValueError):
+                candidate_stale = True
 
     meta = PAGE_META["deep_reports"]
     return templates.TemplateResponse(
@@ -416,7 +432,16 @@ def deep_reports_page(
             "pages": PAGE_META,
             "reports": reports,
             "selected_report": selected,
-            "industry_sources": industry_sources,
-            **_source_drawer_context(db, industry_name=industry_name),
+            "display_report_html": display_report_html,
+            "citation_context": citation_context,
+            "candidate_preview": candidate_preview,
+            "candidate_validation": candidate_validation,
+            "candidate_stale": candidate_stale,
+            "drawer_sources": industry_sources,
+            "drawer_report_id": selected.id if selected else None,
+            "drawer_report_status": selected.status if selected else "",
+            "mita_configured": bool(settings.mita_api_key)
+            and not is_placeholder_key(settings.mita_api_key),
+            "industry_generation_mode": settings.industry_report_generation_mode,
         },
     )

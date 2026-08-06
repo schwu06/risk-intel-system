@@ -227,7 +227,7 @@
   window.ENTITY_ID = {% if selected_entity %}{{ selected_entity.id }}{% else %}null{% endif %};
   window.ENTITY_NAME = {% if selected_entity %}{{ (selected_entity.display_name or selected_entity.name)|tojson }}{% else %}null{% endif %};
 </script>
-<script src="/static/js/entity_assessment.js"></script>
+<script src="/static/js/entity_assessment.js?v=20260805-1"></script>
 <script>
   (function initRiskTabs() {
     var tabs = document.querySelectorAll(".risk-tab");

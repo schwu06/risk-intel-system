@@ -14,6 +14,9 @@ from app.database.models import (
     DomainBlacklist,
     DomainWhitelist,
     EntityRisk,
+    IndustryConflictDetectionRun,
+    IndustryEvidenceCard,
+    IndustryEvidenceExtractionRun,
     IndustryReport,
     NewsArticle,
     SearchLog,
@@ -27,13 +30,17 @@ from app.exporters.docx_report import (
 )
 from app.schemas import (
     CreditUpdateOut,
+    ConflictResolutionRequest,
     DataSourceOut,
     DataSourceUrlIn,
     DomainRuleIn,
     EntityRiskOut,
     IndustryAnalysisRequest,
     IndustryDataSourceUrlIn,
+    EvidenceExtractRequest,
+    IndustryReportRenameIn,
     IndustryReportOut,
+    GroundedPromotionRequest,
     ManualEntryIn,
     NewsArticleOut,
     PipelineJobStatusOut,
@@ -43,21 +50,53 @@ from app.schemas import (
     RssSourceItemOut,
     TargetEntityOut,
 )
-from app.services.data_source_parser import SUPPORTED_EXTENSIONS
+from app.services.data_source_parser import MAX_UPLOAD_BYTES, SUPPORTED_EXTENSIONS
 from app.services.data_source_service import (
+    IndustryReportNotEditableError,
     delete_industry_source,
     delete_module_source,
+    get_industry_source_by_id,
     get_source_by_id,
     list_all_sources,
     list_industry_sources,
+    list_industry_source_chunks,
     list_module_sources,
     save_industry_file_source,
     save_industry_url_source,
     save_module_file_source,
     save_module_url_source,
 )
+from app.services.source_registry import source_registry_state
+from app.services.evidence_cards import (
+    EvidenceCardService,
+    EvidenceExtractionError,
+    evidence_card_to_dict,
+    evidence_run_to_dict,
+)
+from app.services.conflict_detection import (
+    ConflictDetectionError,
+    ConflictDetectionService,
+    conflict_run_to_dict,
+    conflict_to_dict,
+)
+from app.services.grounded_report import (
+    GroundedPromotionError,
+    GroundedReportError,
+    GroundedReportService,
+    grounded_run_to_dict,
+)
+from app.services.grounded_readiness import check_grounded_readiness
+from app.services.deepseek_analyzer import (
+    GROUNDED_REPORT_PROMPT_VERSION,
+    STRUCTURED_GROUNDED_REPORT_PROMPT_VERSION,
+)
+from app.services.citation_rendering import (
+    CitationPresentationError,
+    build_citation_context,
+    citation_detail,
+)
 from app.services.domain_rules import seed_default_domains
-from app.services.industry_analysis import IndustryAnalysisService
+from app.services.industry_analysis import IndustryAnalysisService, IndustryGenerationError
 from app.services.pipeline_runner import (
     get_current_job,
     get_job_status,
@@ -310,9 +349,11 @@ async def upload_module_data_source(
     ext = Path(filename).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型，允许: {', '.join(SUPPORTED_EXTENSIONS)}")
-    content = await file.read()
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
     if not content:
         raise HTTPException(status_code=400, detail="文件为空")
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="文件超过 25 MB 上传上限")
     if entity_id is not None and not db.query(TargetEntity).filter(TargetEntity.id == entity_id).first():
         raise HTTPException(status_code=404, detail="主体不存在")
     try:
@@ -372,6 +413,10 @@ def list_rss_sources(
 # ---------------------------------------------------------------------------
 
 
+def _industry_source_origin_label(source_type: str) -> str:
+    return "补充网络搜索功能" if source_type == "network_search" else "用户添加"
+
+
 @router.post("/industry/analyze", response_model=IndustryReportOut)
 def run_industry_analysis(body: IndustryAnalysisRequest, db: Session = Depends(get_db)):
     svc = IndustryAnalysisService(db)
@@ -381,9 +426,59 @@ def run_industry_analysis(body: IndustryAnalysisRequest, db: Session = Depends(g
             company_name=body.company_name,
             supplement_search=body.supplement_search,
         )
+    except IndustryGenerationError as exc:
+        raise HTTPException(
+            status_code=412,
+            detail={"code": exc.code, "message": str(exc), "next_step": exc.next_step},
+        ) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return report
+
+
+@router.post("/industry/reports/drafts", response_model=IndustryReportOut)
+def create_industry_report_draft(
+    body: IndustryAnalysisRequest, db: Session = Depends(get_db)
+):
+    try:
+        return IndustryAnalysisService(db).create_draft(
+            body.industry_name,
+            company_name=body.company_name,
+            supplement_search=body.supplement_search,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/industry/reports/{report_id}/fork", response_model=IndustryReportOut)
+def fork_industry_report(report_id: int, db: Session = Depends(get_db)):
+    try:
+        return IndustryAnalysisService(db).fork_report(report_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/industry/reports/{report_id}/generate", response_model=IndustryReportOut)
+def generate_industry_report(report_id: int, db: Session = Depends(get_db)):
+    try:
+        return IndustryAnalysisService(db).generate_report(report_id)
+    except IndustryGenerationError as exc:
+        raise HTTPException(
+            status_code=412,
+            detail={"code": exc.code, "message": str(exc), "next_step": exc.next_step},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/industry/reports/{report_id}/grounded-readiness")
+def get_grounded_readiness(report_id: int, db: Session = Depends(get_db)):
+    try:
+        return check_grounded_readiness(db, report_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/industry/reports", response_model=list[IndustryReportOut])
@@ -400,27 +495,423 @@ def get_industry_report(report_id: int, db: Session = Depends(get_db)):
     return row
 
 
-@router.get("/industry/data-sources/{industry_name}")
-def get_industry_data_sources(industry_name: str, db: Session = Depends(get_db)):
-    rows = list_industry_sources(db, industry_name)
+@router.delete("/industry/reports/{report_id}")
+def delete_industry_report(report_id: int, db: Session = Depends(get_db)):
+    try:
+        deleted = IndustryAnalysisService(db).delete_report(report_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="报告不存在")
+    return {"message": "报告已删除", "id": report_id}
+
+
+@router.patch("/industry/reports/{report_id}/name", response_model=IndustryReportOut)
+def rename_industry_report(
+    report_id: int, body: IndustryReportRenameIn, db: Session = Depends(get_db)
+):
+    try:
+        return IndustryAnalysisService(db).rename_report(report_id, body.report_name)
+    except ValueError as exc:
+        status_code = 404 if str(exc) == "报告不存在" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@router.post("/industry/reports/{report_id}/evidence/extract")
+def extract_industry_evidence(
+    report_id: int, body: EvidenceExtractRequest | None = None, db: Session = Depends(get_db)
+):
+    try:
+        run = EvidenceCardService(db).extract(report_id, body.source_id if body else None)
+    except ValueError as exc:
+        status = 404 if str(exc) in {"report_not_found", "source_not_found_for_report"} else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except EvidenceExtractionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return evidence_run_to_dict(run)
+
+
+@router.get("/industry/reports/{report_id}/evidence")
+def list_industry_evidence(
+    report_id: int,
+    source_id: int | None = Query(None),
+    validation_status: str | None = Query(None),
+    claim_type: str | None = Query(None),
+    risk_tag: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    try:
+        rows = EvidenceCardService(db).list_cards(
+            report_id, source_id=source_id, validation_status=validation_status,
+            claim_type=claim_type, risk_tag=risk_tag,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [evidence_card_to_dict(row) for row in rows]
+
+
+@router.get("/industry/reports/{report_id}/evidence/{evidence_code}")
+def get_industry_evidence_card(
+    report_id: int, evidence_code: str, db: Session = Depends(get_db)
+):
+    service = EvidenceCardService(db)
+    try:
+        service._scope(report_id, None)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    service.refresh_stale(report_id)
+    row = db.query(IndustryEvidenceCard).filter(
+        IndustryEvidenceCard.report_id == report_id,
+        IndustryEvidenceCard.evidence_code == evidence_code,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="evidence_not_found")
+    return evidence_card_to_dict(row)
+
+
+@router.get("/industry/reports/{report_id}/evidence-runs")
+def list_industry_evidence_runs(report_id: int, db: Session = Depends(get_db)):
+    if not db.query(IndustryReport).filter(IndustryReport.id == report_id).first():
+        raise HTTPException(status_code=404, detail="report_not_found")
+    rows = db.query(IndustryEvidenceExtractionRun).filter(
+        IndustryEvidenceExtractionRun.report_id == report_id
+    ).order_by(IndustryEvidenceExtractionRun.id.desc()).all()
+    return [evidence_run_to_dict(row) for row in rows]
+
+
+@router.post("/industry/reports/{report_id}/conflicts/detect")
+def detect_industry_conflicts(report_id: int, db: Session = Depends(get_db)):
+    try:
+        run = ConflictDetectionService(db).detect(report_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ConflictDetectionError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return conflict_run_to_dict(run)
+
+
+@router.get("/industry/reports/{report_id}/conflicts")
+def list_industry_conflicts(
+    report_id: int,
+    conflict_type: str | None = Query(None),
+    severity: str | None = Query(None),
+    resolution_status: str | None = Query(None),
+    source_id: int | None = Query(None),
+    evidence_code: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    try:
+        rows = ConflictDetectionService(db).list_conflicts(
+            report_id, conflict_type=conflict_type, severity=severity,
+            resolution_status=resolution_status, source_id=source_id,
+            evidence_code=evidence_code,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [conflict_to_dict(row) for row in rows]
+
+
+@router.get("/industry/reports/{report_id}/conflicts/{conflict_code}")
+def get_industry_conflict(
+    report_id: int, conflict_code: str, db: Session = Depends(get_db)
+):
+    try:
+        row = ConflictDetectionService(db).get_conflict(report_id, conflict_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not row:
+        raise HTTPException(status_code=404, detail="conflict_not_found")
+    return conflict_to_dict(row, include_members=True)
+
+
+@router.patch("/industry/reports/{report_id}/conflicts/{conflict_code}")
+def resolve_industry_conflict(
+    report_id: int, conflict_code: str, body: ConflictResolutionRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        row = ConflictDetectionService(db).resolve(
+            report_id, conflict_code, body.resolution_status,
+            body.resolution_note, body.selected_evidence_code,
+        )
+    except ValueError as exc:
+        status = 404 if str(exc) in {"report_not_found", "conflict_not_found"} else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    return conflict_to_dict(row, include_members=True)
+
+
+@router.get("/industry/reports/{report_id}/conflict-runs")
+def list_industry_conflict_runs(report_id: int, db: Session = Depends(get_db)):
+    if not db.query(IndustryReport).filter(IndustryReport.id == report_id).first():
+        raise HTTPException(status_code=404, detail="report_not_found")
+    rows = db.query(IndustryConflictDetectionRun).filter(
+        IndustryConflictDetectionRun.report_id == report_id
+    ).order_by(IndustryConflictDetectionRun.id.desc()).all()
+    return [conflict_run_to_dict(row) for row in rows]
+
+
+@router.post("/industry/reports/{report_id}/grounded-runs/generate")
+def generate_grounded_report_shadow(
+    report_id: int, db: Session = Depends(get_db),
+    prompt_version: str = GROUNDED_REPORT_PROMPT_VERSION,
+):
+    if prompt_version not in {
+        GROUNDED_REPORT_PROMPT_VERSION, STRUCTURED_GROUNDED_REPORT_PROMPT_VERSION,
+    }:
+        raise HTTPException(status_code=400, detail="unsupported_grounded_prompt_version")
+    try:
+        run = GroundedReportService(db).generate(report_id, prompt_version=prompt_version)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GroundedReportError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return grounded_run_to_dict(run)
+
+
+@router.get("/industry/reports/{report_id}/grounded-runs")
+def list_grounded_report_runs(report_id: int, db: Session = Depends(get_db)):
+    try:
+        rows = GroundedReportService(db).list_runs(report_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [grounded_run_to_dict(row) for row in rows]
+
+
+@router.get("/industry/reports/{report_id}/grounded-runs/{run_id}")
+def get_grounded_report_run(
+    report_id: int, run_id: int, db: Session = Depends(get_db)
+):
+    try:
+        row = GroundedReportService(db).get_run(report_id, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not row:
+        raise HTTPException(status_code=404, detail="grounded_run_not_found")
+    return grounded_run_to_dict(row, include_candidate=True)
+
+
+@router.get("/industry/reports/{report_id}/grounded-runs/{run_id}/validation")
+def get_grounded_report_validation(
+    report_id: int, run_id: int, db: Session = Depends(get_db)
+):
+    try:
+        row = GroundedReportService(db).get_run(report_id, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not row:
+        raise HTTPException(status_code=404, detail="grounded_run_not_found")
+    return grounded_run_to_dict(row, include_validation=True)
+
+
+@router.post(
+    "/industry/reports/{report_id}/grounded-runs/{run_id}/promote",
+    response_model=IndustryReportOut,
+)
+def promote_grounded_report_run(
+    report_id: int, run_id: int, body: GroundedPromotionRequest,
+    db: Session = Depends(get_db),
+):
+    if get_settings().industry_report_generation_mode != "grounded":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "GROUNDED_MODE_DISABLED",
+                "message": "当前服务端配置为legacy模式，不能晋升grounded候选。",
+                "next_step": "switch server configuration and restart",
+            },
+        )
+    try:
+        return GroundedReportService(db).promote(
+            report_id, run_id, promotion_type="manual", promotion_note=body.promotion_note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GroundedPromotionError as exc:
+        raise HTTPException(
+            status_code=412,
+            detail={"code": exc.code, "message": str(exc), "next_step": exc.next_step},
+        ) from exc
+
+
+def _citation_error(exc: CitationPresentationError, status_code: int = 412) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": exc.code, "message": exc.message, "next_step": exc.next_step},
+    )
+
+
+@router.get("/industry/reports/{report_id}/citations")
+def get_industry_report_citations(report_id: int, db: Session = Depends(get_db)):
+    report = db.get(IndustryReport, report_id)
+    if not report or report.status != "completed":
+        raise HTTPException(status_code=404, detail="report_not_found")
+    if report.generation_mode != "grounded":
+        return {
+            "report_id": report_id,
+            "generation_mode": report.generation_mode or "legacy",
+            "citations": [],
+            "warnings": [{
+                "code": "LEGACY_REPORT_NOT_GROUNDED",
+                "message": "该报告不是证据约束报告，没有可验证的引用详情。",
+            }],
+        }
+    try:
+        context = build_citation_context(db, report)
+    except CitationPresentationError as exc:
+        raise _citation_error(exc) from exc
+    return {
+        "report_id": report.id,
+        "generation_mode": "grounded",
+        "citations": context["citations"],
+        "warnings": context["warnings"],
+        "coverage": context["coverage"],
+        "limitations": context["limitations"],
+        "unresolved_conflicts": context["unresolved_conflicts"],
+        "metadata": context["metadata"],
+    }
+
+
+@router.get("/industry/reports/{report_id}/citations/{evidence_code}")
+def get_industry_report_citation(
+    report_id: int, evidence_code: str, db: Session = Depends(get_db),
+):
+    report = db.get(IndustryReport, report_id)
+    if not report or report.status != "completed" or report.generation_mode != "grounded":
+        raise HTTPException(status_code=404, detail="citation_not_found")
+    try:
+        context = build_citation_context(db, report)
+        return citation_detail(context, evidence_code)
+    except CitationPresentationError as exc:
+        raise _citation_error(exc, status_code=404) from exc
+
+
+@router.get(
+    "/industry/reports/{report_id}/grounded-runs/{run_id}/citations/{evidence_code}"
+)
+def get_grounded_candidate_citation(
+    report_id: int, run_id: int, evidence_code: str, db: Session = Depends(get_db),
+):
+    report = db.get(IndustryReport, report_id)
+    try:
+        run = GroundedReportService(db).get_run(report_id, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="citation_not_found") from exc
+    if (
+        not report or report.status != "awaiting_approval" or not run
+        or run.status != "validated" or not run.candidate_report_json
+    ):
+        raise HTTPException(status_code=404, detail="citation_not_found")
+    try:
+        context = build_citation_context(db, report, run.candidate_report_json)
+        return citation_detail(context, evidence_code)
+    except CitationPresentationError as exc:
+        raise _citation_error(exc, status_code=404) from exc
+
+
+@router.get("/industry/reports/{report_id}/data-sources")
+def get_industry_data_sources(report_id: int, db: Session = Depends(get_db)):
+    report = IndustryAnalysisService(db).get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="报告不存在")
+    rows = list_industry_sources(db, report_id)
     return [
         {
             "id": r.id,
-            "industry_name": r.industry_name,
+            "report_id": r.report_id,
             "name": r.name,
             "source_type": r.source_type,
+            "origin_label": _industry_source_origin_label(r.source_type),
             "url": r.url,
             "original_filename": r.original_filename,
             "text_preview": (r.extracted_text or "")[:200],
+            "chars": len(r.extracted_text or ""),
+            "source_origin": r.source_origin,
+            "evidence_grade": r.evidence_grade,
+            "registry_state": source_registry_state(r),
+            "is_full_text": r.is_full_text,
+            "is_truncated": r.is_truncated,
+            "parse_warning": r.parse_warning,
             "created_at": r.created_at.isoformat(),
         }
         for r in rows
     ]
 
 
-@router.post("/industry/data-sources/upload")
+@router.get("/industry/reports/{report_id}/data-sources/{source_id}")
+def get_industry_data_source_detail(
+    report_id: int, source_id: int, db: Session = Depends(get_db)
+):
+    row = get_industry_source_by_id(db, source_id)
+    if not row or row.report_id != report_id:
+        raise HTTPException(status_code=404, detail="行业数据源不存在")
+    text = row.extracted_text or ""
+    return {
+        "id": row.id,
+        "report_id": row.report_id,
+        "name": row.name,
+        "source_type": row.source_type,
+        "origin_label": _industry_source_origin_label(row.source_type),
+        "url": row.url,
+        "original_filename": row.original_filename,
+        "extracted_text": text,
+        "chars": len(text),
+        "raw_content_hash": row.raw_content_hash,
+        "extracted_text_hash": row.extracted_text_hash,
+        "mime_type": row.mime_type,
+        "file_size": row.file_size,
+        "source_origin": row.source_origin,
+        "source_publisher": row.source_publisher,
+        "published_at": row.published_at,
+        "retrieved_at": row.retrieved_at.isoformat() if row.retrieved_at else None,
+        "is_full_text": row.is_full_text,
+        "is_truncated": row.is_truncated,
+        "parse_status": row.parse_status,
+        "registry_state": source_registry_state(row),
+        "parse_warning": row.parse_warning,
+        "used_ocr": row.used_ocr,
+        "page_count": row.page_count,
+        "slide_count": row.slide_count,
+        "sheet_count": row.sheet_count,
+        "evidence_grade": row.evidence_grade,
+        "chunk_count": len(row.chunks),
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+@router.get("/industry/reports/{report_id}/data-sources/{source_id}/chunks")
+def get_industry_data_source_chunks(
+    report_id: int, source_id: int, db: Session = Depends(get_db)
+):
+    row = get_industry_source_by_id(db, source_id)
+    if not row or row.report_id != report_id:
+        raise HTTPException(status_code=404, detail="行业数据源不存在")
+    return [
+        {
+            "id": chunk.id,
+            "report_id": chunk.report_id,
+            "source_id": chunk.source_id,
+            "chunk_index": chunk.chunk_index,
+            "text": chunk.text,
+            "locator": chunk.locator,
+            "page_number": chunk.page_number,
+            "slide_number": chunk.slide_number,
+            "sheet_name": chunk.sheet_name,
+            "cell_range": chunk.cell_range,
+            "row_range": chunk.row_range,
+            "paragraph_index": chunk.paragraph_index,
+            "table_index": chunk.table_index,
+            "table_row_index": chunk.table_row_index,
+            "char_start": chunk.char_start,
+            "char_end": chunk.char_end,
+            "content_hash": chunk.content_hash,
+        }
+        for chunk in list_industry_source_chunks(db, report_id, source_id)
+    ]
+
+
+@router.post("/industry/reports/{report_id}/data-sources/upload")
 async def upload_industry_data_source(
-    industry_name: str = Form(...),
+    report_id: int,
     name: str = Form(""),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -429,26 +920,48 @@ async def upload_industry_data_source(
     ext = Path(filename).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型，允许: {', '.join(SUPPORTED_EXTENSIONS)}")
-    content = await file.read()
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="文件为空")
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="文件超过 25 MB 上传上限")
     try:
-        row = save_industry_file_source(db, industry_name, name or filename, filename, content)
+        row = save_industry_file_source(db, report_id, name or filename, filename, content)
+    except IndustryReportNotEditableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"message": "行业数据源已上传", "id": row.id}
 
 
-@router.post("/industry/data-sources/url")
-def add_industry_url_source(body: IndustryDataSourceUrlIn, db: Session = Depends(get_db)):
+@router.post("/industry/reports/{report_id}/data-sources/url")
+def add_industry_url_source(
+    report_id: int, body: IndustryDataSourceUrlIn, db: Session = Depends(get_db)
+):
     try:
-        row = save_industry_url_source(db, body.industry_name, body.name, body.url)
+        row = save_industry_url_source(db, report_id, body.name, body.url)
+    except IndustryReportNotEditableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"message": "行业网址已添加", "id": row.id}
 
 
-@router.delete("/industry/data-sources/{source_id}")
-def remove_industry_data_source(source_id: int, db: Session = Depends(get_db)):
-    if not delete_industry_source(db, source_id):
+@router.delete("/industry/reports/{report_id}/data-sources/{source_id}")
+def remove_industry_data_source(
+    report_id: int, source_id: int, db: Session = Depends(get_db)
+):
+    try:
+        deleted = delete_industry_source(db, report_id, source_id)
+    except IndustryReportNotEditableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not deleted:
         raise HTTPException(status_code=404, detail="数据源不存在")
     return {"message": "已删除"}
 
@@ -459,8 +972,18 @@ def export_industry_docx(report_id: int, db: Session = Depends(get_db)):
     if not row or row.status != "completed":
         raise HTTPException(status_code=404, detail="报告不可用")
     out_dir = Path("data/exports")
-    filename = f"行业分析_{row.industry_name}_{report_id}.docx"
-    path = export_industry_report_to_path(row, out_dir / filename)
+    safe_name = "".join(
+        "_" if char in '<>:"/\\|?*' else char
+        for char in (row.report_name or row.industry_name)
+    ).strip(" ._")[:180] or f"行业分析_{report_id}"
+    filename = f"{safe_name}_v{row.version}.docx"
+    citation_context = None
+    if row.generation_mode == "grounded":
+        try:
+            citation_context = build_citation_context(db, row, enforce_export_gate=True)
+        except CitationPresentationError as exc:
+            raise _citation_error(exc) from exc
+    path = export_industry_report_to_path(row, out_dir / filename, citation_context=citation_context)
     return FileResponse(
         path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

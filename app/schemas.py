@@ -1,9 +1,147 @@
 """Pydantic 请求/响应模型。"""
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional, Union
 
 from pydantic import BaseModel, Field
+
+
+EvidenceClaimType = Literal["fact", "reported_opinion", "forecast", "inference"]
+EvidenceRiskTag = Literal[
+    "market_size", "market_growth", "policy_regulation", "business_model",
+    "revenue_model", "profitability", "cost_capex", "financing_debt",
+    "project_pipeline", "capacity_output", "technology_performance",
+    "supplier_dependency", "customer_concentration", "competition_market_share",
+    "pricing", "safety_accident", "legal_litigation", "environmental",
+    "governance", "management_guidance", "risk_event", "other_material_information",
+]
+
+
+class EvidenceCandidate(BaseModel):
+    original_quote: str = Field(..., min_length=1)
+    normalized_claim: str = Field(..., min_length=1)
+    claim_type: EvidenceClaimType
+    subject: Optional[str] = None
+    metric_name: Optional[str] = None
+    raw_value: Optional[str] = None
+    unit: Optional[str] = None
+    currency: Optional[str] = None
+    period: Optional[str] = None
+    as_of_date: Optional[str] = None
+    speaker: Optional[str] = None
+    importance_score: int = Field(..., ge=1, le=5)
+    importance_reason: Optional[str] = None
+    risk_tags: list[EvidenceRiskTag] = Field(default_factory=list)
+    extraction_confidence: Optional[float] = Field(None, ge=0, le=1)
+
+    model_config = {"extra": "forbid"}
+
+
+class EvidenceCandidatePayload(BaseModel):
+    candidates: list[EvidenceCandidate] = Field(default_factory=list)
+
+    model_config = {"extra": "forbid"}
+
+
+class EvidenceExtractRequest(BaseModel):
+    source_id: Optional[int] = Field(None, ge=1)
+
+
+ConflictResolutionStatus = Literal[
+    "resolved_disclosed", "resolved_selected", "not_a_conflict"
+]
+
+
+class ConflictResolutionRequest(BaseModel):
+    resolution_status: ConflictResolutionStatus
+    resolution_note: str = Field(..., min_length=1, max_length=4000)
+    selected_evidence_code: Optional[str] = Field(None, pattern=r"^E\d+$")
+
+    model_config = {"extra": "forbid"}
+
+
+class GroundedReportSection(BaseModel):
+    heading: str = Field(..., min_length=1, max_length=500)
+    content: str = Field(..., min_length=1)
+
+    model_config = {"extra": "forbid"}
+
+
+class GroundedReportCitation(BaseModel):
+    evidence_code: str = Field(..., pattern=r"^E\d+$")
+    location: str = Field(..., min_length=1, max_length=256)
+
+    model_config = {"extra": "forbid"}
+
+
+class GroundedReportMetric(BaseModel):
+    name: str = Field(..., min_length=1, max_length=256)
+    value: str = Field(..., min_length=1, max_length=256)
+    evidence_code: str = Field(..., pattern=r"^E\d+$")
+
+    model_config = {"extra": "forbid"}
+
+
+class GroundedReportCandidate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=500)
+    sections: list[GroundedReportSection] = Field(default_factory=list)
+    summary: str = ""
+    risk_outlook: str = ""
+    key_metrics: list[GroundedReportMetric] = Field(default_factory=list)
+    citations: list[GroundedReportCitation] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    unresolved_conflicts: list[str] = Field(default_factory=list)
+    evidence_coverage: dict = Field(default_factory=dict)
+    generation_metadata: dict = Field(default_factory=dict)
+
+    model_config = {"extra": "forbid"}
+
+
+class StructuredEvidenceFactSentence(BaseModel):
+    sentence_type: Literal["evidence_fact"]
+    text: str = Field(..., min_length=1, max_length=4000)
+    evidence_codes: list[str] = Field(..., min_length=1, max_length=20)
+
+    model_config = {"extra": "forbid"}
+
+
+class StructuredBoundedAnalysisSentence(BaseModel):
+    sentence_type: Literal["bounded_analysis"]
+    text: str = Field(..., min_length=1, max_length=4000)
+    evidence_codes: list[str] = Field(..., min_length=1, max_length=20)
+    assumptions: list[str] = Field(default_factory=list, max_length=20)
+
+    model_config = {"extra": "forbid"}
+
+
+StructuredReportSentence = Union[
+    StructuredEvidenceFactSentence, StructuredBoundedAnalysisSentence,
+]
+
+
+class StructuredGroundedReportSection(BaseModel):
+    heading: str = Field(..., min_length=1, max_length=500)
+    sentences: list[StructuredReportSentence] = Field(..., min_length=1, max_length=200)
+
+    model_config = {"extra": "forbid"}
+
+
+class StructuredGroundedReportCandidate(BaseModel):
+    """V2 shadow-only candidate; citations and audit fields are compiler-owned."""
+
+    title: str = Field(..., min_length=1, max_length=500)
+    structured_sections: list[StructuredGroundedReportSection] = Field(default_factory=list)
+    key_metrics: list[GroundedReportMetric] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    unresolved_conflicts: list[str] = Field(default_factory=list)
+
+    model_config = {"extra": "forbid"}
+
+
+class GroundedPromotionRequest(BaseModel):
+    promotion_note: str = Field(..., min_length=1, max_length=4000)
+
+    model_config = {"extra": "forbid"}
 
 
 class RiskEntryOut(BaseModel):
@@ -116,20 +254,39 @@ class IndustryAnalysisRequest(BaseModel):
 
 
 class IndustryDataSourceUrlIn(BaseModel):
-    industry_name: str
-    name: str
+    name: str = Field(..., max_length=256)
     url: str = Field(..., min_length=8)
+
+
+class IndustryReportRenameIn(BaseModel):
+    report_name: str = Field(..., min_length=1, max_length=256)
 
 
 class IndustryReportOut(BaseModel):
     id: int
+    parent_report_id: Optional[int] = None
+    root_report_id: Optional[int] = None
+    version: int = 1
+    report_name: Optional[str] = None
     industry_name: str
     company_name: Optional[str] = None
     status: str
+    supplement_search: bool = True
     report_html: Optional[str] = None
     chart_specs: Optional[str] = None
+    source_manifest_json: Optional[str] = None
     error_message: Optional[str] = None
+    generation_mode: Optional[str] = None
+    grounded_run_id: Optional[int] = None
+    prompt_version: Optional[str] = None
+    evidence_snapshot_hash: Optional[str] = None
+    conflict_snapshot_hash: Optional[str] = None
+    citation_validation_status: Optional[str] = None
+    promoted_at: Optional[datetime] = None
+    promotion_type: Optional[str] = None
+    promotion_note: Optional[str] = None
     created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 

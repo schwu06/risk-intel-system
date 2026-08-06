@@ -15,7 +15,35 @@
     return null;
   }
 
+  function sourceScope() {
+    var drawer = document.getElementById("source-drawer");
+    return (drawer && drawer.getAttribute("data-source-scope")) || "module";
+  }
+
+  function currentReportId() {
+    var drawer = document.getElementById("source-drawer");
+    return Number((drawer && drawer.getAttribute("data-report-id")) || 0) || null;
+  }
+
+  function requireReportId() {
+    var reportId = currentReportId();
+    if (!reportId) throw new Error("请先在左侧创建报告草稿");
+    return reportId;
+  }
+
+  function industrySourcesEditable() {
+    var drawer = document.getElementById("source-drawer");
+    var status = String((drawer && drawer.getAttribute("data-report-status")) || "");
+    return status === "draft" || status === "failed";
+  }
+
   function dataSourcesUrl() {
+    if (sourceScope() === "industry") {
+      var reportId = currentReportId();
+      return reportId
+        ? "/api/v1/industry/reports/" + reportId + "/data-sources"
+        : null;
+    }
     var eid = currentEntityId();
     return eid ? "/api/v1/data-sources?entity_id=" + eid : "/api/v1/data-sources";
   }
@@ -85,7 +113,7 @@
   const dropzone = document.getElementById("sources-dropzone");
   const uploadNameInput = document.getElementById("global-upload-name");
   const uploadSubmitBtn = document.getElementById("global-upload-submit");
-  const ALLOWED_EXTS = [".txt", ".xlsx", ".docx", ".pdf"];
+  const ALLOWED_EXTS = [".txt", ".xlsx", ".docx", ".pptx", ".pdf"];
 
   function isDrawerOpen() {
     return !document.body.classList.contains("sources-collapsed");
@@ -192,9 +220,15 @@
     const fd = new FormData();
     fd.append("file", file);
     fd.append("name", optionalName || (uploadNameInput && uploadNameInput.value) || file.name);
-    var eid = currentEntityId();
-    if (eid) fd.append("entity_id", String(eid));
-    const resp = await fetch("/api/v1/data-sources/upload", { method: "POST", body: fd });
+    var endpoint = "/api/v1/data-sources/upload";
+    if (sourceScope() === "industry") {
+      if (!industrySourcesEditable()) throw new Error("已完成报告的数据源不可修改，请先创建新版");
+      endpoint = "/api/v1/industry/reports/" + requireReportId() + "/data-sources/upload";
+    } else {
+      var eid = currentEntityId();
+      if (eid) fd.append("entity_id", String(eid));
+    }
+    const resp = await fetch(endpoint, { method: "POST", body: fd });
     const data = await resp.json().catch(function () { return {}; });
     if (!resp.ok) {
       var detail = data.detail;
@@ -282,12 +316,13 @@
   function renderSourceList(sources) {
     if (!listWrap) return;
     if (!sources || !sources.length) {
+      var emptyAction = industrySourcesEditable()
+        ? '<p class="sources-empty-hint">将文件拖放到此处，或 <button type="button" class="text-link" id="btn-empty-add-source-dyn">添加数据源</button></p>'
+        : '<p class="sources-empty-hint">已完成报告的数据源不可修改。</p>';
       listWrap.innerHTML =
         '<div class="sources-empty" id="managed-source-list">' +
         '<p class="sources-empty-title">保存的数据源将显示在此处</p>' +
-        '<p class="sources-empty-desc">可添加文件、网站等。采集时会优先参考这些权威材料。</p>' +
-        '<p class="sources-empty-hint">将文件拖放到此处，或 ' +
-        '<button type="button" class="text-link" id="btn-empty-add-source-dyn">添加数据源</button></p>' +
+        '<p class="sources-empty-desc">当前报告的数据源组为空。</p>' + emptyAction +
         "</div>";
       var dyn = document.getElementById("btn-empty-add-source-dyn");
       if (dyn) {
@@ -300,7 +335,8 @@
     }
     var html = '<ul class="managed-source-list" id="managed-source-list">';
     sources.forEach(function (src) {
-      var meta = [src.source_type || "-"];
+      var typeLabel = src.source_type === "network_search" ? "网络搜索功能" : (src.source_type || "-");
+      var meta = [src.origin_label || typeLabel];
       if (src.original_filename) meta.push(src.original_filename);
       if (src.url) meta.push("网址");
       if (typeof src.chars === "number") meta.push(src.chars + " 字");
@@ -311,7 +347,7 @@
         '<span class="source-name">' + escapeHtml(src.name) + "</span>" +
         '<span class="source-meta">' + escapeHtml(meta.join(" · ")) + "</span>" +
         "</button>" +
-        '<button type="button" class="link-btn delete-source" data-id="' + src.id + '">删除</button>' +
+        ((industrySourcesEditable() || src.source_origin === "network_search" || src.source_type === "network_search") ? '<button type="button" class="link-btn delete-source" data-id="' + src.id + '">删除</button>' : '') +
         "</li>";
     });
     html += "</ul>";
@@ -321,7 +357,12 @@
 
   async function refreshSourceList() {
     try {
-      const resp = await fetch(dataSourcesUrl());
+      const url = dataSourcesUrl();
+      if (!url) {
+        renderSourceList([]);
+        return;
+      }
+      const resp = await fetch(url);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.detail || "刷新失败");
       renderSourceList(data);
@@ -414,9 +455,15 @@
         const url = globalUrl.querySelector('[name="url"]').value;
         await handleSourceMutation(async function () {
           const body = { name: name, url: url, priority: 0 };
-          var eid = currentEntityId();
-          if (eid) body.entity_id = eid;
-          const resp = await fetch("/api/v1/data-sources/url", {
+          var endpoint = "/api/v1/data-sources/url";
+          if (sourceScope() === "industry") {
+            if (!industrySourcesEditable()) throw new Error("已完成报告的数据源不可修改，请先创建新版");
+            endpoint = "/api/v1/industry/reports/" + requireReportId() + "/data-sources/url";
+          } else {
+            var eid = currentEntityId();
+            if (eid) body.entity_id = eid;
+          }
+          const resp = await fetch(endpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
@@ -437,7 +484,10 @@
     const id = btn.getAttribute("data-id");
     if (!confirm("确认删除该数据源？")) return;
     await handleSourceMutation(async function () {
-      const resp = await fetch("/api/v1/data-sources/" + id, { method: "DELETE" });
+      const endpoint = sourceScope() === "industry"
+        ? "/api/v1/industry/reports/" + requireReportId() + "/data-sources/" + id
+        : "/api/v1/data-sources/" + id;
+      const resp = await fetch(endpoint, { method: "DELETE" });
       const data = await resp.json().catch(function () { return {}; });
       if (!resp.ok) throw new Error(data.detail || "删除失败");
       return data;
@@ -468,16 +518,20 @@
     setSourceViewOpen(true);
     if (sourceViewBody) sourceViewBody.innerHTML = '<p class="hint">加载中…</p>';
     try {
-      const resp = await fetch("/api/v1/data-sources/item/" + id);
+      const endpoint = sourceScope() === "industry"
+        ? "/api/v1/industry/reports/" + requireReportId() + "/data-sources/" + id
+        : "/api/v1/data-sources/item/" + id;
+      const resp = await fetch(endpoint);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.detail || "加载失败");
       if (sourceViewTitle) sourceViewTitle.textContent = data.name || "数据详情";
       const meta = [
-        "类型：" + (data.source_type || "-"),
+        "类型：" + (data.source_type === "network_search" ? "网络搜索" : (data.source_type || "-")),
+        "来源：" + (data.origin_label || "用户添加"),
         data.original_filename ? ("文件：" + data.original_filename) : "",
         data.url ? ("链接：" + data.url) : "",
         "字数：" + ((data.extracted_text || "").length),
-      ].filter(Boolean).join("<br/>");
+      ].filter(Boolean).map(escapeHtml).join("<br/>");
       const text = escapeHtml(data.extracted_text || data.text_preview || "（无提取正文）");
       if (sourceViewBody) {
         sourceViewBody.innerHTML =
@@ -492,34 +546,6 @@
   document.querySelectorAll(".view-source").forEach(function (btn) {
     btn._bound = true;
     btn.addEventListener("click", onViewSource);
-  });
-
-  const industryUpload = document.getElementById("drawer-industry-upload-form");
-  if (industryUpload) {
-    industryUpload.addEventListener("submit", async function (ev) {
-      ev.preventDefault();
-      alert("请使用上方统一上传入口");
-    });
-  }
-
-  const industryUrl = document.getElementById("drawer-industry-url-form");
-  if (industryUrl) {
-    industryUrl.addEventListener("submit", async function (ev) {
-      ev.preventDefault();
-      alert("请使用上方统一添加网址入口");
-    });
-  }
-
-  document.querySelectorAll(".delete-industry-source").forEach(function (btn) {
-    btn.addEventListener("click", async function () {
-      const id = btn.getAttribute("data-id");
-      if (!confirm("确认删除该行业数据源？")) return;
-      const resp = await fetch("/api/v1/industry/data-sources/" + id, { method: "DELETE" });
-      if (resp.ok) {
-        showSourceToast("已删除");
-        await refreshSourceList();
-      } else alert("删除失败");
-    });
   });
 
   /* ---------- 流水线（异步 + 轮询，不阻断侧栏/上传） ---------- */

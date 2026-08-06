@@ -10,29 +10,34 @@
 
 {% block page_sidebar %}
 <aside class="industry-sidebar page-rail">
-  <h2>新建分析</h2>
+  <h2>新建报告</h2>
   <form id="analysis-form" class="stack-form">
     <label>行业名称</label>
     <input type="text" name="industry_name" placeholder="例如：航空运输" required />
     <label>企业名称（可选）</label>
     <input type="text" name="company_name" placeholder="例如：某航空公司" />
     <label class="checkbox-row">
-      <input type="checkbox" name="supplement_search" checked />
-      本地数据源不足时补充网络检索
+      <input type="checkbox" name="supplement_search" {% if mita_configured and industry_generation_mode == 'legacy' %}checked{% else %}disabled{% endif %} />
+      生成时补充网络搜索，并自动加入本报告数据源
     </label>
-    <button type="submit" class="btn">生成分析报告</button>
+    {% if industry_generation_mode == 'grounded' %}<p class="hint">当前为 grounded 模式：正式生成不会临时搜索或拼接全文，请先完成证据提取和冲突检测。</p>{% elif not mita_configured %}<p class="hint">未配置 MITA_API_KEY，网络搜索暂不可用。</p>{% endif %}
+    <button type="submit" class="btn">创建报告草稿</button>
   </form>
   <p class="hint" id="analysis-msg"></p>
-  <p class="hint">权威材料请在右侧「数据源」统一上传；生成报告时会优先读取。</p>
+  <p class="hint">服务端生成模式：{{ industry_generation_mode }}</p>
+  <p class="hint">创建草稿后，在右侧添加该报告的专属数据源，再开始生成。</p>
 
   <h2>历史报告</h2>
   <ul class="report-list">
     {% for r in reports %}
-    <li>
+    <li class="report-list-item">
       <a href="/deep-reports?report_id={{ r.id }}" class="report-link {% if selected_report and selected_report.id == r.id %}active{% endif %}">
-        {{ r.industry_name }}{% if r.company_name %} / {{ r.company_name }}{% endif %}
+        <span class="report-link-name">{% if r.report_name %}{{ r.report_name }}{% else %}{{ r.industry_name }}{% if r.company_name %} / {{ r.company_name }}{% endif %}{% endif %} · v{{ r.version }}</span>
         <span class="report-status status-{{ r.status }}">{{ r.status }}</span>
+        <time class="report-created-at" datetime="{{ r.created_at.isoformat() if r.created_at else '' }}">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '日期未知' }}</time>
       </a>
+      <button type="button" class="report-rename-btn" data-report-id="{{ r.id }}" data-report-name="{{ r.report_name or '' }}" data-default-name="{{ r.industry_name }}{% if r.company_name %} / {{ r.company_name }}{% endif %}" aria-label="修改报告名称" title="修改报告名称">✎</button>
+      <button type="button" class="report-delete-btn" data-report-id="{{ r.id }}" aria-label="删除报告" title="删除报告">删除</button>
     </li>
     {% else %}
     <li class="empty-source">暂无报告</li>
@@ -43,28 +48,85 @@
 
 {% block content %}
 <main class="industry-layout content-shell">
-  <section class="industry-content">
+  <section class="industry-content"{% if selected_report %} data-report-id="{{ selected_report.id }}" data-report-status="{{ selected_report.status }}" data-run-id="{{ selected_report.grounded_run_id or '' }}"{% endif %}>
     {% if selected_report and selected_report.status == 'completed' %}
     <div class="report-toolbar">
       <a class="btn" href="/api/v1/industry/export/docx/{{ selected_report.id }}">导出 Word</a>
+      <button type="button" class="btn report-revision-btn" id="btn-fork-report" data-report-id="{{ selected_report.id }}">补充数据并生成新版</button>
     </div>
+    <p class="hint">生成模式：{{ selected_report.generation_mode or '历史记录/尚未记录' }}{% if selected_report.citation_validation_status %} · 引用校验：{{ selected_report.citation_validation_status }}{% endif %}</p>
+    {% if selected_report.report_name %}<h1 class="managed-report-name">{{ selected_report.report_name }} · v{{ selected_report.version }}</h1>{% endif %}
     <div class="report-preview">
-      {{ selected_report.report_html | safe }}
+      {{ display_report_html | safe }}
     </div>
+    {% if selected_report.generation_mode == 'grounded' and citation_context %}
+    <section class="report-audit-panel" aria-labelledby="report-audit-title">
+      <h2 id="report-audit-title">证据审计摘要</h2>
+      <dl class="audit-grid">
+        <div><dt>已展示引用</dt><dd>{{ citation_context.citations | length }}</dd></div>
+        <div><dt>验证证据</dt><dd>{{ citation_context.coverage.get('verified_evidence_count', '—') }}</dd></div>
+        <div><dt>独立来源</dt><dd>{{ citation_context.coverage.get('independent_source_count', '—') }}</dd></div>
+        <div><dt>未解决冲突</dt><dd>{{ citation_context.coverage.get('unresolved_conflict_count', 0) }}</dd></div>
+      </dl>
+      {% if citation_context.unresolved_conflicts %}<details><summary>未解决冲突（{{ citation_context.unresolved_conflicts | length }}）</summary><ul>{% for item in citation_context.unresolved_conflicts %}<li>{{ item }}</li>{% endfor %}</ul></details>{% endif %}
+      {% if citation_context.limitations %}<details><summary>报告限制（{{ citation_context.limitations | length }}）</summary><ul>{% for item in citation_context.limitations %}<li>{{ item }}</li>{% endfor %}</ul></details>{% endif %}
+      {% if citation_context.warnings %}<p class="citation-warning" role="alert">存在无法验证的引用，请重新生成报告后再使用。</p>{% endif %}
+    </section>
+    {% endif %}
     <div id="industry-charts" class="chart-grid"></div>
-    {% elif selected_report and selected_report.status == 'failed' %}
-    <p class="empty">报告生成失败：{{ selected_report.error_message }}</p>
+    {% elif selected_report and selected_report.status == 'awaiting_approval' %}
+    <div class="approval-panel">
+      <h1 class="report-title">候选报告等待审批</h1>
+      <p>请核对正文引用、验证结果、覆盖缺口和冲突后再晋升。候选在晋升前不会写入正式报告正文。</p>
+      <p class="hint">生成模式：grounded · 引用校验：{{ selected_report.citation_validation_status or 'validated' }} · run #{{ selected_report.grounded_run_id }}</p>
+      {% if candidate_stale %}<p class="citation-warning" role="alert">候选证据或冲突快照已变化，必须重新生成，当前不能晋升。</p>{% endif %}
+      {% if candidate_validation %}
+      <dl class="audit-grid">
+        <div><dt>验证状态</dt><dd>{% if candidate_validation.get('valid') %}通过{% else %}未通过{% endif %}</dd></div>
+        <div><dt>错误</dt><dd>{{ candidate_validation.get('errors', []) | length }}</dd></div>
+        <div><dt>警告</dt><dd>{{ candidate_validation.get('warnings', []) | length }}</dd></div>
+        <div><dt>引用覆盖率</dt><dd>{{ candidate_validation.get('coverage', {}).get('factual_citation_coverage', '—') }}</dd></div>
+      </dl>
+      {% endif %}
+      {% if candidate_preview %}<div class="report-preview candidate-preview">{{ candidate_preview | safe }}</div>{% else %}<p class="empty">候选正文当前不可读取，请重新生成。</p>{% endif %}
+      {% if citation_context and citation_context.limitations %}<details open><summary>限制与缺口</summary><ul>{% for item in citation_context.limitations %}<li>{{ item }}</li>{% endfor %}</ul></details>{% endif %}
+      {% if citation_context and citation_context.unresolved_conflicts %}<details><summary>未解决冲突</summary><ul>{% for item in citation_context.unresolved_conflicts %}<li>{{ item }}</li>{% endfor %}</ul></details>{% endif %}
+      <label for="promotion-note">审批备注（必填）</label>
+      <textarea id="promotion-note" rows="4" maxlength="4000" placeholder="记录审批依据、关注事项或使用限制"></textarea>
+      <button type="button" class="btn" id="btn-promote-grounded" data-report-id="{{ selected_report.id }}" data-run-id="{{ selected_report.grounded_run_id }}" {% if candidate_stale or not candidate_preview %}disabled{% endif %}>晋升为正式报告</button>
+      <p class="hint" id="promotion-msg" role="status"></p>
+    </div>
+    {% elif selected_report and selected_report.status in ['draft', 'failed'] %}
+    <div class="report-preview">
+      <h1 class="report-title">{% if selected_report.report_name %}{{ selected_report.report_name }}{% else %}{{ selected_report.industry_name }}{% if selected_report.company_name %} / {{ selected_report.company_name }}{% endif %}{% endif %} · v{{ selected_report.version }}</h1>
+      <p>当前为报告草稿。右侧数据源仅属于这份报告，确认材料后再开始生成。</p>
+      {% if selected_report.status == 'failed' %}<p class="empty">上次生成失败：{{ selected_report.error_message }}</p>{% endif %}
+      <button type="button" class="btn" id="btn-generate-report" data-report-id="{{ selected_report.id }}">生成当前报告</button>
+      <p class="hint" id="generation-msg"></p>
+    </div>
     {% elif selected_report and selected_report.status == 'running' %}
     <p class="empty">报告生成中，请刷新页面…</p>
     {% else %}
-    <p class="empty">请在左侧输入行业名称并生成分析报告；权威材料可在右侧「数据源」分栏上传。</p>
+    <p class="empty">请先在左侧创建报告草稿，再在右侧添加这份报告的专属数据源。</p>
     {% endif %}
   </section>
 </main>
+
+<dialog id="citation-dialog" class="citation-dialog" aria-labelledby="citation-dialog-title">
+  <div class="citation-dialog-header">
+    <h2 id="citation-dialog-title">证据详情</h2>
+    <button type="button" class="citation-close" aria-label="关闭证据详情">×</button>
+  </div>
+  <div id="citation-detail" class="citation-detail" aria-live="polite"></div>
+</dialog>
+{% endblock %}
+
+{% block source_panel %}
+{% include "partials/source_drawer.html" %}
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/industry.js"></script>
+<script src="/static/js/industry.js?v=20260806-1"></script>
 {% if selected_report and selected_report.chart_specs %}
 <script>
   window.INDUSTRY_CHARTS = {{ selected_report.chart_specs | safe }};

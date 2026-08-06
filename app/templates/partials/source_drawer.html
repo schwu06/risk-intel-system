@@ -1,10 +1,13 @@
-{# 右侧停靠数据源面板：收起后保留窄轨，开关图标位置固定 #}
+{# 右侧停靠数据源面板：每份报告拥有独立数据源组 #}
+{% set drawer_editable = drawer_report_status in ['draft', 'failed'] %}
 <aside
   class="sources-panel"
   id="source-drawer"
-  aria-label="数据源"
-  aria-hidden="false"
-  data-entity-id="{{ drawer_entity_id or '' }}"
+  aria-label="数据源"
+  aria-hidden="false"
+  data-source-scope="industry"
+  data-report-id="{{ drawer_report_id or '' }}"
+  data-report-status="{{ drawer_report_status or '' }}"
 >
   <div class="sources-panel-header">
     <h2 class="sources-panel-title">数据源</h2>
@@ -26,17 +29,13 @@
 
   <div class="sources-panel-content">
     <div class="sources-panel-actions">
-      <button type="button" class="sources-add-btn" id="btn-toggle-add-sources">
+      <button type="button" class="sources-add-btn" id="btn-toggle-add-sources" {% if not drawer_editable %}disabled{% endif %}>
         <span aria-hidden="true">+</span> 添加数据源
       </button>
 
       <div class="sources-add-box" id="sources-add-box" hidden>
         <p class="sources-add-label">
-          {% if drawer_entity_id %}
-          上传文件或添加网址，作为当前监控主体的专属参考素材
-          {% else %}
-          上传文件或添加网址，供各模块采集时优先参考
-          {% endif %}
+          上传文件或添加网址，仅归属于当前报告草稿。报告生成完成后，该组材料将被冻结。
         </p>
 
         <label class="sources-dropzone" id="sources-dropzone" for="global-upload-file">
@@ -44,12 +43,12 @@
             type="file"
             id="global-upload-file"
             name="file"
-            accept=".txt,.xlsx,.docx,.pdf"
+            accept=".txt,.xlsx,.docx,.pptx,.pdf"
             class="sources-file-input"
           />
           <span class="sources-dropzone-icon" aria-hidden="true">↑</span>
           <span class="sources-dropzone-title">点击或拖拽文件到此处上传</span>
-          <span class="sources-dropzone-hint">支持 txt / xlsx / docx / pdf</span>
+          <span class="sources-dropzone-hint">支持 txt / xlsx / docx / pptx / pdf（扫描 PDF 自动 OCR）</span>
         </label>
 
         <form class="stack-form" id="global-upload-form">
@@ -59,7 +58,7 @@
 
         <form class="stack-form" id="global-url-form">
           <input type="text" name="name" placeholder="链接名称" required />
-          <input type="url" name="url" placeholder="https://..." required />
+          <input type="url" name="url" placeholder="网页或 PDF 链接（https://...）" required />
           <button type="submit" class="btn small secondary">添加网址</button>
         </form>
 
@@ -78,13 +77,13 @@
           <button type="button" class="managed-source-main view-source" data-id="{{ src.id }}" title="点击查看">
             <span class="source-name">{{ src.name }}</span>
             <span class="source-meta">
-              {{ src.source_type }}
+              {% if src.source_type == 'network_search' %}网络搜索功能{% else %}{{ src.source_type }}{% endif %}
               {% if src.original_filename %} · {{ src.original_filename }}{% endif %}
               {% if src.url %} · 网址{% endif %}
               · {{ (src.extracted_text or '')|length }} 字
             </span>
           </button>
-          <button type="button" class="link-btn delete-source" data-id="{{ src.id }}">删除</button>
+          {% if drawer_editable or src.source_origin == 'network_search' or src.source_type == 'network_search' %}<button type="button" class="link-btn delete-source" data-id="{{ src.id }}">删除</button>{% endif %}
         </li>
         {% endfor %}
       </ul>
@@ -98,15 +97,13 @@
         </div>
         <p class="sources-empty-title">保存的数据源将显示在此处</p>
         <p class="sources-empty-desc">
-          {% if drawer_entity_id %}
-          可为当前主体添加文件、网站等专属材料；采集近24小时资讯时将优先参考。
-          {% else %}
-          可添加文件、网站等。采集时会优先参考这些权威材料，再结合 RSS / 秘塔结果生成日报。
-          {% endif %}
+          当前报告的数据源组为空。
         </p>
         <p class="sources-empty-hint">
-          将文件拖放到此处，或
-          <button type="button" class="text-link" id="btn-empty-add-source">添加数据源</button>
+          {% if drawer_editable %}将文件拖放到此处，或
+          <button type="button" class="text-link" id="btn-empty-add-source">添加数据源</button>
+          {% elif drawer_report_id %}已完成报告的数据源不可修改。
+          {% else %}请先在左侧创建报告草稿。{% endif %}
         </p>
       </div>
       {% endif %}
@@ -130,11 +127,11 @@
       <ul>
         <li>Google News RSS（按模块关键词检索）</li>
         <li>精选媒体 RSS：Reuters、BBC、NHK 等</li>
-        <li>秘塔（Metaso）网页搜索作广度补充</li>
+        <li>秘塔（Metaso）网页搜索作广度补充，结果自动加入当前研报数据源</li>
         <li>日本企业模块另提供披露门户核对入口（不直接入库）</li>
       </ul>
       <p><strong>大模型</strong>：DeepSeek 将检索结果整理为标题、摘要、分类、重要度、影响分析等字段；不编造材料中没有的事实。</p>
-      <p><strong>统一数据源</strong>：右侧面板上传的文件/网址对所有模块共用，流水线会优先从中提取事实。</p>
+      <p><strong>研报数据源</strong>：右侧面板中的文件和网址仅归属于当前报告；已完成报告保持只读，创建新版时会复制为一组独立材料。</p>
       <p><strong>空结果含义</strong>：「今日无动态」表示采集成功但无可推送条目；失败时会尽量保留上次结果。</p>
     </div>
   </div>

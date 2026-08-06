@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -60,6 +60,13 @@ class MitaSearchClient:
             "Accept": "application/json",
         }
 
+    def _search_url(self) -> str:
+        """构造普通网页 Search API 地址。"""
+        base = self.base_url.rstrip("/")
+        if base.endswith("/search"):
+            return base
+        return f"{base}/search"
+
     def _build_query(
         self,
         query: str,
@@ -88,7 +95,7 @@ class MitaSearchClient:
         payload: dict[str, Any] = {
             "q": effective_query,
             "scope": "webpage",
-            "size": max_results,
+            "size": max(1, min(int(max_results), 50)),
             "includeSummary": True,
             "includeRawContent": False,
             "conciseSnippet": False,
@@ -96,7 +103,7 @@ class MitaSearchClient:
         if extra_params:
             payload.update(extra_params)
 
-        url = f"{self.base_url}/search"
+        url = self._search_url()
         logger.info("秘塔搜索: q=%s", effective_query[:200])
 
         def _do_search() -> dict[str, Any] | list[Any]:
@@ -145,7 +152,7 @@ class MitaSearchClient:
             err = data.get("errMsg") or data.get("errCode")
             raise RuntimeError(f"秘塔搜索失败: {err}")
 
-        items = self._parse_items(data)
+        items = self._parse_items(data)[:max_results]
         if not items:
             logger.warning(
                 "秘塔搜索未解析到任何结果，响应键: %s",
@@ -164,16 +171,20 @@ class MitaSearchClient:
 
     def _parse_items(self, data: dict[str, Any]) -> list[MitaSearchResultItem]:
         candidates: list[Any] = []
+        answer_text = ""
         if isinstance(data, list):
             candidates = data
         elif isinstance(data, dict):
+            payload_data = data.get("data")
+            if isinstance(payload_data, dict):
+                answer_text = str(payload_data.get("text") or "")
             for key in ("webpages", "results", "items", "data", "list", "records"):
                 block = data.get(key)
                 if isinstance(block, list):
                     candidates = block
                     break
                 if isinstance(block, dict):
-                    for sub in ("webpages", "items", "list", "results"):
+                    for sub in ("references", "webpages", "items", "list", "results"):
                         inner = block.get(sub)
                         if isinstance(inner, list):
                             candidates = inner
@@ -190,14 +201,18 @@ class MitaSearchClient:
                 or row.get("link")
                 or row.get("href")
                 or row.get("sourceUrl")
+                or ((row.get("file_meta") or {}).get("url") if isinstance(row.get("file_meta"), dict) else "")
                 or ""
             )
+            if url.startswith("/"):
+                url = urljoin("https://metaso.cn", url)
             snippet = str(
                 row.get("snippet")
                 or row.get("summary")
                 or row.get("content")
                 or row.get("abstract")
                 or row.get("desc")
+                or answer_text
                 or ""
             )
             title = str(row.get("title") or row.get("name") or row.get("siteName") or url or "无标题")
@@ -217,6 +232,15 @@ class MitaSearchClient:
                     snippet=snippet,
                     published_at=str(published) if published else None,
                     source_domain=str(domain) if domain else None,
+                )
+            )
+        if not parsed and answer_text:
+            parsed.append(
+                MitaSearchResultItem(
+                    title="秘塔网络搜索摘要",
+                    url="",
+                    snippet=answer_text,
+                    source_domain="metaso.cn",
                 )
             )
         return parsed

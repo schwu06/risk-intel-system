@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}{{ page_title }} — {{ app_name }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/css/dashboard.css" />
+  <link rel="stylesheet" href="/static/css/dashboard.css?v=20260805-2" />
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
   {% block head_extra %}{% endblock %}
 </head>
@@ -24,16 +24,16 @@
     </div>
   </header>
 
-  {# 三栏顺序：操作/统计侧栏 → 主内容 → 数据源；各栏独立滚动 #}
+  {# 页面默认两栏；仅深度研报通过 source_panel block 增加右侧数据源栏。 #}
   <div class="app-shell" id="app-shell">
     {% block page_sidebar %}{% endblock %}
     <div class="app-main">
       {% block content %}{% endblock %}
     </div>
-    {% include "partials/source_drawer.html" %}
+    {% block source_panel %}{% endblock %}
   </div>
 
-  <script src="/static/js/dashboard.js"></script>
+  <script src="/static/js/dashboard.js?v=20260805-3"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

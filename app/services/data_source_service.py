@@ -3,20 +3,42 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import html
+import json
+import re
+import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from sqlalchemy.orm import Session
 
-from app.database.models import IndustryDataSource, ModuleDataSource
-from app.services.data_source_parser import fetch_url_text, parse_uploaded_file, truncate_text
+from app.database.models import IndustryDataSource, IndustryReport, IndustrySourceChunk, ModuleDataSource
+from app.services.data_source_parser import (
+    fetch_url_source,
+    fetch_url_text,
+    parse_text_with_chunks,
+    parse_uploaded_file,
+    parse_uploaded_file_with_chunks,
+    truncate_text,
+)
+from app.services.source_registry import (
+    apply_registry_metadata,
+    build_chunk_rows,
+    build_registry_metadata,
+    infer_mime_type,
+)
 
 logger = logging.getLogger(__name__)
 
 UPLOAD_ROOT = Path("data/uploads/modules")
-INDUSTRY_UPLOAD_ROOT = Path("data/uploads/industry")
+INDUSTRY_UPLOAD_ROOT = Path("data/uploads/industry_reports")
 # 统一数据源标记（兼容旧按模块上传的记录：列表与读取时一并纳入）
 GLOBAL_SOURCE_CODE = "ALL"
+
+
+class IndustryReportNotEditableError(ValueError):
+    """目标报告已经冻结，不能再修改其数据源。"""
 
 
 def ensure_upload_dirs() -> None:
@@ -111,7 +133,11 @@ def save_module_file_source(
             dest = dest_dir / f"{stem}_{counter}{suffix}"
             counter += 1
     dest.write_bytes(file_bytes)
-    extracted = truncate_text(parse_uploaded_file(dest))
+    try:
+        extracted = truncate_text(parse_uploaded_file(dest))
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
     row = ModuleDataSource(
         module_code=code,
         entity_id=entity_id,
@@ -166,104 +192,417 @@ def delete_module_source(db: Session, source_id: int) -> bool:
     return True
 
 
-def list_industry_sources(db: Session, industry_name: str) -> list[IndustryDataSource]:
+def list_industry_sources(db: Session, report_id: int) -> list[IndustryDataSource]:
     return (
         db.query(IndustryDataSource)
-        .filter(
-            IndustryDataSource.industry_name == industry_name,
-            IndustryDataSource.is_active.is_(True),
-        )
-        .order_by(IndustryDataSource.created_at.desc())
+        .filter(IndustryDataSource.report_id == report_id)
+        .order_by(IndustryDataSource.created_at.asc(), IndustryDataSource.id.asc())
         .all()
     )
 
 
-def get_industry_authoritative_text(db: Session, industry_name: str, max_chars: int = 100_000) -> str:
-    """研报优先使用统一数据源，并合并该行业历史专用源（若有）。"""
-    shared = get_shared_authoritative_text(db, max_chars=max_chars // 2)
-    sources = list_industry_sources(db, industry_name)
+def get_industry_source_by_id(
+    db: Session, source_id: int
+) -> Optional[IndustryDataSource]:
+    return db.query(IndustryDataSource).filter(IndustryDataSource.id == source_id).first()
+
+
+def list_industry_source_chunks(
+    db: Session, report_id: int, source_id: int
+) -> list[IndustrySourceChunk]:
+    return (
+        db.query(IndustrySourceChunk)
+        .filter(
+            IndustrySourceChunk.report_id == report_id,
+            IndustrySourceChunk.source_id == source_id,
+        )
+        .order_by(IndustrySourceChunk.chunk_index.asc())
+        .all()
+    )
+
+
+def build_industry_authoritative_text(
+    db: Session, report_id: int, max_chars: int = 100_000
+) -> tuple[str, list[dict]]:
+    """构建单份报告的输入，并记录每个来源实际进入模型的字符数。"""
+    sources = [s for s in list_industry_sources(db, report_id) if (s.extracted_text or "").strip()]
     blocks: list[str] = []
-    used = len(shared)
-    for src in sources:
+    manifest: list[dict] = []
+    remaining = max_chars
+    for index, src in enumerate(sources):
         text = (src.extracted_text or "").strip()
-        if not text:
-            continue
-        header = f"【行业数据源: {src.name}】"
-        chunk = f"{header}\n{text}"
-        if used + len(chunk) > max_chars:
-            remaining = max_chars - used
-            if remaining <= 200:
-                break
-            chunk = chunk[:remaining] + "\n...[截断]"
+        if src.source_type == "network_search":
+            # Keep the original fields visible in the source viewer for audit,
+            # but do not feed untranslated trace text back into report writing.
+            text = "\n".join(
+                line for line in text.splitlines()
+                if not line.startswith(("原始标题：", "原始摘要（追溯）："))
+            ).strip()
+        header = f"【研报数据源 #{src.id}: {src.name}】\n"
+        separator_cost = 2 if blocks else 0
+        available = max(0, remaining - separator_cost)
+        sources_left = len(sources) - index
+        allocation = max(0, available // sources_left)
+        marker = "\n...[本数据源因上下文上限截断]"
+        raw_body_budget = max(0, allocation - len(header))
+        will_truncate = len(text) > raw_body_budget
+        body_budget = max(0, raw_body_budget - (len(marker) if will_truncate else 0))
+        included = min(len(text), body_budget)
+        chunk = header + text[:included]
+        truncated = included < len(text)
+        if truncated:
+            chunk += marker
         blocks.append(chunk)
-        used += len(chunk)
-    industry_part = "\n\n".join(blocks)
-    if shared and industry_part:
-        return f"{shared}\n\n{industry_part}"
-    return shared or industry_part
+        remaining = max(0, remaining - separator_cost - len(chunk))
+        manifest.append(
+            {
+                "source_id": src.id,
+                "name": src.name,
+                "source_type": src.source_type,
+                "content_hash": src.content_hash,
+                "attached_chars": len(text),
+                "included_chars": included,
+                "truncated": truncated,
+            }
+        )
+    return "\n\n".join(blocks), manifest
+
+
+def get_industry_authoritative_text(db: Session, report_id: int, max_chars: int = 100_000) -> str:
+    text, _ = build_industry_authoritative_text(db, report_id, max_chars=max_chars)
+    return text
+
+
+def _editable_industry_report(db: Session, report_id: int) -> IndustryReport:
+    report = (
+        db.query(IndustryReport)
+        .populate_existing()
+        .filter(IndustryReport.id == report_id)
+        .first()
+    )
+    if not report:
+        raise ValueError("报告不存在")
+    if report.status not in {"draft", "failed"}:
+        raise IndustryReportNotEditableError("只有草稿或生成失败的报告可以修改数据源")
+    if report.status == "failed":
+        report.status = "draft"
+        report.error_message = None
+    return report
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _summarize_network_title(title: str, snippet: str, max_chars: int = 72) -> str:
+    """将搜索结果标题压缩成适合侧栏展示的一行摘要。"""
+    candidate = html.unescape((title or "").strip())
+    if not candidate:
+        candidate = html.unescape((snippet or "").strip()).split("。", 1)[0]
+    candidate = re.sub(r"\s+", " ", candidate).strip(" -_|｜") or "网络搜索结果"
+    if len(candidate) > max_chars:
+        candidate = candidate[: max_chars - 1].rstrip() + "…"
+    return candidate
+
+
+def append_industry_network_search_sources(
+    db: Session,
+    report_id: int,
+    items: list[object],
+    translator: Optional[Callable[[str, str], tuple[str, str]]] = None,
+    require_translation: bool = False,
+) -> list[IndustryDataSource]:
+    """把补充网络搜索结果固化为当前报告的专属数据源。
+
+    该入口只供正在生成的报告调用；按 URL 和内容哈希去重，避免失败重试或
+    新版继承后重复写入同一搜索结果。
+    """
+    report = (
+        db.query(IndustryReport)
+        .populate_existing()
+        .filter(IndustryReport.id == report_id)
+        .first()
+    )
+    if not report:
+        raise ValueError("报告不存在")
+    if report.status != "running":
+        raise ValueError("网络搜索结果只能写入正在生成的报告")
+
+    existing = list_industry_sources(db, report_id)
+    existing_urls = {(src.url or "").strip() for src in existing if src.url}
+    existing_hashes = {src.content_hash for src in existing if src.content_hash}
+    created: list[IndustryDataSource] = []
+    try:
+        for item in items:
+            title = str(getattr(item, "title", "") or "")
+            url = str(getattr(item, "url", "") or "").strip()
+            snippet = str(getattr(item, "snippet", "") or "")
+            published_at = str(getattr(item, "published_at", "") or "")
+            source_domain = str(getattr(item, "source_domain", "") or "")
+            original_title = re.sub(r"\s+", " ", html.unescape(title)).strip()
+            original_snippet = re.sub(r"\s+", " ", html.unescape(snippet)).strip()
+            if translator is not None:
+                translated_title, translated_snippet = translator(title, snippet)
+                summary_title = _summarize_network_title(translated_title, translated_snippet)
+                display_snippet = str(translated_snippet or "").strip()
+            else:
+                summary_title = _summarize_network_title(title, snippet)
+                display_snippet = original_snippet
+            if require_translation and not re.search(r"[\u4e00-\u9fff]", summary_title + display_snippet):
+                raise ValueError("network_source_translation_not_chinese")
+            text = "\n".join(
+                part
+                for part in (
+                    "【来源：补充网络搜索功能】",
+                    f"标题摘要：{summary_title}",
+                    f"原始标题：{original_title}",
+                    f"来源网站：{source_domain}" if source_domain else "",
+                    f"发布时间：{published_at}" if published_at else "",
+                    f"搜索摘要：{display_snippet}",
+                    f"原始摘要（追溯）：{original_snippet}" if translator else "",
+                    f"原始链接：{url}" if url else "",
+                )
+                if part
+            )
+            content_hash = _content_hash(text)
+            if (url and url in existing_urls) or content_hash in existing_hashes:
+                continue
+            parsed = parse_text_with_chunks(text, format_name="network_search")
+            metadata = build_registry_metadata(
+                raw_content=text.encode("utf-8"),
+                parsed=parsed,
+                source_origin="network_search",
+                mime_type="text/plain",
+                published_at=published_at or None,
+                is_full_text=False,
+            )
+            row = IndustryDataSource(
+                report_id=report_id,
+                name=summary_title,
+                source_type="network_search",
+                url=url or None,
+                extracted_text=parsed.extracted_text,
+                content_hash=content_hash,
+                char_count=len(parsed.extracted_text),
+            )
+            apply_registry_metadata(row, metadata)
+            db.add(row)
+            db.flush()
+            db.add_all(build_chunk_rows(report_id=report_id, source_id=row.id, parsed=parsed))
+            created.append(row)
+            if url:
+                existing_urls.add(url)
+            existing_hashes.add(content_hash)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    for row in created:
+        db.refresh(row)
+    return created
+
+
+def _unique_destination(report_id: int, filename: str) -> Path:
+    dest_dir = INDUSTRY_UPLOAD_ROOT / str(report_id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(filename).name
+    dest = dest_dir / safe_name
+    counter = 1
+    while dest.exists():
+        dest = dest_dir / f"{Path(safe_name).stem}_{counter}{Path(safe_name).suffix}"
+        counter += 1
+    return dest
 
 
 def save_industry_file_source(
     db: Session,
-    industry_name: str,
+    report_id: int,
     name: str,
     filename: str,
     file_bytes: bytes,
 ) -> IndustryDataSource:
+    _editable_industry_report(db, report_id)
     ensure_upload_dirs()
-    dest_dir = INDUSTRY_UPLOAD_ROOT / _safe_dirname(industry_name)
-    dest_dir.mkdir(parents=True, exist_ok=True)
     safe_name = Path(filename).name
-    dest = dest_dir / safe_name
-    if dest.exists():
-        stem, suffix = dest.stem, dest.suffix
-        counter = 1
-        while dest.exists():
-            dest = dest_dir / f"{stem}_{counter}{suffix}"
-            counter += 1
+    dest = _unique_destination(report_id, safe_name)
     dest.write_bytes(file_bytes)
-    extracted = truncate_text(parse_uploaded_file(dest))
-    row = IndustryDataSource(
-        industry_name=industry_name,
-        name=name or safe_name,
-        source_type="file",
-        file_path=str(dest),
-        original_filename=safe_name,
-        extracted_text=extracted,
-    )
-    db.add(row)
-    db.commit()
+    try:
+        parsed = parse_uploaded_file_with_chunks(dest)
+        metadata = build_registry_metadata(
+            raw_content=file_bytes,
+            parsed=parsed,
+            source_origin="customer_file",
+            mime_type=infer_mime_type(safe_name),
+            is_full_text=True,
+        )
+    except Exception as exc:
+        dest.unlink(missing_ok=True)
+        raise ValueError(f"文件解析失败: {exc}") from exc
+    try:
+        _editable_industry_report(db, report_id)
+        row = IndustryDataSource(
+            report_id=report_id,
+            name=name or safe_name,
+            source_type="file",
+            file_path=str(dest),
+            original_filename=safe_name,
+            extracted_text=parsed.extracted_text,
+            # Preserve the existing content_hash contract: hash of extracted text.
+            content_hash=_content_hash(parsed.extracted_text),
+            char_count=len(parsed.extracted_text),
+        )
+        apply_registry_metadata(row, metadata)
+        db.add(row)
+        db.flush()
+        db.add_all(build_chunk_rows(report_id=report_id, source_id=row.id, parsed=parsed))
+        db.commit()
+    except Exception:
+        db.rollback()
+        dest.unlink(missing_ok=True)
+        raise
     db.refresh(row)
     return row
 
 
 def save_industry_url_source(
     db: Session,
-    industry_name: str,
+    report_id: int,
     name: str,
     url: str,
 ) -> IndustryDataSource:
-    text = truncate_text(fetch_url_text(url))
-    row = IndustryDataSource(
-        industry_name=industry_name,
-        name=name or url,
-        source_type="url",
-        url=url,
-        extracted_text=text,
-    )
-    db.add(row)
-    db.commit()
+    _editable_industry_report(db, report_id)
+    try:
+        fetched = fetch_url_source(url)
+        metadata = build_registry_metadata(
+            raw_content=fetched.raw_content,
+            parsed=fetched.parsed,
+            source_origin="customer_url",
+            mime_type=fetched.mime_type,
+            is_full_text=True,
+        )
+        _editable_industry_report(db, report_id)
+        row = IndustryDataSource(
+            report_id=report_id,
+            name=name or url,
+            source_type="url",
+            url=url,
+            extracted_text=fetched.parsed.extracted_text,
+            content_hash=_content_hash(fetched.parsed.extracted_text),
+            char_count=len(fetched.parsed.extracted_text),
+        )
+        apply_registry_metadata(row, metadata)
+        db.add(row)
+        db.flush()
+        db.add_all(
+            build_chunk_rows(report_id=report_id, source_id=row.id, parsed=fetched.parsed)
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(row)
     return row
 
 
-def delete_industry_source(db: Session, source_id: int) -> bool:
-    row = db.query(IndustryDataSource).filter(IndustryDataSource.id == source_id).first()
+def clone_industry_sources(db: Session, source_report_id: int, target_report_id: int) -> int:
+    _editable_industry_report(db, target_report_id)
+    count = 0
+    for src in list_industry_sources(db, source_report_id):
+        copied_path: str | None = None
+        if src.file_path and Path(src.file_path).is_file():
+            filename = src.original_filename or Path(src.file_path).name
+            dest = _unique_destination(target_report_id, filename)
+            shutil.copy2(src.file_path, dest)
+            copied_path = str(dest)
+        clone = IndustryDataSource(
+            report_id=target_report_id,
+            copied_from_source_id=src.id,
+            name=src.name,
+            source_type=src.source_type,
+            file_path=copied_path,
+            original_filename=src.original_filename,
+            url=src.url,
+            extracted_text=src.extracted_text,
+            content_hash=src.content_hash,
+            char_count=src.char_count,
+            raw_content_hash=src.raw_content_hash,
+            extracted_text_hash=src.extracted_text_hash,
+            mime_type=src.mime_type,
+            file_size=src.file_size,
+            source_origin=src.source_origin,
+            source_publisher=src.source_publisher,
+            published_at=src.published_at,
+            retrieved_at=src.retrieved_at,
+            is_full_text=src.is_full_text,
+            is_truncated=src.is_truncated,
+            parse_status=src.parse_status,
+            parse_warning=src.parse_warning,
+            used_ocr=src.used_ocr,
+            page_count=src.page_count,
+            slide_count=src.slide_count,
+            sheet_count=src.sheet_count,
+            evidence_grade=src.evidence_grade,
+        )
+        db.add(clone)
+        db.flush()
+        for source_chunk in sorted(src.chunks, key=lambda item: item.chunk_index):
+            db.add(
+                IndustrySourceChunk(
+                    report_id=target_report_id,
+                    source_id=clone.id,
+                    chunk_index=source_chunk.chunk_index,
+                    text=source_chunk.text,
+                    locator=source_chunk.locator,
+                    page_number=source_chunk.page_number,
+                    slide_number=source_chunk.slide_number,
+                    sheet_name=source_chunk.sheet_name,
+                    cell_range=source_chunk.cell_range,
+                    row_range=source_chunk.row_range,
+                    paragraph_index=source_chunk.paragraph_index,
+                    table_index=source_chunk.table_index,
+                    table_row_index=source_chunk.table_row_index,
+                    char_start=source_chunk.char_start,
+                    char_end=source_chunk.char_end,
+                    content_hash=source_chunk.content_hash,
+                )
+            )
+        count += 1
+    _editable_industry_report(db, target_report_id)
+    db.commit()
+    return count
+
+
+def delete_industry_source(db: Session, report_id: int, source_id: int) -> bool:
+    row = (
+        db.query(IndustryDataSource)
+        .filter(IndustryDataSource.id == source_id, IndustryDataSource.report_id == report_id)
+        .first()
+    )
     if not row:
         return False
+    report = db.query(IndustryReport).filter(IndustryReport.id == report_id).first()
+    if not report:
+        return False
+    # Network-search leads are explicitly removable after generation; customer
+    # sources retain the existing draft/failed edit lock.
+    if report.status not in {"draft", "failed", "running"} and row.source_origin != "network_search" and row.source_type != "network_search":
+        raise IndustryReportNotEditableError("completed_report_customer_source_locked")
+    if report.status == "failed":
+        report.status = "draft"
+        report.error_message = None
     if row.file_path:
         Path(row.file_path).unlink(missing_ok=True)
     db.delete(row)
+    if report.source_manifest_json:
+        try:
+            manifest = json.loads(report.source_manifest_json)
+            if isinstance(manifest, list):
+                report.source_manifest_json = json.dumps(
+                    [item for item in manifest if item.get("source_id") != source_id],
+                    ensure_ascii=False,
+                )
+        except (TypeError, ValueError):
+            logger.warning("无法更新已完成报告的数据源清单: report_id=%s", report_id)
     db.commit()
     return True
 
