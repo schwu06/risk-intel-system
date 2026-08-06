@@ -48,10 +48,11 @@ from app.services.news_section_router import (
 from app.services.recency import is_within_hours, parse_published_at
 from app.services.rss_news import RssNewsCollector
 from app.services.scrapers.direct_site_collector import DirectSiteCollector
+from app.services.scrapers.godiva_source_collector import GodivaSourceCollector
 from app.services.scrapers.official_portals import OfficialPortalScraper
 from app.services.scrapers.sina_724_collector import Sina724Collector
 from app.services.scrapers.tdnet_collector import TdnetCollector
-from app.timeutil import tokyo_now
+from app.timeutil import TOKYO, tokyo_now, tokyo_today
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class RiskPipeline:
         authority_text: Optional[str] = None,
         entity_id: Optional[int] = None,
         window_hours: Optional[int] = None,
+        direct_sites_config=None,
     ) -> None:
         self.db = db
         self.mita = mita or MitaSearchClient()
@@ -82,10 +84,15 @@ class RiskPipeline:
         self.window_hours = int(window_hours if window_hours is not None else default_hours)
         if self.window_hours < 1:
             self.window_hours = NEWS_WINDOW_HOURS_24
+        # 入库时效键；补采历史日时可与采集窗不同（采集窗放大，仍按 24 写入按日快照）
+        self._persist_window_hours: Optional[int] = None
+        self.calendar_day: Optional[date] = None
+        self._backfill_adjusted = False
         self.job_id = job_id
         # None = 实时读取数据源；非 None（含空串）= 任务启动时冻结的快照，运行中变更不影响本次
         self._authority_snapshot = authority_text
         self.entity_id = entity_id
+        self._direct_sites_config = direct_sites_config
         self.llm_top_k = int(getattr(self.settings, "pipeline_llm_top_k", 12) or 12)
         self.cache_hours = int(getattr(self.settings, "pipeline_llm_cache_hours", 168) or 168)
         self.mita_pause = float(getattr(self.settings, "pipeline_mita_query_pause_seconds", 0.8) or 0)
@@ -99,11 +106,48 @@ class RiskPipeline:
                 retry_backoff=float(getattr(self.settings, "network_retry_backoff_seconds", 1.5) or 1.5),
             )
 
+    @property
+    def persist_hours(self) -> int:
+        if self._persist_window_hours is not None:
+            return int(self._persist_window_hours)
+        return int(self.window_hours)
+
+    def _prepare_day_snapshot(self, module_code: str, report_date: date) -> None:
+        """历史日缺快照补采：放大采集窗，入库仍写 window_hours=24，并按东京日历日过滤。"""
+        if self._backfill_adjusted:
+            return
+        if module_code not in NEWS_MODULES:
+            return
+        if int(self.window_hours) != NEWS_WINDOW_HOURS_24:
+            return
+        if report_date >= tokyo_today():
+            return
+        start = datetime.combine(report_date, datetime.min.time())
+        hours = int((tokyo_now() - start).total_seconds() / 3600) + 1
+        hours = max(NEWS_WINDOW_HOURS_24, min(168, hours))
+        self.window_hours = hours
+        self._persist_window_hours = NEWS_WINDOW_HOURS_24
+        self.calendar_day = report_date
+        self._backfill_adjusted = True
+
+    def _published_on_calendar_day(self, published_at: Optional[datetime]) -> bool:
+        """无 calendar_day 约束时放行；有约束时要求发布时间落在该东京日。"""
+        if self.calendar_day is None:
+            return True
+        if published_at is None:
+            return False
+        if published_at.tzinfo is not None:
+            local = published_at.astimezone(TOKYO).replace(tzinfo=None)
+        else:
+            local = published_at
+        return local.date() == self.calendar_day
+
     def run_module(self, module_code: str, report_date: date) -> int:
         module_code = module_code.upper()
         if module_code not in MODULE_CODES:
             raise ValueError(f"未知模块: {module_code}")
 
+        self._prepare_day_snapshot(module_code, report_date)
         run = self._ensure_run(report_date, module_code)
         # 先清掉历史误入库的检索入口占位，避免页面继续展示假新闻
         purged_early = self._purge_non_news_placeholders(report_date, module_code)
@@ -195,6 +239,24 @@ class RiskPipeline:
                 fail_notes.append(f"直连站点: {exc}")
                 funnel["source_fail"].append("direct_site")
                 logger.warning("模块 %s 直连站点采集失败（已跳过）: %s", module_code, exc)
+
+            if module_code in ("A",):
+                try:
+                    godiva_batch = self._collect_godiva_sources(module_code, funnel)
+                    if godiva_batch["items"]:
+                        batches.append(godiva_batch)
+                        source_ok += 1
+                    elif godiva_batch.get("error"):
+                        err = str(godiva_batch.get("error") or "")
+                        if "无条目" not in err:
+                            source_fail += 1
+                            fail_notes.append(f"Godiva信源: {err}")
+                            funnel["source_fail"].append("godiva_source")
+                except Exception as exc:
+                    source_fail += 1
+                    fail_notes.append(f"Godiva信源: {exc}")
+                    funnel["source_fail"].append("godiva_source")
+                    logger.warning("模块 %s Godiva 信源采集失败（已跳过）: %s", module_code, exc)
 
             if module_code in ("B", "D"):
                 try:
@@ -582,8 +644,11 @@ class RiskPipeline:
         self, module_code: str, funnel: dict[str, Any]
     ) -> dict[str, Any]:
         """无 RSS 直连网站 HTML 列表采集（config/direct_sites.yaml）。"""
-        path = getattr(self.settings, "direct_sites_config_path", None) or None
-        collector = DirectSiteCollector(config_path=path)
+        if self._direct_sites_config is not None:
+            collector = DirectSiteCollector(config=self._direct_sites_config)
+        else:
+            path = getattr(self.settings, "direct_sites_config_path", None) or None
+            collector = DirectSiteCollector(config_path=path)
         configured = collector.config.sites_for_module(module_code)
         if not configured:
             funnel["direct_site_fetched"] = 0
@@ -639,6 +704,59 @@ class RiskPipeline:
                 "source": "direct_site",
                 "sites": [s.label for s in configured],
             },
+            "error": None if items else "近窗内无条目",
+        }
+
+    def _collect_godiva_sources(
+        self, module_code: str, funnel: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Godiva 供应链/品牌关联无 RSS 信源（COCOBOD / ICCO / 欧盟观测站 / 日本百货店协会）。"""
+        collector = GodivaSourceCollector(
+            retry_attempts=int(getattr(self.settings, "network_retry_attempts", 3) or 3),
+            retry_backoff=float(
+                getattr(self.settings, "network_retry_backoff_seconds", 1.5) or 1.5
+            ),
+        )
+        hits = collector.collect_for_module(
+            module_code, hours=self.window_hours, max_items=self.collect_max_items
+        )
+        funnel["godiva_source_fetched"] = len(hits)
+        items = [
+            {
+                "title": h.title,
+                "url": h.url,
+                "snippet": h.snippet,
+                "published_at": h.published_at,
+                "source_domain": h.source_domain,
+                "feed": h.feed_label,
+                "fingerprint": content_fingerprint(
+                    module_code=module_code,
+                    title=h.title,
+                    url=h.url,
+                    published_at=h.published_at,
+                ),
+            }
+            for h in hits
+        ]
+        if items and self.settings.news_fetch_body:
+            items = enrich_items_with_body(
+                items,
+                max_items=min(8, int(self.settings.news_max_body_items or 8)),
+            )
+        log = SearchLog(
+            module_code=module_code,
+            query_text=f"[Godiva信源 近{self.window_hours}小时]",
+            status="completed" if items else "empty",
+            result_count=len(items),
+            raw_response=json.dumps({"items": items}, ensure_ascii=False)[:50000],
+        )
+        self.db.add(log)
+        self.db.flush()
+        return {
+            "source": "godiva_source",
+            "items": items,
+            "search_log_id": log.id,
+            "metadata": {"source": "godiva_source"},
             "error": None if items else "近窗内无条目",
         }
 
@@ -882,7 +1000,13 @@ class RiskPipeline:
         """主源（RSS / 直连站点 / 新浪7x24 / TDnet）有效候选数；不含秘塔与权威上传正文。"""
         primary_items: list[dict[str, Any]] = []
         for batch in batches:
-            if batch.get("source") not in ("rss", "tdnet", "direct_site", "sina_724"):
+            if batch.get("source") not in (
+                "rss",
+                "tdnet",
+                "direct_site",
+                "sina_724",
+                "godiva_source",
+            ):
                 continue
             primary_items.extend(batch.get("items") or [])
         return self._count_valid_items(primary_items, module_code)
@@ -1263,7 +1387,7 @@ class RiskPipeline:
                 .filter(
                     NewsArticle.report_date == report_date,
                     NewsArticle.module_code == module_code,
-                    NewsArticle.window_hours == self.window_hours,
+                    NewsArticle.window_hours == self.persist_hours,
                 )
                 .all()
             )
@@ -1294,7 +1418,7 @@ class RiskPipeline:
             .filter(
                 DailyRiskEntry.report_date == report_date,
                 DailyRiskEntry.module_code == module_code,
-                DailyRiskEntry.window_hours == self.window_hours,
+                DailyRiskEntry.window_hours == self.persist_hours,
             )
             .all()
         )
@@ -1384,7 +1508,7 @@ class RiskPipeline:
             .filter(
                 ReportRun.report_date == report_date,
                 ReportRun.module_code == module_code,
-                ReportRun.window_hours == self.window_hours,
+                ReportRun.window_hours == self.persist_hours,
             )
             .first()
         )
@@ -1392,7 +1516,7 @@ class RiskPipeline:
             run = ReportRun(
                 report_date=report_date,
                 module_code=module_code,
-                window_hours=self.window_hours,
+                window_hours=self.persist_hours,
                 status="running",
             )
             self.db.add(run)
@@ -1427,7 +1551,7 @@ class RiskPipeline:
                 .filter(
                     NewsArticle.report_date == report_date,
                     NewsArticle.module_code == module_code,
-                    NewsArticle.window_hours == self.window_hours,
+                    NewsArticle.window_hours == self.persist_hours,
                 )
                 .count()
             )
@@ -1441,7 +1565,7 @@ class RiskPipeline:
             .filter(
                 DailyRiskEntry.report_date == report_date,
                 DailyRiskEntry.module_code == module_code,
-                DailyRiskEntry.window_hours == self.window_hours,
+                DailyRiskEntry.window_hours == self.persist_hours,
             )
             .count()
         )
@@ -1452,7 +1576,7 @@ class RiskPipeline:
             self.db.query(NewsArticle).filter(
                 NewsArticle.report_date == report_date,
                 NewsArticle.module_code == module_code,
-                NewsArticle.window_hours == self.window_hours,
+                NewsArticle.window_hours == self.persist_hours,
             ).delete(synchronize_session=False)
 
         if module_code in ENTITY_MODULES:
@@ -1475,7 +1599,7 @@ class RiskPipeline:
             self.db.query(DailyRiskEntry).filter(
                 DailyRiskEntry.report_date == report_date,
                 DailyRiskEntry.module_code == module_code,
-                DailyRiskEntry.window_hours == self.window_hours,
+                DailyRiskEntry.window_hours == self.persist_hours,
             ).delete(synchronize_session=False)
         self.db.commit()
 
@@ -1543,7 +1667,7 @@ class RiskPipeline:
             .filter(
                 DailyRiskEntry.report_date == report_date,
                 DailyRiskEntry.module_code.in_(tuple(NEWS_MODULES)),
-                DailyRiskEntry.window_hours == self.window_hours,
+                DailyRiskEntry.window_hours == self.persist_hours,
             )
             .all()
         )
@@ -1595,7 +1719,7 @@ class RiskPipeline:
                     structured_json=entry.structured_json,
                     search_log_id=entry.search_log_id,
                     published_at=entry.published_at,
-                    window_hours=self.window_hours,
+                    window_hours=self.persist_hours,
                 )
                 self.db.add(clone)
                 self.db.flush()
@@ -1610,7 +1734,7 @@ class RiskPipeline:
                         NewsArticle(
                             report_date=report_date,
                             module_code=target,
-                            window_hours=self.window_hours,
+                            window_hours=self.persist_hours,
                             category_tag=src_news.category_tag,
                             country_or_region=src_news.country_or_region,
                             target_entity=src_news.target_entity,
@@ -1632,7 +1756,7 @@ class RiskPipeline:
                         NewsArticle(
                             report_date=report_date,
                             module_code=target,
-                            window_hours=self.window_hours,
+                            window_hours=self.persist_hours,
                             category_tag=entry.pillar_or_topic or entry.risk_category,
                             country_or_region=entry.country_or_region,
                             target_entity=entry.target_entity,
@@ -1696,6 +1820,8 @@ class RiskPipeline:
                 # 降级条目若带时间且过期则丢弃；无时间保留
                 if not row.get("_degraded"):
                     continue
+            if not self._published_on_calendar_day(published_at):
+                continue
 
             seen_titles.add(title_key)
             meta = dict(row.get("_metadata") or metadata or {})
@@ -1732,7 +1858,7 @@ class RiskPipeline:
                 structured_json=json.dumps(enriched, ensure_ascii=False),
                 search_log_id=search_log_id or row.get("_search_log_id"),
                 published_at=published_at,
-                window_hours=self.window_hours,
+                window_hours=self.persist_hours,
             )
             self.db.add(entry)
             self.db.flush()
@@ -1768,7 +1894,7 @@ class RiskPipeline:
                     NewsArticle(
                         report_date=entry.report_date,
                         module_code=entry.module_code,
-                        window_hours=self.window_hours,
+                        window_hours=self.persist_hours,
                         category_tag=entry.pillar_or_topic or entry.risk_category,
                         country_or_region=entry.country_or_region,
                         target_entity=entry.target_entity,

@@ -68,6 +68,7 @@ class PipelineJobStatusOut(BaseModel):
     snapshot: Optional[dict] = None
     entity_id: Optional[int] = None
     window_hours: Optional[int] = None
+    scope: Optional[str] = None
 
 
 class ManualEntryIn(BaseModel):

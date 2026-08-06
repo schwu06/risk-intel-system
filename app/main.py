@@ -22,6 +22,7 @@ from app.services.domain_rules import seed_default_domains
 from app.services.industry_analysis import IndustryAnalysisService
 from app.services.pipeline import RISK_LEVEL_ORDER
 from app.services.scheduler import shutdown_scheduler, start_scheduler
+from app.timeutil import tokyo_day_tabs, tokyo_today
 from app.services.social_source import resolve_social_source
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -75,7 +76,7 @@ def on_shutdown():
 
 def _parse_report_date(value: str | None) -> date:
     if not value:
-        return date.today()
+        return tokyo_today()
     try:
         return date.fromisoformat(value)
     except ValueError as exc:
@@ -142,7 +143,27 @@ def _daily_news_context(
     allowed_codes = tuple(allowed.keys())
     meta = PAGE_META[page_key]
     window_hours = int(meta.get("window_hours") or NEWS_WINDOW_HOURS_24)
+    # 7×24：按日快照，与近24小时共用 window_hours=24
+    if page_key == "news_7x24":
+        window_hours = NEWS_WINDOW_HOURS_24
     rd = _parse_report_date(report_date)
+    today = tokyo_today()
+    day_tabs: list[dict] = []
+    if page_key == "news_7x24":
+        for d in tokyo_day_tabs(7):
+            day_tabs.append(
+                {
+                    "date": d.isoformat(),
+                    "label": "今天" if d == today else d.strftime("%m-%d"),
+                    "active": d == rd,
+                }
+            )
+        # 仅允许最近 7 个东京日
+        allowed_days = {t["date"] for t in day_tabs}
+        if rd.isoformat() not in allowed_days:
+            rd = today
+        for t in day_tabs:
+            t["active"] = t["date"] == rd.isoformat()
 
     selected = (module_code or "").upper() or None
     if selected and selected not in allowed:
@@ -255,6 +276,14 @@ def _daily_news_context(
         "empty_hint": meta.get("empty_hint")
         or "当前筛选条件下暂无条目。可通过侧边栏运行流水线采集资讯。",
         "news_subnav": True,
+        "day_tabs": day_tabs,
+        "tokyo_today": today.isoformat(),
+        # 无条目且无当日跑批记录时才自动补采，避免「今日无动态」反复触发
+        "auto_backfill": bool(
+            page_key == "news_7x24"
+            and not entries
+            and not run_map
+        ),
     }
 
 

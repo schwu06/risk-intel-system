@@ -1,10 +1,10 @@
 # 无 RSS 的直连网站 HTML 列表采集（改完可 POST /api/v1/pipeline/direct-sites/reload）
 #
-# 说明：新浪财经 7×24（finance.sina.com.cn/7x24）为 JS 动态加载，
-# 已用专用采集器接入（zhibo.sina.com.cn/api/zhibo/feed），无需写在本文件。
-# 模块映射：D=宏观/数据/市场/央行/A股；B=国际。
-#
-# 其它无 RSS 站点可在此用 CSS 选择器配置：
+# 说明：
+# - 新浪财经 7×24：专用采集器 sina_724_collector（模块 B/D）
+# - Godiva 供应链/品牌无 RSS 源：专用采集器 godiva_source_collector（模块 A）
+#   含 COCOBOD / ICCO / 欧盟乳制品·糖观测站 / 日本百货店协会销售额
+# - 其它无 RSS 站点可在此用 CSS 选择器配置：
 #   list_url / modules / item_selector / title_selector / link_selector
 #   date_selector / snippet_selector / base_url / headers / encoding
 

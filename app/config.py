@@ -100,10 +100,11 @@ PAGE_META = {
     "news_7x24": {
         "path": "/daily-news-7x24",
         "title": "新闻日报 · 7×24",
-        "subtitle": "近7×24小时重要资讯 · 区域 · 机构 · 宏观",
-        "window_hours": NEWS_WINDOW_HOURS_7X24,
-        "collect_label": "采集近7×24小时资讯",
-        "empty_hint": "当前筛选条件下暂无条目。可通过侧边栏运行流水线采集近 7×24 小时资讯。",
+        "subtitle": "近七日按日快照 · 区域 · 机构 · 宏观",
+        # 与近24小时共用 window_hours=24 按日快照，避免再跑 168 小时全量采集
+        "window_hours": NEWS_WINDOW_HOURS_24,
+        "collect_label": "采集当日资讯",
+        "empty_hint": "该日暂无快照。将自动补采；也可点击侧边栏手动采集。",
     },
     "entity_assessment": {
         "path": "/entity-assessment",

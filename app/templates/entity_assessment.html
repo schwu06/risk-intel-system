@@ -224,6 +224,7 @@
   window.REPORT_DATE = "{{ report_date }}";
   window.PIPELINE_MODULES = "{{ module_codes_csv }}".split(",").filter(Boolean);
   window.ENTRY_CHARTS = [];
+  window.NEWS_WINDOW_HOURS = 24;
   window.ENTITY_ID = {% if selected_entity %}{{ selected_entity.id }}{% else %}null{% endif %};
   window.ENTITY_NAME = {% if selected_entity %}{{ (selected_entity.display_name or selected_entity.name)|tojson }}{% else %}null{% endif %};
 </script>

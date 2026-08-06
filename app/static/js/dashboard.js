@@ -1,6 +1,5 @@
 (function () {
   const COLORS = ["#6b7c93", "#8a939f", "#a8956e", "#7a9a82", "#9aa3ad"];
-  const JOB_STORAGE_KEY = "pipeline_active_job_id";
   const chartInstances = [];
   let activeJobId = null;
   let polling = false;
@@ -13,6 +12,57 @@
     var raw = drawer && drawer.getAttribute("data-entity-id");
     if (raw) return Number(raw) || null;
     return null;
+  }
+
+  function currentWindowHours() {
+    if (typeof window.NEWS_WINDOW_HOURS === "number" && window.NEWS_WINDOW_HOURS > 0) {
+      return window.NEWS_WINDOW_HOURS;
+    }
+    return 24;
+  }
+
+  function currentModuleCodes() {
+    if (window.PIPELINE_MODULES && window.PIPELINE_MODULES.length) {
+      return window.PIPELINE_MODULES.slice();
+    }
+    return [];
+  }
+
+  /** 与后端 job_scope 对齐：近24小时 / 7×24 / 主体各自独立 */
+  function collectScopeKey() {
+    var eid = currentEntityId();
+    if (eid) return "entity:" + eid;
+    var codes = currentModuleCodes().map(function (c) { return String(c).toUpperCase(); }).sort();
+    var hours = currentWindowHours();
+    if (codes.length === 1 && codes[0] === "A") return "entity:all";
+    if (codes.length && codes.every(function (c) { return c === "B" || c === "C" || c === "D"; })) {
+      return "news:" + hours;
+    }
+    if (codes.length) return "mod:" + hours + ":" + codes.join(",");
+    return "news:" + hours;
+  }
+
+  function jobStorageKey() {
+    return "pipeline_active_job_id:" + collectScopeKey();
+  }
+
+  function refreshMsgKey() {
+    return "pipeline_collect_status_msg:" + collectScopeKey();
+  }
+
+  function refreshAtKey() {
+    return "pipeline_collect_finished_at:" + collectScopeKey();
+  }
+
+  function runningQueryUrl() {
+    var params = [];
+    var hours = currentWindowHours();
+    var eid = currentEntityId();
+    var codes = currentModuleCodes();
+    if (hours) params.push("window_hours=" + encodeURIComponent(hours));
+    if (eid) params.push("entity_id=" + encodeURIComponent(eid));
+    if (codes.length) params.push("module_codes=" + encodeURIComponent(codes.join(",")));
+    return "/api/v1/pipeline/running" + (params.length ? "?" + params.join("&") : "");
   }
 
   function dataSourcesUrl() {
@@ -532,26 +582,21 @@
   }
 
   function setCollectBusy(busy) {
+    // 仅禁用本页采集按钮，避免重复提交；其它界面操作保持可用
     if (pipelineBtn) pipelineBtn.disabled = !!busy;
-    document.querySelectorAll(".btn-reload-module").forEach(function (btn) {
-      btn.disabled = !!busy;
-    });
   }
 
   function rememberJob(jobId) {
     activeJobId = jobId || null;
     try {
-      if (jobId) sessionStorage.setItem(JOB_STORAGE_KEY, jobId);
-      else sessionStorage.removeItem(JOB_STORAGE_KEY);
+      if (jobId) sessionStorage.setItem(jobStorageKey(), jobId);
+      else sessionStorage.removeItem(jobStorageKey());
     } catch (e) { /* ignore */ }
   }
 
   function pipelineMsgEl() {
     return document.getElementById("pipeline-msg");
   }
-
-  var REFRESH_MSG_KEY = "pipeline_collect_status_msg";
-  var REFRESH_AT_KEY = "pipeline_collect_finished_at";
 
   /** 东京时间（Asia/Tokyo）24 小时制：YYYY-MM-DD HH:mm:ss */
   function formatRefreshTime(isoOrDate) {
@@ -592,20 +637,20 @@
   }
 
   function persistPipelineMsg(text) {
-    try { sessionStorage.setItem(REFRESH_MSG_KEY, text); } catch (e) { /* ignore */ }
+    try { sessionStorage.setItem(refreshMsgKey(), text); } catch (e) { /* ignore */ }
   }
 
   function persistRefreshAt(isoOrDate) {
     try {
       if (!isoOrDate) {
-        sessionStorage.setItem(REFRESH_AT_KEY, new Date().toISOString());
+        sessionStorage.setItem(refreshAtKey(), new Date().toISOString());
         return;
       }
       if (isoOrDate instanceof Date) {
-        sessionStorage.setItem(REFRESH_AT_KEY, isoOrDate.toISOString());
+        sessionStorage.setItem(refreshAtKey(), isoOrDate.toISOString());
         return;
       }
-      sessionStorage.setItem(REFRESH_AT_KEY, String(isoOrDate));
+      sessionStorage.setItem(refreshAtKey(), String(isoOrDate));
     } catch (e) { /* ignore */ }
   }
 
@@ -631,12 +676,12 @@
     var msg = pipelineMsgEl();
     if (!msg) return;
     try {
-      var at = sessionStorage.getItem(REFRESH_AT_KEY);
+      var at = sessionStorage.getItem(refreshAtKey());
       if (at) {
         setRefreshSuccessMsg(msg, at);
         return;
       }
-      var saved = sessionStorage.getItem(REFRESH_MSG_KEY);
+      var saved = sessionStorage.getItem(refreshMsgKey());
       if (!saved) return;
       saved = saved.replace("最近更新时间", "最近刷新时间");
       // 旧版文案：把 UTC 墙钟误标为本地时间，恢复时按 UTC 转东京
@@ -697,9 +742,7 @@
     const target = msgEl || pipelineMsgEl();
     setCollectingMsg(target);
     const payload = { report_date: window.REPORT_DATE || null, async_mode: true };
-    if (typeof window.NEWS_WINDOW_HOURS === "number" && window.NEWS_WINDOW_HOURS > 0) {
-      payload.window_hours = window.NEWS_WINDOW_HOURS;
-    }
+    payload.window_hours = currentWindowHours();
     if (moduleCodes && moduleCodes.length) {
       payload.module_codes = moduleCodes;
     } else if (window.PIPELINE_MODULES && window.PIPELINE_MODULES.length) {
@@ -716,6 +759,7 @@
     if (resp.status === 409) {
       const detail = data.detail || {};
       const existingId = detail.job_id;
+      // 仅跟随本作用域冲突任务，不接管其它界面的采集
       if (existingId) {
         setCollectingMsg(target);
         return trackJob(existingId, target);
@@ -812,14 +856,14 @@
     }, 50);
   })();
 
-  // 页面加载时若有未完成任务，恢复轮询（不阻断侧栏）
+  // 页面加载时若有本作用域未完成任务，恢复轮询（不阻断侧栏/其它界面）
   (async function resumeActiveJob() {
     try {
-      const resp = await fetch("/api/v1/pipeline/running");
+      const resp = await fetch(runningQueryUrl());
       const cur = await resp.json();
       let jobId = cur && cur.job_id ? cur.job_id : null;
       if (!jobId) {
-        try { jobId = sessionStorage.getItem(JOB_STORAGE_KEY); } catch (e) { jobId = null; }
+        try { jobId = sessionStorage.getItem(jobStorageKey()); } catch (e) { jobId = null; }
       }
       if (!jobId) return;
 
@@ -830,11 +874,85 @@
         rememberJob(null);
         return;
       }
+      // 任务作用域须与当前页一致，避免接管其它界面采集
+      var expected = collectScopeKey();
+      var jobScope = jd.scope || (jd.snapshot && jd.snapshot.scope) || null;
+      if (jobScope && jobScope !== expected) {
+        rememberJob(null);
+        return;
+      }
+      if (!jobScope) {
+        var jobHours = Number(jd.window_hours || 24);
+        var jobEntity = jd.entity_id != null ? Number(jd.entity_id) : null;
+        if (jobEntity && jobEntity !== currentEntityId()) {
+          rememberJob(null);
+          return;
+        }
+        if (!jobEntity && jobHours !== currentWindowHours()) {
+          rememberJob(null);
+          return;
+        }
+      }
 
       const msg = pipelineMsgEl();
       setCollectingMsg(msg);
       trackJob(jobId, msg).catch(function () { /* 已在 trackJob 内提示 */ });
     } catch (e) { /* ignore */ }
+  })();
+
+  // 后台整点采集：只同步「最近刷新时间」，不强制打断当前操作
+  (function syncBackgroundRefreshTime() {
+    var page = window.ACTIVE_PAGE || "";
+    if (page !== "daily_news" && page !== "news_7x24") return;
+    if (currentEntityId()) return;
+
+    function isUserCollectingMsg(text) {
+      var t = String(text || "");
+      return t.indexOf("采集中") === 0 || t.indexOf("采集失败") === 0;
+    }
+
+    async function tick() {
+      if (polling) return;
+      var msg = pipelineMsgEl();
+      if (msg && isUserCollectingMsg(msg.textContent)) return;
+      try {
+        var hours = currentWindowHours() || 24;
+        var codes = (currentModuleCodes() || []).join(",") || "B,C,D";
+        var resp = await fetch(
+          "/api/v1/pipeline/last-refresh?window_hours=" +
+            encodeURIComponent(hours) +
+            "&module_codes=" +
+            encodeURIComponent(codes)
+        );
+        var data = await resp.json();
+        if (!resp.ok || !data || !data.finished_at) return;
+        if (data.running) return;
+        if (polling) return;
+        msg = pipelineMsgEl();
+        if (msg && isUserCollectingMsg(msg.textContent)) return;
+        setRefreshSuccessMsg(msg, data.finished_at);
+      } catch (e) { /* ignore */ }
+    }
+
+    tick();
+    setInterval(tick, 30000);
+  })();
+
+  // 7×24：某日无快照时自动补采并写回数据库
+  (function autoBackfillDaySnapshot() {
+    if (!window.AUTO_BACKFILL) return;
+    if (window.ACTIVE_PAGE !== "news_7x24") return;
+    var key = "news_7x24_backfill:" + (window.REPORT_DATE || "");
+    try {
+      if (sessionStorage.getItem(key) === "1") return;
+      sessionStorage.setItem(key, "1");
+    } catch (e) { /* ignore */ }
+    var msg = pipelineMsgEl();
+    setCollectBusy(true);
+    runPipeline(null, msg).catch(function () {
+      setCollectBusy(false);
+      try { sessionStorage.removeItem(key); } catch (e2) { /* ignore */ }
+    });
   })();
 
   renderEntryCharts();

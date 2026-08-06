@@ -22,6 +22,12 @@ queries:
     - label: Godiva 动态
       query: "Godiva chocolate OR Godiva Chocolatier news OR lawsuit OR recall"
       priority: 20
+    - label: Godiva 日本
+      query: "ゴディバ OR Godiva Japan OR Godiva 日本 ニュース OR 店舗 OR 業績"
+      priority: 18
+    - label: 可可供应链
+      query: "cocoa price OR Côte d'Ivoire cocoa OR Ghana COCOBOD OR ICCO cocoa"
+      priority: 16
     - label: 普洛斯 GLP
       query: "普洛斯 OR GLP logistics property 新闻 OR 动态"
       priority: 20
@@ -99,6 +105,20 @@ feeds:
     modules: [C, D, A]
     type: direct
     priority: 30
+    enabled: true
+  # Godiva 供应链：ICI（含科特迪瓦 CCC 相关披露入口）
+  - label: ICI Cocoa Initiative
+    url: "https://www.cocoainitiative.org/rss.xml"
+    modules: [A]
+    type: direct
+    priority: 32
+    enabled: true
+  # 科特迪瓦可可产业新闻（官方 CCC 站点证书/鉴权异常时的可用替代 RSS）
+  - label: Cacao.ci
+    url: "https://cacao.ci/feed/"
+    modules: [A]
+    type: direct
+    priority: 28
     enabled: true
   - label: BBC World
     url: "http://feeds.bbci.co.uk/news/world/rss.xml"

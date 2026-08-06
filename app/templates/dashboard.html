@@ -24,7 +24,7 @@
   {% if news_subnav %}
   <nav class="news-subnav" aria-label="新闻日报分栏">
     <a
-      href="/daily-news?report_date={{ report_date }}"
+      href="/daily-news?report_date={{ tokyo_today or report_date }}"
       class="news-subnav-link {% if active_page == 'daily_news' %}active{% endif %}"
     >近24小时</a>
     <a
@@ -66,6 +66,17 @@
 {% block content %}
 <main class="layout content-shell" data-modules="{{ module_codes_csv }}" data-page-path="{{ page_path }}">
   <section class="content">
+    {% if day_tabs %}
+    <nav class="day-tabs" aria-label="近七日日期">
+      {% for tab in day_tabs %}
+      <a
+        href="{{ page_path }}?report_date={{ tab.date }}{% if selected_module %}&module_code={{ selected_module }}{% endif %}"
+        class="day-tab {% if tab.active %}active{% endif %}"
+        {% if tab.active %}aria-current="page"{% endif %}
+      >{{ tab.label }}</a>
+      {% endfor %}
+    </nav>
+    {% endif %}
     <h1>{{ page_title }} — {{ report_date }}</h1>
 
     {% for code, name in modules.items() %}
@@ -148,5 +159,8 @@
   window.PIPELINE_MODULES = "{{ module_codes_csv }}".split(",").filter(Boolean);
   window.NEWS_WINDOW_HOURS = {{ window_hours | int }};
   window.ENTRY_CHARTS = {{ entry_charts_json | safe }};
+  window.AUTO_BACKFILL = {{ 'true' if auto_backfill else 'false' }};
+  window.ACTIVE_PAGE = "{{ active_page }}";
+  window.TOKYO_TODAY = "{{ tokyo_today or report_date }}";
 </script>
 {% endblock %}

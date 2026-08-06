@@ -61,6 +61,7 @@ from app.services.industry_analysis import IndustryAnalysisService
 from app.services.pipeline_runner import (
     get_current_job,
     get_job_status,
+    get_last_news_refresh,
     get_running_job_id,
     run_modules_sync,
     start_pipeline_job,
@@ -71,6 +72,7 @@ from app.services.direct_site_config import (
 )
 from app.services.rss_config import load_rss_config, reload_rss_config
 from app.services.rss_source_service import list_rss_sources_24h
+from app.timeutil import tokyo_today
 
 router = APIRouter()
 
@@ -132,7 +134,7 @@ def list_entries(
 
 @router.post("/pipeline/run", response_model=PipelineRunResponse)
 def run_pipeline(body: PipelineRunRequest, db: Session = Depends(get_db)):
-    rd = body.report_date or date.today()
+    rd = body.report_date or tokyo_today()
     codes = body.module_codes or list(MODULE_CODES.keys())
     settings = get_settings()
     use_async = (
@@ -202,12 +204,35 @@ def pipeline_job_status(job_id: str):
 
 
 @router.get("/pipeline/running")
-def pipeline_running_job():
-    """当前是否有采集任务在跑（供前端恢复轮询，不阻断其它操作）。"""
-    row = get_current_job()
+def pipeline_running_job(
+    window_hours: int | None = Query(None, ge=1, le=168),
+    entity_id: int | None = Query(None),
+    module_codes: str | None = Query(None, description="逗号分隔模块，如 B,C,D"),
+):
+    """当前是否有匹配作用域的采集任务（供前端恢复轮询，不阻断其它操作）。"""
+    codes = None
+    if module_codes:
+        codes = [c.strip().upper() for c in module_codes.split(",") if c.strip()]
+    row = get_current_job(
+        window_hours=window_hours,
+        entity_id=entity_id,
+        module_codes=codes,
+    )
     if not row:
         return {"job_id": None, "status": "idle", "message": ""}
     return row
+
+
+@router.get("/pipeline/last-refresh")
+def pipeline_last_refresh(
+    window_hours: int = Query(NEWS_WINDOW_HOURS_24, ge=1, le=168),
+    module_codes: str | None = Query("B,C,D", description="逗号分隔模块"),
+):
+    """最近一次新闻采集完成时间（东京），供界面同步刷新文案且不打断操作。"""
+    codes = None
+    if module_codes:
+        codes = [c.strip().upper() for c in module_codes.split(",") if c.strip()]
+    return get_last_news_refresh(window_hours=window_hours, module_codes=codes)
 
 
 @router.get("/pipeline/rss-config")

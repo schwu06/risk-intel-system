@@ -1,4 +1,7 @@
-"""异步流水线任务：防重入 + 后台线程执行 + 启动时冻结数据源快照。"""
+"""异步流水线任务：按作用域防重入 + 后台线程执行 + 启动时冻结配置快照。
+
+不同界面（近24小时 / 7×24 / 主体评估）可并行采集；同一作用域内仍互斥。
+"""
 
 from __future__ import annotations
 
@@ -13,23 +16,61 @@ from typing import Any, Optional
 from app.config import MODULE_CODES, NEWS_WINDOW_HOURS_24, get_settings, news_window_label
 from app.database.models import PipelineJob, ReportRun
 from app.database.session import SessionLocal
+from app.services.direct_site_config import load_direct_sites_config
 from app.services.pipeline import RiskPipeline
 from app.services.rss_news import RssNewsCollector
 from app.timeutil import tokyo_isoformat, tokyo_now
 
 logger = logging.getLogger(__name__)
 
-_lock = threading.Lock()
-_running_job_id: Optional[str] = None
+# 全局登记表锁；各作用域可并行跑任务
+_registry_lock = threading.Lock()
+_running_by_scope: dict[str, str] = {}  # scope -> job_id
+_scope_by_job: dict[str, str] = {}  # job_id -> scope
 _job_snapshots: dict[str, dict[str, Any]] = {}
 
 
-def get_running_job_id() -> Optional[str]:
-    return _running_job_id
+def job_scope(
+    *,
+    module_codes: Optional[list[str]] = None,
+    entity_id: Optional[int] = None,
+    window_hours: int = NEWS_WINDOW_HOURS_24,
+) -> str:
+    """采集作用域：近24小时 / 7×24 / 主体 彼此独立。"""
+    hours = int(window_hours or NEWS_WINDOW_HOURS_24)
+    if entity_id is not None:
+        return f"entity:{int(entity_id)}"
+    codes = sorted({str(c).upper() for c in (module_codes or []) if c})
+    if codes == ["A"]:
+        return "entity:all"
+    if codes and set(codes) <= {"B", "C", "D"}:
+        return f"news:{hours}"
+    if codes:
+        return f"mod:{hours}:{','.join(codes)}"
+    return f"news:{hours}"
+
+
+def get_running_job_id(scope: Optional[str] = None) -> Optional[str]:
+    """有 scope 时返回该作用域任务；否则返回任意一个运行中任务（供「下次生效」提示）。"""
+    with _registry_lock:
+        if scope:
+            return _running_by_scope.get(scope)
+        if not _running_by_scope:
+            return None
+        return next(iter(_running_by_scope.values()))
+
+
+def list_running_job_ids() -> list[str]:
+    with _registry_lock:
+        return list(_running_by_scope.values())
 
 
 def recover_stale_jobs() -> int:
     """进程重启后，将库中遗留的 queued/running 标记为失败，避免前端一直等待幽灵任务。"""
+    with _registry_lock:
+        _running_by_scope.clear()
+        _scope_by_job.clear()
+        _job_snapshots.clear()
     db = SessionLocal()
     try:
         rows = (
@@ -52,9 +93,23 @@ def recover_stale_jobs() -> int:
         db.close()
 
 
-def get_current_job() -> Optional[dict[str, Any]]:
-    """返回当前运行中的任务状态；无任务时返回 None。"""
-    jid = _running_job_id
+def get_current_job(
+    *,
+    window_hours: Optional[int] = None,
+    entity_id: Optional[int] = None,
+    module_codes: Optional[list[str]] = None,
+) -> Optional[dict[str, Any]]:
+    """返回匹配作用域的运行中任务；无筛选时返回任意一个。"""
+    if window_hours is not None or entity_id is not None or module_codes is not None:
+        hours = int(window_hours if window_hours is not None else NEWS_WINDOW_HOURS_24)
+        scope = job_scope(
+            module_codes=module_codes,
+            entity_id=entity_id,
+            window_hours=hours,
+        )
+        jid = get_running_job_id(scope)
+    else:
+        jid = get_running_job_id()
     if not jid:
         return None
     return get_job_status(jid)
@@ -84,6 +139,8 @@ def _snapshot_for_storage(snapshot: dict[str, Any]) -> str:
         "source_ids": snapshot.get("source_ids") or [],
         "source_names": snapshot.get("source_names") or [],
         "authority_chars": snapshot.get("authority_chars") or 0,
+        "window_hours": snapshot.get("window_hours"),
+        "scope": snapshot.get("scope"),
     }
     return json.dumps(meta, ensure_ascii=False)
 
@@ -95,9 +152,7 @@ def start_pipeline_job(
     entity_id: Optional[int] = None,
     window_hours: Optional[int] = None,
 ) -> dict[str, Any]:
-    """启动异步任务；若已有任务在跑则返回冲突信息。"""
-    global _running_job_id
-
+    """启动异步任务；仅当同一作用域已有任务时返回冲突。"""
     codes = [c.upper() for c in (module_codes or list(MODULE_CODES.keys()))]
     invalid = [c for c in codes if c not in MODULE_CODES]
     if invalid:
@@ -112,20 +167,27 @@ def start_pipeline_job(
     if hours < 1:
         hours = NEWS_WINDOW_HOURS_24
 
-    if not _lock.acquire(blocking=False):
-        return {
-            "accepted": False,
-            "job_id": _running_job_id,
-            "status": "conflict",
-            "message": "已有采集任务在运行，请稍后再试或轮询当前任务状态",
-        }
+    scope = job_scope(module_codes=codes, entity_id=entity_id, window_hours=hours)
 
-    job_id = uuid.uuid4().hex[:16]
-    _running_job_id = job_id
+    with _registry_lock:
+        existing = _running_by_scope.get(scope)
+        if existing:
+            return {
+                "accepted": False,
+                "job_id": existing,
+                "status": "conflict",
+                "scope": scope,
+                "message": "该界面已有采集任务在运行，请稍后再试或轮询当前任务状态",
+            }
+        job_id = uuid.uuid4().hex[:16]
+        _running_by_scope[scope] = job_id
+        _scope_by_job[job_id] = scope
+
     db = SessionLocal()
     try:
         snapshot = _build_job_snapshot(db, entity_id=entity_id)
         snapshot["window_hours"] = hours
+        snapshot["scope"] = scope
         _job_snapshots[job_id] = snapshot
         row = PipelineJob(
             job_id=job_id,
@@ -143,9 +205,11 @@ def start_pipeline_job(
         db.add(row)
         db.commit()
     except Exception:
-        _running_job_id = None
+        with _registry_lock:
+            if _running_by_scope.get(scope) == job_id:
+                _running_by_scope.pop(scope, None)
+            _scope_by_job.pop(job_id, None)
         _job_snapshots.pop(job_id, None)
-        _lock.release()
         db.close()
         raise
     db.close()
@@ -165,6 +229,7 @@ def start_pipeline_job(
         "module_codes": codes,
         "entity_id": entity_id,
         "window_hours": hours,
+        "scope": scope,
         "message": f"采集任务已启动（近{news_window_label(hours)}），请轮询状态",
         "snapshot": {
             "source_ids": snapshot.get("source_ids") or [],
@@ -172,6 +237,7 @@ def start_pipeline_job(
             "frozen_at": snapshot.get("frozen_at"),
             "entity_id": entity_id,
             "window_hours": hours,
+            "scope": scope,
         },
     }
 
@@ -209,7 +275,13 @@ def get_job_status(job_id: str) -> Optional[dict[str, Any]]:
             "error_message": row.error_message,
             "started_at": tokyo_isoformat(row.started_at),
             "finished_at": tokyo_isoformat(row.finished_at),
-            "running_job_id": _running_job_id,
+            "running_job_id": get_running_job_id(),
+            "scope": (
+                (snapshot_meta or {}).get("scope")
+                if isinstance(snapshot_meta, dict)
+                else None
+            )
+            or _scope_by_job.get(job_id),
             "snapshot": snapshot_meta,
             "entity_id": (snapshot_meta or {}).get("entity_id") if isinstance(snapshot_meta, dict) else None,
         }
@@ -225,8 +297,9 @@ def _run_one_module(
     rss: RssNewsCollector,
     entity_id: Optional[int] = None,
     window_hours: int = NEWS_WINDOW_HOURS_24,
+    direct_sites_config=None,
 ) -> tuple[str, int, Optional[dict], Optional[str]]:
-    """每个模块独立 Session；权威文本与 RSS 配置来自任务快照。"""
+    """每个模块独立 Session；权威文本与 RSS/直连配置来自任务快照。"""
     db = SessionLocal()
     try:
         pipeline = RiskPipeline(
@@ -236,6 +309,7 @@ def _run_one_module(
             rss=rss,
             entity_id=entity_id,
             window_hours=window_hours,
+            direct_sites_config=direct_sites_config,
         )
         count = pipeline.run_module(code, report_date)
         funnel = None
@@ -275,11 +349,13 @@ def _execute_modules(
     funnels: dict[str, Any] = {}
     errors: list[str] = []
 
-    # 任务级冻结 RSS 配置（热加载不影响本次）
+    # 任务级冻结 RSS / 直连站点配置（热加载与运行中变更不影响本次）
     rss = RssNewsCollector(
         retry_attempts=int(getattr(settings, "network_retry_attempts", 3) or 3),
         retry_backoff=float(getattr(settings, "network_retry_backoff_seconds", 1.5) or 1.5),
     )
+    direct_path = getattr(settings, "direct_sites_config_path", None) or None
+    direct_sites_config = load_direct_sites_config(direct_path)
 
     if parallel:
         workers = min(4, len(codes))
@@ -294,6 +370,7 @@ def _execute_modules(
                     rss,
                     entity_id,
                     window_hours,
+                    direct_sites_config,
                 ): code
                 for code in codes
             }
@@ -314,6 +391,7 @@ def _execute_modules(
                 rss,
                 entity_id,
                 window_hours,
+                direct_sites_config,
             )
             results[code] = count
             if funnel:
@@ -323,13 +401,20 @@ def _execute_modules(
     return results, funnels, errors
 
 
+def _release_job_scope(job_id: str) -> None:
+    with _registry_lock:
+        scope = _scope_by_job.pop(job_id, None)
+        if scope and _running_by_scope.get(scope) == job_id:
+            _running_by_scope.pop(scope, None)
+    _job_snapshots.pop(job_id, None)
+
+
 def _execute_job(
     job_id: str,
     report_date: date,
     codes: list[str],
     window_hours: int = NEWS_WINDOW_HOURS_24,
 ) -> None:
-    global _running_job_id
     snapshot = _job_snapshots.get(job_id) or {}
     authority_text = snapshot.get("authority_text") or ""
     entity_id = snapshot.get("entity_id")
@@ -401,12 +486,66 @@ def _execute_job(
             db.rollback()
     finally:
         db.close()
-        _job_snapshots.pop(job_id, None)
-        _running_job_id = None
-        try:
-            _lock.release()
-        except RuntimeError:
-            pass
+        _release_job_scope(job_id)
+
+
+def get_last_news_refresh(
+    *,
+    window_hours: int = NEWS_WINDOW_HOURS_24,
+    module_codes: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """最近一次新闻采集完成时间（东京 ISO），供界面同步刷新文案。"""
+    hours = int(window_hours or NEWS_WINDOW_HOURS_24)
+    codes = [c.upper() for c in (module_codes or ["B", "C", "D"])]
+    scope = job_scope(module_codes=codes, window_hours=hours)
+    running = get_running_job_id(scope)
+    db = SessionLocal()
+    try:
+        q = (
+            db.query(PipelineJob)
+            .filter(PipelineJob.status == "completed")
+            .filter(PipelineJob.window_hours == hours)
+            .filter(PipelineJob.finished_at.isnot(None))
+            .order_by(PipelineJob.finished_at.desc())
+        )
+        finished_at = None
+        job_id = None
+        report_date = None
+        for row in q.limit(30):
+            try:
+                job_codes = json.loads(row.module_codes or "[]")
+            except json.JSONDecodeError:
+                job_codes = []
+            job_codes_u = {str(c).upper() for c in job_codes}
+            if job_codes_u and job_codes_u <= set(codes):
+                finished_at = row.finished_at
+                job_id = row.job_id
+                report_date = row.report_date.isoformat() if row.report_date else None
+                break
+        if finished_at is None:
+            run = (
+                db.query(ReportRun)
+                .filter(ReportRun.module_code.in_(codes))
+                .filter(ReportRun.window_hours == hours)
+                .filter(ReportRun.finished_at.isnot(None))
+                .filter(ReportRun.status.in_(("completed", "empty")))
+                .order_by(ReportRun.finished_at.desc())
+                .first()
+            )
+            if run:
+                finished_at = run.finished_at
+                report_date = run.report_date.isoformat() if run.report_date else None
+        return {
+            "scope": scope,
+            "window_hours": hours,
+            "finished_at": tokyo_isoformat(finished_at),
+            "job_id": job_id,
+            "report_date": report_date,
+            "running": bool(running),
+            "running_job_id": running,
+        }
+    finally:
+        db.close()
 
 
 def run_modules_sync(
@@ -416,8 +555,7 @@ def run_modules_sync(
     entity_id: Optional[int] = None,
     window_hours: Optional[int] = None,
 ) -> dict[str, Any]:
-    """同步执行（调度器 / 调试用）。仍受全局锁保护，避免与异步任务重叠。"""
-    global _running_job_id
+    """同步执行（调度器 / 调试用）。与同作用域异步任务互斥。"""
     codes = [c.upper() for c in (module_codes or list(MODULE_CODES.keys()))]
     settings = get_settings()
     hours = int(
@@ -427,19 +565,24 @@ def run_modules_sync(
     )
     if hours < 1:
         hours = NEWS_WINDOW_HOURS_24
-    if not _lock.acquire(blocking=False):
-        return {
-            "ok": False,
-            "results": {c: -1 for c in codes},
-            "message": f"已有任务在运行: {_running_job_id}",
-        }
-    job_id = f"sync-{uuid.uuid4().hex[:10]}"
-    _running_job_id = job_id
+    scope = job_scope(module_codes=codes, entity_id=entity_id, window_hours=hours)
+    with _registry_lock:
+        existing = _running_by_scope.get(scope)
+        if existing:
+            return {
+                "ok": False,
+                "results": {c: -1 for c in codes},
+                "message": f"该界面已有任务在运行: {existing}",
+            }
+        job_id = f"sync-{uuid.uuid4().hex[:10]}"
+        _running_by_scope[scope] = job_id
+        _scope_by_job[job_id] = scope
     try:
         db = SessionLocal()
         try:
             snapshot = _build_job_snapshot(db, entity_id=entity_id)
             snapshot["window_hours"] = hours
+            snapshot["scope"] = scope
         finally:
             db.close()
         _job_snapshots[job_id] = snapshot
@@ -461,9 +604,4 @@ def run_modules_sync(
             "window_hours": hours,
         }
     finally:
-        _job_snapshots.pop(job_id, None)
-        _running_job_id = None
-        try:
-            _lock.release()
-        except RuntimeError:
-            pass
+        _release_job_scope(job_id)

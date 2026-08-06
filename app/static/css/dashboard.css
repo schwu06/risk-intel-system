@@ -522,6 +522,37 @@ a:hover {
   font-weight: 600;
 }
 
+.day-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+  padding: 0.15rem 0;
+  border-bottom: 1px solid #e4e7ec;
+}
+
+.day-tab {
+  display: inline-block;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+
+.day-tab:hover {
+  color: var(--text-primary);
+  background: #eef0f3;
+}
+
+.day-tab.active {
+  color: var(--text-primary);
+  background: #e8ebf0;
+  border-color: #d0d5dd;
+  font-weight: 600;
+}
+
 .filter-form {
   display: flex;
   flex-wrap: wrap;
