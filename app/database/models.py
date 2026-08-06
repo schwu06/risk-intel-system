@@ -113,11 +113,20 @@ class SearchLog(Base):
 
 class ReportRun(Base):
     __tablename__ = "report_runs"
-    __table_args__ = (UniqueConstraint("report_date", "module_code", name="uq_report_run_date_module"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "report_date",
+            "module_code",
+            "window_hours",
+            name="uq_report_run_date_module_window",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     report_date: Mapped[date] = mapped_column(Date, nullable=False)
     module_code: Mapped[str] = mapped_column(String(8), nullable=False)
+    # 采集时效窗（24 / 168）；与 news_articles.window_hours 对齐
+    window_hours: Mapped[int] = mapped_column(Integer, default=24, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -139,6 +148,7 @@ class PipelineJob(Base):
     job_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     report_date: Mapped[date] = mapped_column(Date, nullable=False)
     module_codes: Mapped[str] = mapped_column(Text, nullable=False)  # JSON list
+    window_hours: Mapped[int] = mapped_column(Integer, default=24, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False)
     results_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     funnel_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -217,6 +227,8 @@ class DailyRiskEntry(Base):
     structured_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     search_log_id: Mapped[Optional[int]] = mapped_column(ForeignKey("search_logs.id"), nullable=True)
     published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    # 采集时效窗：24=近24小时，168=近7×24小时
+    window_hours: Mapped[int] = mapped_column(Integer, default=24, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     search_log: Mapped[Optional[SearchLog]] = relationship(back_populates="entries")
@@ -235,6 +247,8 @@ class NewsArticle(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     report_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     module_code: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    # 采集时效窗：24=近24小时，168=近7×24小时；与日报副分界面隔离
+    window_hours: Mapped[int] = mapped_column(Integer, default=24, nullable=False, index=True)
     category_tag: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     country_or_region: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     target_entity: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)

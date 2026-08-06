@@ -34,17 +34,21 @@ class Settings(BaseSettings):
     network_retry_backoff_seconds: float = 1.2
     # 流水线韧性：先粗筛再 LLM、缓存、降级入库、异步默认开启
     pipeline_async_default: bool = True
-    pipeline_llm_top_k: int = 8
+    # LLM 单批处理条数（不是最终展示上限；展示不设上限）
+    pipeline_llm_top_k: int = 12
     pipeline_llm_cache_hours: int = 168
     pipeline_mita_query_pause_seconds: float = 0.3
-    # 秘塔「不足才补」：主源有效候选达标则跳过。0 = 跟随 pipeline_llm_top_k
+    # 秘塔「不足才补」目标条数。0 = 默认 24（与展示全量策略对齐，不再跟 LLM 批大小挂钩）
     pipeline_mita_min_items: int = 0
     # 主源整类失败（RSS/TDnet 硬故障）时强制跑秘塔补缺
     pipeline_mita_force_on_primary_fail: bool = True
     # SQLite 下默认串行，避免并行写库拖慢侧栏/上传等其它接口
     pipeline_module_parallel: bool = False
     pipeline_merge_llm: bool = True
+    # 单模块主源采集上限（RSS/直连/新浪/TDnet）；0 或负数按 80
+    pipeline_collect_max_items: int = 80
     rss_config_path: str = "config/rss_feeds.yaml"
+    direct_sites_config_path: str = "config/direct_sites.yaml"
 
 
 @lru_cache
@@ -64,9 +68,23 @@ MODULE_CODES = {
     "E": "授信报告与行业分析",
 }
 
+# 新闻日报时间窗（小时）
+NEWS_WINDOW_HOURS_24 = 24
+NEWS_WINDOW_HOURS_7X24 = 168  # 7×24
+
+
+def news_window_label(hours: int) -> str:
+    """界面/导出用时间窗文案。"""
+    h = int(hours or NEWS_WINDOW_HOURS_24)
+    if h >= NEWS_WINDOW_HOURS_7X24:
+        return "7×24小时"
+    return f"{h}小时"
+
+
 # 三级页面与模块映射（深度研报走 IndustryAnalysis*，不占用 DailyRiskEntry）
 PAGE_MODULES = {
     "daily_news": ("B", "C", "D"),
+    "news_7x24": ("B", "C", "D"),
     "entity_assessment": ("A",),
 }
 
@@ -75,6 +93,17 @@ PAGE_META = {
         "path": "/daily-news",
         "title": "新闻日报",
         "subtitle": "近24小时重要资讯 · 区域 · 机构 · 宏观",
+        "window_hours": NEWS_WINDOW_HOURS_24,
+        "collect_label": "采集近24小时资讯",
+        "empty_hint": "当前筛选条件下暂无条目。可通过侧边栏运行流水线采集近 24 小时资讯。",
+    },
+    "news_7x24": {
+        "path": "/daily-news-7x24",
+        "title": "新闻日报 · 7×24",
+        "subtitle": "近7×24小时重要资讯 · 区域 · 机构 · 宏观",
+        "window_hours": NEWS_WINDOW_HOURS_7X24,
+        "collect_label": "采集近7×24小时资讯",
+        "empty_hint": "当前筛选条件下暂无条目。可通过侧边栏运行流水线采集近 7×24 小时资讯。",
     },
     "entity_assessment": {
         "path": "/entity-assessment",
@@ -85,6 +114,11 @@ PAGE_META = {
         "path": "/deep-reports",
         "title": "深度研报",
         "subtitle": "行业与授信长篇结构化分析",
+    },
+    "intl_ratings": {
+        "path": "/intl-ratings",
+        "title": "国际评级",
+        "subtitle": "发行体国际信用评级与监测",
     },
 }
 
@@ -103,8 +137,10 @@ MODULE_A_CATEGORIES = [
 ]
 
 MODULE_B_REGION_HINT = (
-    "中东地区近24小时重要资讯：国家政策、官方声明、地缘政治与区域市场动态；"
-    "有明确新信息即收录，不要求必须是高风险事件；无材料则留空，不编造。"
+    "中东区域全量动态跟踪：严格限定中东地理范围（沙特、阿联酋、伊朗、以色列、卡塔尔、科威特等）；"
+    "收录国家政策、官方声明、地缘政治与区域市场；有明确新信息即收，不要求必须是高风险。"
+    "与宏观板块交叉时：常规外交/局部冲突/例行声明归本板块；"
+    "若同时引发全球资产剧烈波动，可双投至每日宏观与市场情报。"
 )
 
 MODULE_C_TARGETS = [
@@ -138,6 +174,14 @@ MODULE_D_TOPICS = [
     "美联储货币政策",
     "重大地缘事件",
 ]
+
+# 新闻日报三板块路由说明（供提示词 / 文档）
+DAILY_NEWS_ROUTE_HINT = (
+    "分类路由优先级："
+    "1) 主语为日本监控九企之一→C；"
+    "2) 大宗商品价格/供需/通胀→D，仅中东产油国本土政策声明且未涉全球价格→B；"
+    "3) 中东常规动态→B；全球（含中东）重大地缘且引发资产强反应→D；可双投[B,D]。"
+)
 
 MODULE_E_TEMPLATES = [
     "授信报告模板",
@@ -195,14 +239,19 @@ def module_search_queries(
     report_date: str,
     *,
     entity_targets: list[str] | None = None,
+    window_hours: int = NEWS_WINDOW_HOURS_24,
 ) -> list[dict[str, Any]]:
-    """为各模块生成近 24 小时资讯检索查询。
+    """为各模块生成近 N 小时资讯检索查询。
 
     entity_targets: 主体评估（模块 A）可限定只搜指定主体名称列表。
+    window_hours: 时效窗口；168 时按近一周检索。
     """
     queries: list[dict[str, Any]] = []
     # 避免把具体日期塞进检索词（易导致秘塔“未找到相关数据”）
-    recency = "最新 过去24小时 OR today OR 速报"
+    if int(window_hours or NEWS_WINDOW_HOURS_24) >= NEWS_WINDOW_HOURS_7X24:
+        recency = "最新 过去一周 OR past week OR 近7天 OR 7 days OR 速报"
+    else:
+        recency = "最新 过去24小时 OR today OR 速报"
     if module == "A":
         targets = entity_targets or ["Godiva", "普洛斯 GLP"]
         for target in targets:

@@ -70,7 +70,7 @@
     }
   }
 
-  /* ---------- 数据源面板 / 关于 ---------- */
+  /* ---------- 数据源面板 / 关于（仅深度研报页存在） ---------- */
   const drawer = document.getElementById("source-drawer");
   const toggleBtn = document.getElementById("btn-toggle-source-drawer");
   const aboutModal = document.getElementById("about-modal");
@@ -87,6 +87,7 @@
   const uploadSubmitBtn = document.getElementById("global-upload-submit");
   const ALLOWED_EXTS = [".txt", ".xlsx", ".docx", ".pdf"];
 
+  if (drawer) {
   function isDrawerOpen() {
     return !document.body.classList.contains("sources-collapsed");
   }
@@ -285,7 +286,7 @@
       listWrap.innerHTML =
         '<div class="sources-empty" id="managed-source-list">' +
         '<p class="sources-empty-title">保存的数据源将显示在此处</p>' +
-        '<p class="sources-empty-desc">可添加文件、网站等。采集时会优先参考这些权威材料。</p>' +
+        '<p class="sources-empty-desc">可添加文件、网站等。生成深度研报时会优先参考这些权威材料。</p>' +
         '<p class="sources-empty-hint">将文件拖放到此处，或 ' +
         '<button type="button" class="text-link" id="btn-empty-add-source-dyn">添加数据源</button></p>' +
         "</div>";
@@ -521,6 +522,7 @@
       } else alert("删除失败");
     });
   });
+  } // end: source drawer present
 
   /* ---------- 流水线（异步 + 轮询，不阻断侧栏/上传） ---------- */
   const pipelineBtn = document.getElementById("btn-run-pipeline");
@@ -695,6 +697,9 @@
     const target = msgEl || pipelineMsgEl();
     setCollectingMsg(target);
     const payload = { report_date: window.REPORT_DATE || null, async_mode: true };
+    if (typeof window.NEWS_WINDOW_HOURS === "number" && window.NEWS_WINDOW_HOURS > 0) {
+      payload.window_hours = window.NEWS_WINDOW_HOURS;
+    }
     if (moduleCodes && moduleCodes.length) {
       payload.module_codes = moduleCodes;
     } else if (window.PIPELINE_MODULES && window.PIPELINE_MODULES.length) {
@@ -765,6 +770,47 @@
       }
     });
   });
+
+  function scrollToModulePanel(code) {
+    var panel = document.getElementById("module-panel-" + code);
+    if (!panel) return false;
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    return true;
+  }
+
+  function moduleJumpUrl(code) {
+    var rail = document.querySelector(".page-rail[data-page-path]");
+    var pagePath = (rail && rail.getAttribute("data-page-path")) || window.location.pathname;
+    var reportDate = window.REPORT_DATE || "";
+    var qs = reportDate ? "?report_date=" + encodeURIComponent(reportDate) : "";
+    return pagePath + qs + "#module-panel-" + encodeURIComponent(code);
+  }
+
+  document.querySelectorAll("a.mod-jump").forEach(function (link) {
+    link.addEventListener("click", function (ev) {
+      var code = link.getAttribute("data-module");
+      if (!code) return;
+      if (scrollToModulePanel(code)) {
+        ev.preventDefault();
+        if (history.replaceState) {
+          history.replaceState(null, "", "#module-panel-" + code);
+        }
+        return;
+      }
+      // 当前筛选未展示该模块时，回到全量视图再定位
+      ev.preventDefault();
+      window.location.href = moduleJumpUrl(code);
+    });
+  });
+
+  (function scrollToHashModulePanel() {
+    var hash = window.location.hash || "";
+    var match = hash.match(/^#module-panel-(.+)$/);
+    if (!match) return;
+    setTimeout(function () {
+      scrollToModulePanel(decodeURIComponent(match[1]));
+    }, 50);
+  })();
 
   // 页面加载时若有未完成任务，恢复轮询（不阻断侧栏）
   (async function resumeActiveJob() {

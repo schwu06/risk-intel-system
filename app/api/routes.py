@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.config import CREDIT_LEVELS, MODULE_CODES, get_settings
+from app.config import CREDIT_LEVELS, MODULE_CODES, NEWS_WINDOW_HOURS_24, get_settings, news_window_label
 from app.database.models import (
     CreditUpdate,
     DailyRiskEntry,
@@ -64,6 +64,10 @@ from app.services.pipeline_runner import (
     get_running_job_id,
     run_modules_sync,
     start_pipeline_job,
+)
+from app.services.direct_site_config import (
+    load_direct_sites_config,
+    reload_direct_sites_config,
 )
 from app.services.rss_config import load_rss_config, reload_rss_config
 from app.services.rss_source_service import list_rss_sources_24h
@@ -134,11 +138,19 @@ def run_pipeline(body: PipelineRunRequest, db: Session = Depends(get_db)):
     use_async = (
         settings.pipeline_async_default if body.async_mode is None else bool(body.async_mode)
     )
+    hours = int(
+        body.window_hours
+        if body.window_hours is not None
+        else (getattr(settings, "news_window_hours", NEWS_WINDOW_HOURS_24) or NEWS_WINDOW_HOURS_24)
+    )
 
     if use_async:
         try:
             started = start_pipeline_job(
-                report_date=rd, module_codes=codes, entity_id=body.entity_id
+                report_date=rd,
+                module_codes=codes,
+                entity_id=body.entity_id,
+                window_hours=hours,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -159,9 +171,15 @@ def run_pipeline(body: PipelineRunRequest, db: Session = Depends(get_db)):
             async_mode=True,
             status=started.get("status") or "queued",
             entity_id=body.entity_id,
+            window_hours=hours,
         )
 
-    outcome = run_modules_sync(report_date=rd, module_codes=codes, entity_id=body.entity_id)
+    outcome = run_modules_sync(
+        report_date=rd,
+        module_codes=codes,
+        entity_id=body.entity_id,
+        window_hours=hours,
+    )
     if not outcome.get("ok") and all(v == -1 for v in (outcome.get("results") or {}).values()):
         raise HTTPException(status_code=502, detail=outcome.get("message") or "采集失败")
     return PipelineRunResponse(
@@ -171,6 +189,7 @@ def run_pipeline(body: PipelineRunRequest, db: Session = Depends(get_db)):
         async_mode=False,
         status="completed" if outcome.get("ok") else "failed",
         entity_id=body.entity_id,
+        window_hours=hours,
     )
 
 
@@ -218,6 +237,36 @@ def reload_rss_feeds():
         "message": "RSS 配置已重新加载",
         "query_groups": len(cfg.queries),
         "feeds": len(cfg.feeds),
+    }
+
+
+@router.get("/pipeline/direct-sites")
+def get_direct_sites_summary():
+    cfg = load_direct_sites_config()
+    return {
+        "sites": [
+            {
+                "label": s.label,
+                "list_url": s.list_url,
+                "modules": list(s.modules),
+                "priority": s.priority,
+                "enabled": s.enabled,
+                "type": s.site_type,
+                "item_selector": s.item_selector,
+            }
+            for s in cfg.sites
+        ],
+        "max_items_per_site": cfg.max_items_per_site,
+    }
+
+
+@router.post("/pipeline/direct-sites/reload")
+def reload_direct_sites():
+    cfg = reload_direct_sites_config()
+    return {
+        "message": "直连站点配置已重新加载",
+        "sites": len(cfg.sites),
+        "enabled": sum(1 for s in cfg.sites if s.enabled),
     }
 
 
@@ -642,6 +691,9 @@ def export_docx(
     module_codes: str | None = Query(
         None, description="逗号分隔，如 B,C,D（中东日报/日本企业/宏观）；缺省导出全部"
     ),
+    window_hours: int = Query(
+        NEWS_WINDOW_HOURS_24, ge=1, le=168, description="时效窗：24 或 168（7×24）"
+    ),
     db: Session = Depends(get_db),
 ):
     codes: list[str] | None = None
@@ -651,16 +703,24 @@ def export_docx(
         if invalid:
             raise HTTPException(status_code=400, detail=f"未知模块: {', '.join(invalid)}")
 
-    q = db.query(DailyRiskEntry).filter(DailyRiskEntry.report_date == report_date)
+    q = db.query(DailyRiskEntry).filter(
+        DailyRiskEntry.report_date == report_date,
+        DailyRiskEntry.window_hours == window_hours,
+    )
     if codes:
         q = q.filter(DailyRiskEntry.module_code.in_(codes))
     entries = q.order_by(DailyRiskEntry.module_code, DailyRiskEntry.id).all()
 
     out_dir = Path("data/exports")
     suffix = "_" + "".join(codes) if codes else ""
-    filename = f"24小时核心新闻情报汇总_{report_date.isoformat()}{suffix}.docx"
+    label = news_window_label(window_hours).replace("×", "x")
+    filename = f"{label}核心新闻情报汇总_{report_date.isoformat()}{suffix}.docx"
     path = export_daily_report_to_path(
-        entries, report_date, out_dir / filename, module_codes=codes
+        entries,
+        report_date,
+        out_dir / filename,
+        module_codes=codes,
+        window_hours=window_hours,
     )
     return FileResponse(
         path,

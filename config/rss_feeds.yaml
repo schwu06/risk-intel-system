@@ -6,7 +6,7 @@
 # module_defaults: 可按模块覆盖 Google News 地区/语言（模块 C 用日本版）
 
 defaults:
-  max_items_per_feed: 12
+  max_items_per_feed: 20
   google_hl: zh-CN
   google_gl: CN
   google_ceid: "CN:zh-Hans"

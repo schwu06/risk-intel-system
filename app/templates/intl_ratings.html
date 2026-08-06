@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}国际评级 — {{ app_name }}{% endblock %}
+
+{% block brand_sub %}{{ page_subtitle }}{% endblock %}
+
+{% block header_extra %}
+<span class="header-placeholder" aria-hidden="true"></span>
+{% endblock %}
+
+{% block page_sidebar %}
+<aside class="sidebar page-rail ir-sidebar" aria-label="发行体索引">
+  <div class="ir-sidebar-top">
+    <h2>发行体搜索</h2>
+    <div class="ir-search-box">
+      <input
+        type="search"
+        id="ir-search-input"
+        class="ir-search-input"
+        placeholder="输入发行体名称…"
+        autocomplete="off"
+        aria-label="搜索发行体"
+      />
+      <button type="button" class="ir-search-clear" id="ir-search-clear" title="清空搜索" aria-label="清空搜索" hidden>
+        ×
+      </button>
+    </div>
+  </div>
+
+  <div class="ir-sidebar-body">
+    <div class="ir-tree" id="ir-tree" role="tree"></div>
+    <p class="hint ir-search-empty" id="ir-search-empty" hidden>无匹配发行体</p>
+  </div>
+
+  <div class="ir-sidebar-footer">
+    <div class="actions">
+      <button type="button" class="btn" id="btn-ir-refresh">手动更新</button>
+      <button type="button" class="btn secondary" id="btn-ir-export">导出 Excel</button>
+    </div>
+    <p class="hint" id="ir-action-msg"></p>
+  </div>
+</aside>
+{% endblock %}
+
+{% block content %}
+<main class="layout content-shell ir-main">
+  <section class="content ir-content">
+    <header class="ir-page-header">
+      <h1>国际评级监测表</h1>
+      <p class="ir-page-desc">穆迪 / 标普 / 惠誉评级及债务人上市、亏损与价格监测。数据为演示样本，可手动更新或导出。</p>
+    </header>
+
+    <div class="ir-table-wrap" id="ir-table-wrap">
+      <table class="ir-table" id="ir-table">
+        <thead>
+          <tr>
+            <th class="col-issuer">发行体</th>
+            <th class="col-rating">穆迪评级</th>
+            <th class="col-rating">标普评级</th>
+            <th class="col-rating">惠誉评级</th>
+            <th class="col-yn">债务人最近一期決算是否亏损(是/否)</th>
+            <th class="col-yn">是否上市（是/否）</th>
+            <th class="col-yn">若上市，债务人是否被上市废止(是/否)</th>
+            <th class="col-price">债券价格是否大幅下跌（月环比跌幅超过5%）</th>
+            <th class="col-reason">皆无评级的話请写明理由</th>
+            <th class="col-change">评级是否变化</th>
+            <th class="col-rss">官方 RSS 链接</th>
+          </tr>
+        </thead>
+        <tbody id="ir-table-body"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="/static/js/intl_ratings.js"></script>
+{% endblock %}

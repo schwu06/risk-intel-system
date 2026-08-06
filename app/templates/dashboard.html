@@ -21,6 +21,18 @@
 
 {% block page_sidebar %}
 <aside class="sidebar page-rail" data-modules="{{ module_codes_csv }}" data-page-path="{{ page_path }}">
+  {% if news_subnav %}
+  <nav class="news-subnav" aria-label="新闻日报分栏">
+    <a
+      href="/daily-news?report_date={{ report_date }}"
+      class="news-subnav-link {% if active_page == 'daily_news' %}active{% endif %}"
+    >近24小时</a>
+    <a
+      href="/daily-news-7x24?report_date={{ report_date }}"
+      class="news-subnav-link {% if active_page == 'news_7x24' %}active{% endif %}"
+    >7×24</a>
+  </nav>
+  {% endif %}
   <h2>风险等级分布</h2>
   <ul class="stat-list">
     {% for level, count in stats.items() %}
@@ -32,7 +44,7 @@
     {% for code, name in modules.items() %}
     {% set run = run_map.get(code) %}
     <li>
-      <span class="mod-name">{{ name }}</span>
+      <a class="mod-name mod-jump" href="#module-panel-{{ code }}" data-module="{{ code }}">{{ name }}</a>
       <span class="run-status status-{{ run.status if run else 'pending' }}">
         {% if run %}
           {% if run.status == 'failed' %}请求失败
@@ -44,8 +56,8 @@
     {% endfor %}
   </ul>
   <div class="actions">
-    <a class="btn" href="/api/v1/export/docx?report_date={{ report_date }}&module_codes={{ module_codes_csv }}">导出 Word</a>
-    <button type="button" class="btn secondary" id="btn-run-pipeline">采集近24小时资讯</button>
+    <a class="btn" href="/api/v1/export/docx?report_date={{ report_date }}&module_codes={{ module_codes_csv }}&window_hours={{ window_hours }}">导出 Word</a>
+    <button type="button" class="btn secondary" id="btn-run-pipeline">{{ collect_label }}</button>
   </div>
   <p class="hint" id="pipeline-msg">点击采集数据</p>
 </aside>
@@ -66,34 +78,46 @@
       {% set mod_entries = grouped_entries.get(code, []) %}
       {% set ui = module_ui.get(code, {}) %}
       {% if mod_entries %}
-      <div class="entry-grid">
+      <div class="entry-grid risk-event-list">
         {% for e in mod_entries %}
-        <article class="entry-card level-border-{{ e.risk_level }}">
-          <header>
-            <span class="badge">{{ name }}</span>
-            <span class="risk">{{ e.risk_level }}</span>
-          </header>
-          <h3>{{ e.title }}</h3>
-          {% if e.related_company %}<p class="meta"><strong>关联企业：</strong>{{ e.related_company }}</p>{% endif %}
-          {% if e.category_tag %}<p class="meta"><strong>分类：</strong>{{ e.category_tag }}</p>
-          {% elif e.risk_category %}<p class="meta"><strong>风险类别：</strong>{{ e.risk_category }}</p>{% endif %}
-          <p class="summary">{{ e.summary }}</p>
-          {% if e.published_at %}<p class="meta"><strong>发布时间：</strong>{{ e.published_at }}</p>{% endif %}
-          {% if e.impact_analysis %}<p class="impact"><strong>影响分析：</strong>{{ e.impact_analysis }}</p>{% endif %}
-          <div class="entry-source-row">
-            {% if e.source_url %}
-            <p class="source"><a href="{{ e.source_url }}" target="_blank" rel="noopener noreferrer">来源链接</a></p>
+        <article class="entry-card risk-event-card">
+          <div class="risk-event-top">
+            <span class="risk-level-tag risk-tag-{{ e.risk_level }}">{{ e.risk_level }}</span>
+            {% if e.category_tag %}
+            <span class="risk-category-chip">{{ e.category_tag }}</span>
+            {% elif e.risk_category %}
+            <span class="risk-category-chip">{{ e.risk_category }}</span>
             {% else %}
-            <p class="source muted">来源链接：暂无</p>
+            <span class="risk-category-chip">{{ name }}</span>
             {% endif %}
-            <p class="meta media-source">
-              {% if e.social_source_url and e.social_source_label and e.social_source_label != "暂无" %}
-              <a href="{{ e.social_source_url }}" target="_blank" rel="noopener noreferrer">{{ e.social_source_label }}</a>
-              {% else %}
-              <span>{{ e.social_source_label or "暂无" }}</span>
-              {% endif %}
-            </p>
+            {% if code == "C" and e.related_company %}
+            <span class="risk-company-chip">{{ e.related_company }}</span>
+            {% endif %}
+            {% if e.published_at %}
+            <time class="risk-event-time">{{ e.published_at }}</time>
+            {% endif %}
           </div>
+          <h3 class="risk-event-title">{{ e.title }}</h3>
+          {% if e.summary %}
+          <p class="entry-news-summary">{{ e.summary }}</p>
+          {% endif %}
+          {% if e.impact_analysis %}
+          <p class="entry-risk-analysis">{{ e.impact_analysis }}</p>
+          {% endif %}
+          <footer class="risk-event-footer">
+            {% if e.source_url %}
+            <a class="risk-event-source" href="{{ e.source_url }}" target="_blank" rel="noopener noreferrer">数据来源</a>
+            {% else %}
+            <span class="risk-event-source muted">来源未标注</span>
+            {% endif %}
+            {% if e.social_source_url and e.social_source_label and e.social_source_label != "暂无" %}
+            <a class="risk-event-related" href="{{ e.social_source_url }}" target="_blank" rel="noopener noreferrer">{{ e.social_source_label }}</a>
+            {% elif e.social_source_label and e.social_source_label != "暂无" %}
+            <span class="risk-event-related">{{ e.social_source_label }}</span>
+            {% else %}
+            <span class="risk-event-related muted">媒体来源未标注</span>
+            {% endif %}
+          </footer>
           <div class="chart-host" id="chart-entry-{{ e.id }}"></div>
         </article>
         {% endfor %}
@@ -112,7 +136,7 @@
     {% endfor %}
 
     {% if not entries %}
-    <p class="empty">当前筛选条件下暂无条目。可通过侧边栏运行流水线，或从右侧「数据源」上传权威材料。</p>
+    <p class="empty">{{ empty_hint }}</p>
     {% endif %}
   </section>
 </main>
@@ -122,6 +146,7 @@
 <script>
   window.REPORT_DATE = "{{ report_date }}";
   window.PIPELINE_MODULES = "{{ module_codes_csv }}".split(",").filter(Boolean);
+  window.NEWS_WINDOW_HOURS = {{ window_hours | int }};
   window.ENTRY_CHARTS = {{ entry_charts_json | safe }};
 </script>
 {% endblock %}

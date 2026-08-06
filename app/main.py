@@ -11,12 +11,12 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.api.routes import router as api_router
-from app.config import CREDIT_LEVELS, MODULE_CODES, PAGE_META, get_settings, modules_for_page
+from app.config import CREDIT_LEVELS, MODULE_CODES, NEWS_WINDOW_HOURS_24, PAGE_META, get_settings, modules_for_page
 from app.database.models import CreditUpdate, EntityRisk, NewsArticle, ReportRun, SearchLog, TargetEntity
 from app.database.session import get_db, init_db
 from app.services.api_keys import is_placeholder_key
 from app.services.data_bridge import migrate_legacy_data
-from app.services.data_source_service import list_all_sources, list_industry_sources, list_module_sources
+from app.services.data_source_service import list_all_sources, list_industry_sources
 from app.services.display_zh import build_display_cards
 from app.services.domain_rules import seed_default_domains
 from app.services.industry_analysis import IndustryAnalysisService
@@ -97,17 +97,16 @@ def _source_drawer_context(
     db: Session,
     *,
     industry_name: str | None = None,
-    entity_id: int | None = None,
 ) -> dict:
-    """数据源抽屉：风险日报用全站源；主体评估用当前主体专属源。"""
-    sources = list_all_sources(db, entity_id=entity_id)
+    """数据源侧拉栏：仅深度研报页面使用。"""
+    sources = list_all_sources(db, entity_id=None)
     return {
         "drawer_sources": sources,
         "drawer_modules": dict(MODULE_CODES),
         "drawer_module_sources": {},
         "drawer_industry_sources": [],
         "drawer_industry_name": industry_name or "",
-        "drawer_entity_id": entity_id,
+        "drawer_entity_id": None,
     }
 
 
@@ -135,11 +134,14 @@ def _daily_news_context(
     report_date: str | None,
     module_code: str | None,
     db: Session,
+    page_key: str = "daily_news",
 ) -> dict:
-    page_key = "daily_news"
+    if page_key not in PAGE_META or page_key not in ("daily_news", "news_7x24"):
+        page_key = "daily_news"
     allowed = modules_for_page(page_key)
     allowed_codes = tuple(allowed.keys())
     meta = PAGE_META[page_key]
+    window_hours = int(meta.get("window_hours") or NEWS_WINDOW_HOURS_24)
     rd = _parse_report_date(report_date)
 
     selected = (module_code or "").upper() or None
@@ -150,6 +152,7 @@ def _daily_news_context(
         db.query(NewsArticle)
         .filter(NewsArticle.report_date == rd)
         .filter(NewsArticle.module_code.in_(allowed_codes))
+        .filter(NewsArticle.window_hours == window_hours)
     )
     if selected:
         q = q.filter(NewsArticle.module_code == selected)
@@ -167,6 +170,7 @@ def _daily_news_context(
         db.query(ReportRun)
         .filter(ReportRun.report_date == rd)
         .filter(ReportRun.module_code.in_(allowed_codes))
+        .filter(ReportRun.window_hours == window_hours)
         .all()
     )
     run_map = {r.module_code: r for r in runs}
@@ -228,8 +232,6 @@ def _daily_news_context(
         else:
             module_ui[code] = {"state": "idle", "message": "尚未采集，请点击侧边栏运行流水线。"}
 
-    module_sources = {code: list_module_sources(db, code) for code in allowed_codes}
-
     return {
         "request": request,
         "app_name": settings.app_name,
@@ -246,10 +248,13 @@ def _daily_news_context(
         "stats": stats,
         "run_map": run_map,
         "module_ui": module_ui,
-        "module_sources": module_sources,
         "entry_charts_json": _news_charts_json(entries),
         "pages": PAGE_META,
-        **_source_drawer_context(db),
+        "window_hours": window_hours,
+        "collect_label": meta.get("collect_label") or f"采集近{window_hours}小时资讯",
+        "empty_hint": meta.get("empty_hint")
+        or "当前筛选条件下暂无条目。可通过侧边栏运行流水线采集资讯。",
+        "news_subnav": True,
     }
 
 
@@ -309,7 +314,6 @@ def _entity_assessment_context(
         if ent.credit_level in credit_counts:
             credit_counts[ent.credit_level] += 1
 
-    module_sources = {code: list_module_sources(db, code) for code in allowed_codes}
     runs = (
         db.query(ReportRun)
         .filter(ReportRun.report_date == rd)
@@ -335,12 +339,8 @@ def _entity_assessment_context(
         "credit_logs": credit_logs,
         "credit_levels": CREDIT_LEVELS,
         "credit_counts": credit_counts,
-        "module_sources": module_sources,
         "run_map": run_map,
         "pages": PAGE_META,
-        **_source_drawer_context(
-            db, entity_id=selected_entity.id if selected_entity else None
-        ),
     }
 
 
@@ -368,6 +368,24 @@ def daily_news_page(
         report_date=report_date,
         module_code=module_code,
         db=db,
+        page_key="daily_news",
+    )
+    return templates.TemplateResponse("dashboard.html", ctx)
+
+
+@app.get("/daily-news-7x24", response_class=HTMLResponse)
+def daily_news_7x24_page(
+    request: Request,
+    report_date: str | None = None,
+    module_code: str | None = None,
+    db: Session = Depends(get_db),
+):
+    ctx = _daily_news_context(
+        request=request,
+        report_date=report_date,
+        module_code=module_code,
+        db=db,
+        page_key="news_7x24",
     )
     return templates.TemplateResponse("dashboard.html", ctx)
 
@@ -418,5 +436,22 @@ def deep_reports_page(
             "selected_report": selected,
             "industry_sources": industry_sources,
             **_source_drawer_context(db, industry_name=industry_name),
+        },
+    )
+
+
+@app.get("/intl-ratings", response_class=HTMLResponse)
+def intl_ratings_page(request: Request):
+    meta = PAGE_META["intl_ratings"]
+    return templates.TemplateResponse(
+        "intl_ratings.html",
+        {
+            "request": request,
+            "app_name": settings.app_name,
+            "active_page": "intl_ratings",
+            "page_path": meta["path"],
+            "page_title": meta["title"],
+            "page_subtitle": meta["subtitle"],
+            "pages": PAGE_META,
         },
     )

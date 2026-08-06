@@ -38,6 +38,8 @@ class PipelineRunRequest(BaseModel):
     async_mode: Optional[bool] = None
     # 主体评估页：仅采集/更新指定主体
     entity_id: Optional[int] = None
+    # 新闻时效窗：24=近24小时，168=近7×24小时；缺省跟配置 news_window_hours
+    window_hours: Optional[int] = Field(None, ge=1, le=168)
 
 
 class PipelineRunResponse(BaseModel):
@@ -48,6 +50,7 @@ class PipelineRunResponse(BaseModel):
     async_mode: bool = False
     status: Optional[str] = None
     entity_id: Optional[int] = None
+    window_hours: Optional[int] = None
 
 
 class PipelineJobStatusOut(BaseModel):
@@ -64,6 +67,7 @@ class PipelineJobStatusOut(BaseModel):
     running_job_id: Optional[str] = None
     snapshot: Optional[dict] = None
     entity_id: Optional[int] = None
+    window_hours: Optional[int] = None
 
 
 class ManualEntryIn(BaseModel):

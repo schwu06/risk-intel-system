@@ -14,7 +14,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Inches, Pt, RGBColor
 
-from app.config import MODULE_CODES
+from app.config import MODULE_CODES, NEWS_WINDOW_HOURS_24, news_window_label
 from app.database.models import CreditUpdate, DailyRiskEntry, EntityRisk, IndustryReport, TargetEntity
 from app.services.chart_generator import extract_chart_specs, render_chart_png
 
@@ -116,8 +116,9 @@ def build_daily_report_docx(
     report_date: date,
     institution_name: str = "风险管理部",
     module_codes: Optional[list[str]] = None,
+    window_hours: int = NEWS_WINDOW_HOURS_24,
 ) -> Document:
-    """生成《24小时核心新闻情报汇总》（仅标题/元数据/概要，不含风险研判与图表）。"""
+    """生成核心新闻情报汇总（仅标题/元数据/概要，不含风险研判与图表）。"""
     _ = institution_name  # 新版版式不再展示机构署名
 
     doc = Document()
@@ -136,11 +137,12 @@ def build_daily_report_docx(
 
     items = [e for e in entries if e.module_code in module_map]
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+    report_title = f"{news_window_label(window_hours)}核心新闻情报汇总"
 
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title_p.paragraph_format.space_after = Pt(4)
-    tr = title_p.add_run("24小时核心新闻情报汇总")
+    tr = title_p.add_run(report_title)
     _set_run_font(tr, size_pt=22, bold=True, color=COLOR_PRIMARY)
 
     sub = doc.add_paragraph()
@@ -295,9 +297,14 @@ def export_daily_report_to_path(
     output_path: Path,
     institution_name: str = "风险管理部",
     module_codes: Optional[list[str]] = None,
+    window_hours: int = NEWS_WINDOW_HOURS_24,
 ) -> Path:
     doc = build_daily_report_docx(
-        entries, report_date, institution_name, module_codes=module_codes
+        entries,
+        report_date,
+        institution_name,
+        module_codes=module_codes,
+        window_hours=window_hours,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_path))
@@ -309,9 +316,14 @@ def export_daily_report_to_bytes(
     report_date: date,
     institution_name: str = "风险管理部",
     module_codes: Optional[list[str]] = None,
+    window_hours: int = NEWS_WINDOW_HOURS_24,
 ) -> bytes:
     doc = build_daily_report_docx(
-        entries, report_date, institution_name, module_codes=module_codes
+        entries,
+        report_date,
+        institution_name,
+        module_codes=module_codes,
+        window_hours=window_hours,
     )
     buffer = BytesIO()
     doc.save(buffer)

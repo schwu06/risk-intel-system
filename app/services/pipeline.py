@@ -11,7 +11,14 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.config import MODULE_CODES, PAGE_MODULES, get_settings, module_search_queries
+from app.config import (
+    MODULE_CODES,
+    NEWS_WINDOW_HOURS_24,
+    PAGE_MODULES,
+    get_settings,
+    module_search_queries,
+    news_window_label,
+)
 from app.database.models import (
     ContentFingerprint,
     DailyRiskEntry,
@@ -23,8 +30,7 @@ from app.database.models import (
 )
 from app.services.chart_generator import extract_and_build_charts
 from app.services.content_extractor import enrich_items_with_body
-from app.services.data_source_service import get_module_authoritative_text
-from app.services.dedup import content_fingerprint
+from app.services.dedup import content_fingerprint, dedupe_by_title_similarity, titles_similar
 from app.services.deepseek_analyzer import DeepSeekAnalyzer
 from app.services.domain_rules import get_active_blacklist, get_active_whitelist
 from app.services.entity_credit import refresh_entity_credit, resolve_entity
@@ -35,16 +41,24 @@ from app.services.news_quality import (
     is_reference_only_item,
     is_substantive_news_item,
 )
+from app.services.news_section_router import (
+    filter_rows_for_module,
+    route_news_sections,
+)
 from app.services.recency import is_within_hours, parse_published_at
 from app.services.rss_news import RssNewsCollector
+from app.services.scrapers.direct_site_collector import DirectSiteCollector
 from app.services.scrapers.official_portals import OfficialPortalScraper
+from app.services.scrapers.sina_724_collector import Sina724Collector
 from app.services.scrapers.tdnet_collector import TdnetCollector
 from app.timeutil import tokyo_now
 
 logger = logging.getLogger(__name__)
 
 RISK_LEVEL_ORDER = {"极高": 4, "高": 3, "中": 2, "低": 1}
-NEWS_MODULES = set(PAGE_MODULES.get("daily_news", ("B", "C", "D")))
+NEWS_MODULES = set(PAGE_MODULES.get("daily_news", ("B", "C", "D"))) | set(
+    PAGE_MODULES.get("news_7x24", ())
+)
 ENTITY_MODULES = set(PAGE_MODULES.get("entity_assessment", ("A",)))
 
 
@@ -58,12 +72,16 @@ class RiskPipeline:
         job_id: Optional[str] = None,
         authority_text: Optional[str] = None,
         entity_id: Optional[int] = None,
+        window_hours: Optional[int] = None,
     ) -> None:
         self.db = db
         self.mita = mita or MitaSearchClient()
         self.deepseek = deepseek or DeepSeekAnalyzer()
         self.settings = get_settings()
-        self.window_hours = int(getattr(self.settings, "news_window_hours", 24) or 24)
+        default_hours = int(getattr(self.settings, "news_window_hours", NEWS_WINDOW_HOURS_24) or NEWS_WINDOW_HOURS_24)
+        self.window_hours = int(window_hours if window_hours is not None else default_hours)
+        if self.window_hours < 1:
+            self.window_hours = NEWS_WINDOW_HOURS_24
         self.job_id = job_id
         # None = 实时读取数据源；非 None（含空串）= 任务启动时冻结的快照，运行中变更不影响本次
         self._authority_snapshot = authority_text
@@ -71,6 +89,8 @@ class RiskPipeline:
         self.llm_top_k = int(getattr(self.settings, "pipeline_llm_top_k", 12) or 12)
         self.cache_hours = int(getattr(self.settings, "pipeline_llm_cache_hours", 168) or 168)
         self.mita_pause = float(getattr(self.settings, "pipeline_mita_query_pause_seconds", 0.8) or 0)
+        raw_cap = int(getattr(self.settings, "pipeline_collect_max_items", 80) or 80)
+        self.collect_max_items = raw_cap if raw_cap > 0 else 80
         if rss is not None:
             self.rss = rss
         else:
@@ -126,9 +146,10 @@ class RiskPipeline:
 
             batches: list[dict[str, Any]] = []
             if self._authority_snapshot is not None:
+                # 空字符串快照表示本任务不使用权威上传材料（风险日报/主体评估）
                 authority_text = self._authority_snapshot
             else:
-                authority_text = get_module_authoritative_text(self.db, module_code) or ""
+                authority_text = ""
 
             if authority_text.strip():
                 batches.append(
@@ -156,6 +177,42 @@ class RiskPipeline:
                 fail_notes.append(f"RSS: {exc}")
                 funnel["source_fail"].append("rss")
                 logger.warning("模块 %s RSS 采集失败（已跳过）: %s", module_code, exc)
+
+            try:
+                direct_batch = self._collect_direct_sites(module_code, funnel)
+                if direct_batch["items"]:
+                    batches.append(direct_batch)
+                    source_ok += 1
+                elif direct_batch.get("error"):
+                    err = str(direct_batch.get("error") or "")
+                    # 未配置站点或近窗无条目不算硬故障
+                    if "未配置" not in err and "无条目" not in err:
+                        source_fail += 1
+                        fail_notes.append(f"直连站点: {err}")
+                        funnel["source_fail"].append("direct_site")
+            except Exception as exc:
+                source_fail += 1
+                fail_notes.append(f"直连站点: {exc}")
+                funnel["source_fail"].append("direct_site")
+                logger.warning("模块 %s 直连站点采集失败（已跳过）: %s", module_code, exc)
+
+            if module_code in ("B", "D"):
+                try:
+                    sina_batch = self._collect_sina_724(module_code, funnel)
+                    if sina_batch["items"]:
+                        batches.append(sina_batch)
+                        source_ok += 1
+                    elif sina_batch.get("error"):
+                        err = str(sina_batch.get("error") or "")
+                        if "无条目" not in err:
+                            source_fail += 1
+                            fail_notes.append(f"新浪7x24: {err}")
+                            funnel["source_fail"].append("sina_724")
+                except Exception as exc:
+                    source_fail += 1
+                    fail_notes.append(f"新浪7x24: {exc}")
+                    funnel["source_fail"].append("sina_724")
+                    logger.warning("模块 %s 新浪7x24 采集失败（已跳过）: %s", module_code, exc)
 
             if module_code == "C":
                 try:
@@ -221,6 +278,7 @@ class RiskPipeline:
                     module_code,
                     report_date.isoformat(),
                     entity_targets=entity_targets,
+                    window_hours=self.window_hours,
                 )
                 gap = max(1, mita_target - primary_valid) if not force_mita else max(
                     mita_target, 1
@@ -306,7 +364,7 @@ class RiskPipeline:
                 run.kept_previous = False
                 run.status = "completed" if saved > 0 else "empty"
                 run.phase = "done"
-                run.notes = "外部检索未配置，已写入近24小时演示样本并刷新授信"
+                run.notes = f"外部检索未配置，已写入近{news_window_label(self.window_hours)}演示样本并刷新授信"
                 run.finished_at = tokyo_now()
                 self._set_funnel(run, funnel)
                 self.db.commit()
@@ -342,6 +400,19 @@ class RiskPipeline:
             pending_rows = self._dedupe_structured(pending_rows, module_code, funnel)
             pending_rows = filter_publishable_rows(pending_rows)
             funnel["after_quality_filter"] = len(pending_rows)
+            if module_code in NEWS_MODULES:
+                pending_rows, route_stats = filter_rows_for_module(
+                    pending_rows, module_code, keep_unmatched=True
+                )
+                funnel["after_section_route"] = len(pending_rows)
+                funnel["section_route"] = route_stats
+                if route_stats.get("routed_out"):
+                    logger.info(
+                        "模块 %s 分类路由剔除 %s 条（双投 %s）",
+                        module_code,
+                        route_stats.get("routed_out"),
+                        route_stats.get("dual"),
+                    )
             self._save_artifact(
                 report_date,
                 module_code,
@@ -381,13 +452,15 @@ class RiskPipeline:
                 run.entry_count = saved
                 run.kept_previous = False
                 run.status = "completed" if saved > 0 else "empty"
-                note = f"近{self.window_hours}小时重要资讯采集"
+                note = f"近{news_window_label(self.window_hours)}重要资讯采集"
                 if source_fail:
                     note += f"（部分源失败 {source_fail}）"
                 if funnel.get("degraded"):
                     note += f"（降级入库 {funnel['degraded']}）"
                 if funnel.get("llm_cached"):
                     note += f"（缓存命中 {funnel['llm_cached']}）"
+                if funnel.get("section_route", {}).get("routed_out"):
+                    note += f"（路由剔除 {funnel['section_route']['routed_out']}）"
                 run.notes = note
             else:
                 # 主体评估：无真实产出时写入演示数据，保证页面可刷新
@@ -403,7 +476,7 @@ class RiskPipeline:
                     run.kept_previous = False
                     run.status = "completed" if saved > 0 else "empty"
                     run.notes = (
-                        f"近{self.window_hours}小时采集无新增源数据，已写入演示样本并刷新授信"
+                        f"近{news_window_label(self.window_hours)}采集无新增源数据，已写入演示样本并刷新授信"
                         if saved
                         else "今日无动态"
                     )
@@ -462,7 +535,7 @@ class RiskPipeline:
         detailed = self.rss.collect_detailed(
             module_code,
             hours=self.window_hours,
-            max_items=36,
+            max_items=self.collect_max_items,
         )
         funnel["rss_fetched"] = len(detailed.items)
         funnel["rss_feeds_ok"] = detailed.fetch_ok
@@ -505,10 +578,122 @@ class RiskPipeline:
             "error": None if detailed.fetch_ok else "全部 feed 失败",
         }
 
+    def _collect_direct_sites(
+        self, module_code: str, funnel: dict[str, Any]
+    ) -> dict[str, Any]:
+        """无 RSS 直连网站 HTML 列表采集（config/direct_sites.yaml）。"""
+        path = getattr(self.settings, "direct_sites_config_path", None) or None
+        collector = DirectSiteCollector(config_path=path)
+        configured = collector.config.sites_for_module(module_code)
+        if not configured:
+            funnel["direct_site_fetched"] = 0
+            return {
+                "source": "direct_site",
+                "items": [],
+                "search_log_id": None,
+                "metadata": {"source": "direct_site"},
+                "error": "未配置直连站点",
+            }
+
+        hits = collector.collect_for_module(
+            module_code, hours=self.window_hours, max_items=self.collect_max_items
+        )
+        funnel["direct_site_fetched"] = len(hits)
+        items = [
+            {
+                "title": h.title,
+                "url": h.url,
+                "snippet": h.snippet,
+                "published_at": h.published_at,
+                "source_domain": h.source_domain,
+                "feed": h.feed_label,
+                "fingerprint": content_fingerprint(
+                    module_code=module_code,
+                    title=h.title,
+                    url=h.url,
+                    published_at=h.published_at,
+                ),
+            }
+            for h in hits
+        ]
+        if items and self.settings.news_fetch_body:
+            items = enrich_items_with_body(
+                items,
+                max_items=min(8, int(self.settings.news_max_body_items or 8)),
+            )
+        labels = ", ".join(s.label for s in configured[:5])
+        log = SearchLog(
+            module_code=module_code,
+            query_text=f"[直连站点 {labels} 近{self.window_hours}小时]",
+            status="completed" if items else "empty",
+            result_count=len(items),
+            raw_response=json.dumps({"items": items}, ensure_ascii=False)[:50000],
+        )
+        self.db.add(log)
+        self.db.flush()
+        return {
+            "source": "direct_site",
+            "items": items,
+            "search_log_id": log.id,
+            "metadata": {
+                "source": "direct_site",
+                "sites": [s.label for s in configured],
+            },
+            "error": None if items else "近窗内无条目",
+        }
+
+    def _collect_sina_724(
+        self, module_code: str, funnel: dict[str, Any]
+    ) -> dict[str, Any]:
+        """新浪财经 7×24 快讯（zhibo feed API）。"""
+        collector = Sina724Collector()
+        hits = collector.collect_for_module(
+            module_code, hours=self.window_hours, max_items=self.collect_max_items
+        )
+        funnel["sina_724_fetched"] = len(hits)
+        items = [
+            {
+                "title": h.title,
+                "url": h.url,
+                "snippet": h.snippet,
+                "published_at": h.published_at,
+                "source_domain": h.source_domain,
+                "feed": h.feed_label,
+                "fingerprint": content_fingerprint(
+                    module_code=module_code,
+                    title=h.title,
+                    url=h.url,
+                    published_at=h.published_at,
+                ),
+            }
+            for h in hits
+        ]
+        if items and self.settings.news_fetch_body:
+            items = enrich_items_with_body(
+                items,
+                max_items=min(8, int(self.settings.news_max_body_items or 8)),
+            )
+        log = SearchLog(
+            module_code=module_code,
+            query_text=f"[新浪财经7x24 近{self.window_hours}小时]",
+            status="completed" if items else "empty",
+            result_count=len(items),
+            raw_response=json.dumps({"items": items}, ensure_ascii=False)[:50000],
+        )
+        self.db.add(log)
+        self.db.flush()
+        return {
+            "source": "sina_724",
+            "items": items,
+            "search_log_id": log.id,
+            "metadata": {"source": "sina_724", "portal": "finance.sina.com.cn/7x24"},
+            "error": None if items else "近窗内无条目",
+        }
+
     def _collect_tdnet(self, module_code: str, funnel: dict[str, Any]) -> dict[str, Any]:
         """采集监控企业 TDnet 适时应披露，作为可分析/可入库资讯源。"""
         collector = TdnetCollector()
-        hits = collector.collect(hours=self.window_hours, max_items=36)
+        hits = collector.collect(hours=self.window_hours, max_items=self.collect_max_items)
         funnel["tdnet_fetched"] = len(hits)
         items = [
             {
@@ -694,21 +879,21 @@ class RiskPipeline:
     def _count_primary_valid(
         self, batches: list[dict[str, Any]], module_code: str
     ) -> int:
-        """主源（RSS / TDnet）有效候选数；不含秘塔与权威上传正文。"""
+        """主源（RSS / 直连站点 / 新浪7x24 / TDnet）有效候选数；不含秘塔与权威上传正文。"""
         primary_items: list[dict[str, Any]] = []
         for batch in batches:
-            if batch.get("source") not in ("rss", "tdnet"):
+            if batch.get("source") not in ("rss", "tdnet", "direct_site", "sina_724"):
                 continue
             primary_items.extend(batch.get("items") or [])
         return self._count_valid_items(primary_items, module_code)
 
     def _mita_target(self, module_code: str, batches: list[dict[str, Any]]) -> int:
-        """秘塔补齐目标条数。"""
+        """秘塔补齐目标条数（与展示全量对齐，默认 24，不再跟 LLM 批大小挂钩）。"""
         configured = int(getattr(self.settings, "pipeline_mita_min_items", 0) or 0)
-        base = configured if configured > 0 else self.llm_top_k
+        base = configured if configured > 0 else 24
         if module_code in ENTITY_MODULES:
             # 主体评估：更严，有几条相关资讯即可，避免空窗也硬扛全量 query
-            return min(base, 3)
+            return min(base, 6)
         if module_code == "C":
             tdnet_n = 0
             for batch in batches:
@@ -716,7 +901,7 @@ class RiskPipeline:
                     tdnet_n += self._count_valid_items(batch.get("items") or [], module_code)
             # 已有正式披露时，搜索补缺门槛略降
             if tdnet_n >= 1:
-                return min(base, 6)
+                return min(base, 16)
         return max(1, base)
 
     def _should_force_mita(self, module_code: str, funnel: dict[str, Any]) -> bool:
@@ -757,7 +942,7 @@ class RiskPipeline:
         authority_text: str,
         funnel: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """同一模块多源合并为少量 LLM 调用，显著缩短耗时。"""
+        """多源合并：指纹+标题相似去重后全量分析入库（LLM 仅分批增强，不截断展示）。"""
         rows: list[dict[str, Any]] = []
         auth_batches = [b for b in batches if b.get("source") == "authority"]
         other_batches = [b for b in batches if b.get("source") != "authority"]
@@ -788,68 +973,22 @@ class RiskPipeline:
         if not merged_items:
             return rows
 
-        # 去重后取 Top-K
-        seen: set[str] = set()
-        unique: list[dict[str, Any]] = []
-        for it in merged_items:
-            fp = it.get("fingerprint") or content_fingerprint(
-                module_code=module_code,
-                title=it.get("title"),
-                url=it.get("url"),
-                published_at=it.get("published_at"),
-            )
-            if fp in seen:
-                continue
-            seen.add(fp)
-            it["fingerprint"] = fp
-            unique.append(it)
-        ranked = self._prefilter_items(unique, self.llm_top_k)
-        funnel["sent_llm"] = int(funnel.get("sent_llm") or 0) + len(ranked)
-
-        web_text = json.dumps(ranked, ensure_ascii=False, indent=2)
-        combined = web_text
-        if authority_text:
-            combined = (
-                f"=== 权威数据源（优先参考）===\n{authority_text[:20000]}\n\n"
-                f"=== RSS/秘塔合并候选（近{self.window_hours}小时）===\n{web_text}"
-            )
+        unique = self._unique_source_items(merged_items, module_code)
+        funnel["after_event_dedup"] = len(unique)
         metadata = {"source": "merged"}
-        # 仅用户权威上传触发 authority_first；EDINET 备注等不应占用该模式
         authority_first = bool(funnel.get("authority"))
-        try:
-            structured = self._llm_analyze(
-                combined,
+        rows.extend(
+            self._analyze_item_chunks(
+                unique,
                 module_code=module_code,
                 report_date=report_date,
-                source="merged",
+                authority_text=authority_text,
+                metadata=metadata,
                 authority_first=authority_first,
                 funnel=funnel,
-                context={
-                    "report_date": report_date.isoformat(),
-                    "source": "merged",
-                    "window_hours": self.window_hours,
-                },
+                source_label="merged",
             )
-            if structured:
-                rows.extend(
-                    filter_publishable_rows(
-                        self._tag_rows(
-                            structured,
-                            metadata,
-                            ranked,
-                            module_code=module_code,
-                            degraded=False,
-                        )
-                    )
-                )
-            else:
-                logger.info("合并材料 LLM 返回空，视为无资讯")
-        except Exception as exc:
-            logger.warning("合并 LLM 失败，降级实质条目: %s", exc)
-            degraded = self._degrade_items(ranked, metadata)
-            funnel["degraded"] = int(funnel.get("degraded") or 0) + len(degraded)
-            funnel["source_fail"].append("merged_llm")
-            rows.extend(degraded)
+        )
         return rows
 
     def _analyze_batch(
@@ -890,57 +1029,150 @@ class RiskPipeline:
         if not items:
             return []
 
-        # 去掉检索入口占位，避免污染 LLM / 降级入库
         real_items = [it for it in items if is_substantive_news_item(it)]
         if not real_items:
             logger.info("来源 %s 无实质资讯条目，跳过分析", source)
             return []
 
-        # 粗筛 Top-K，降低 LLM 超时概率
-        ranked = self._prefilter_items(real_items, self.llm_top_k)
-        funnel["sent_llm"] = int(funnel.get("sent_llm") or 0) + len(ranked)
-        web_text = json.dumps(ranked, ensure_ascii=False, indent=2)
-        combined = web_text
-        if authority_text:
-            combined = (
-                f"=== 权威数据源（优先参考）===\n{authority_text[:20000]}\n\n"
-                f"=== {source} 近{self.window_hours}小时 ===\n{web_text}"
-            )
+        unique = self._unique_source_items(real_items, module_code)
+        return self._analyze_item_chunks(
+            unique,
+            module_code=module_code,
+            report_date=report_date,
+            authority_text=authority_text,
+            metadata=metadata,
+            authority_first=bool(authority_text),
+            funnel=funnel,
+            source_label=source,
+        )
 
-        try:
-            structured = self._llm_analyze(
-                combined,
+    def _unique_source_items(
+        self, items: list[dict[str, Any]], module_code: str
+    ) -> list[dict[str, Any]]:
+        """URL 指纹去重 + 标题相似事件去重。"""
+        seen: set[str] = set()
+        unique: list[dict[str, Any]] = []
+        for it in items:
+            fp = it.get("fingerprint") or content_fingerprint(
                 module_code=module_code,
-                report_date=report_date,
-                source=source,
-                authority_first=bool(authority_text),
-                funnel=funnel,
-                context={
-                    "report_date": report_date.isoformat(),
-                    "source": source,
-                    "window_hours": self.window_hours,
-                    **{k: v for k, v in metadata.items() if k != "source"},
-                },
+                title=it.get("title"),
+                url=it.get("url"),
+                published_at=it.get("published_at"),
             )
-            if structured:
-                rows = self._tag_rows(
-                    structured, metadata, ranked, module_code=module_code, degraded=False
-                )
-                return filter_publishable_rows(rows)
-            # LLM 明确返回空 = 材料中无合格新闻，不降级硬塞
-            logger.info("来源 %s LLM 返回空结果，视为无资讯", source)
+            if fp in seen:
+                continue
+            seen.add(fp)
+            it = dict(it)
+            it["fingerprint"] = fp
+            unique.append(it)
+        return dedupe_by_title_similarity(unique)
+
+    def _analyze_item_chunks(
+        self,
+        items: list[dict[str, Any]],
+        *,
+        module_code: str,
+        report_date: date,
+        authority_text: str,
+        metadata: dict[str, Any],
+        authority_first: bool,
+        funnel: dict[str, Any],
+        source_label: str,
+    ) -> list[dict[str, Any]]:
+        """按批调用 LLM；漏掉的候选用原文降级补齐，保证不因截断丢条。"""
+        if not items:
             return []
-        except Exception as exc:
-            # rss / mita / tdnet 在异常时降级；且只降级有实质内容的条目
-            if source not in ("rss", "mita", "tdnet"):
-                logger.warning("LLM 分析失败（%s），不降级: %s", source, exc)
-                funnel["source_fail"].append(f"{source}_llm")
-                return []
-            logger.warning("LLM 分析失败，降级入库实质原始条目 (%s): %s", source, exc)
-            degraded = self._degrade_items(ranked, metadata)
-            funnel["degraded"] = int(funnel.get("degraded") or 0) + len(degraded)
-            funnel["source_fail"].append(f"{source}_llm")
-            return degraded
+        batch_size = max(1, self.llm_top_k)
+        out: list[dict[str, Any]] = []
+        for start in range(0, len(items), batch_size):
+            chunk = items[start : start + batch_size]
+            funnel["sent_llm"] = int(funnel.get("sent_llm") or 0) + len(chunk)
+            web_text = json.dumps(chunk, ensure_ascii=False, indent=2)
+            combined = web_text
+            if authority_text:
+                combined = (
+                    f"=== 权威数据源（优先参考）===\n{authority_text[:20000]}\n\n"
+                    f"=== {source_label} 近{self.window_hours}小时候选 ===\n{web_text}"
+                )
+            try:
+                structured = self._llm_analyze(
+                    combined,
+                    module_code=module_code,
+                    report_date=report_date,
+                    source=f"{source_label}:{start}",
+                    authority_first=authority_first,
+                    funnel=funnel,
+                    context={
+                        "report_date": report_date.isoformat(),
+                        "source": source_label,
+                        "window_hours": self.window_hours,
+                        "chunk_offset": start,
+                        "chunk_size": len(chunk),
+                    },
+                )
+                tagged = []
+                if structured:
+                    tagged = filter_publishable_rows(
+                        self._tag_rows(
+                            structured,
+                            metadata,
+                            chunk,
+                            module_code=module_code,
+                            degraded=False,
+                        )
+                    )
+                # LLM 漏掉的不重复候选 → 降级补齐
+                filled = self._reconcile_chunk_rows(
+                    chunk, tagged, metadata, module_code=module_code, funnel=funnel
+                )
+                out.extend(filled)
+            except Exception as exc:
+                logger.warning(
+                    "LLM 分析失败，降级入库实质原始条目 (%s#%s): %s",
+                    source_label,
+                    start,
+                    exc,
+                )
+                degraded = self._degrade_items(chunk, metadata)
+                funnel["degraded"] = int(funnel.get("degraded") or 0) + len(degraded)
+                funnel["source_fail"].append(f"{source_label}_llm")
+                out.extend(degraded)
+        return out
+
+    def _reconcile_chunk_rows(
+        self,
+        chunk: list[dict[str, Any]],
+        tagged: list[dict[str, Any]],
+        metadata: dict[str, Any],
+        *,
+        module_code: str,
+        funnel: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """将 LLM 结果与候选对齐：有结构化的用结构化，没有的用原文降级保留。"""
+        used: set[int] = set()
+        rows: list[dict[str, Any]] = []
+        for row in tagged:
+            rows.append(row)
+            src_url = (row.get("来源链接") or "").strip()
+            title = row.get("标题") or ""
+            for i, it in enumerate(chunk):
+                if i in used:
+                    continue
+                if src_url and (it.get("url") or "").strip() == src_url:
+                    used.add(i)
+                    break
+                if titles_similar(title, it.get("title")):
+                    used.add(i)
+                    break
+        missing = [it for i, it in enumerate(chunk) if i not in used]
+        if missing:
+            extra = self._degrade_items(missing, metadata)
+            funnel["degraded"] = int(funnel.get("degraded") or 0) + len(extra)
+            rows.extend(extra)
+        # 再按标题相似压一次（LLM 可能仍输出重复）
+        return dedupe_by_title_similarity(
+            rows, title_getter=lambda r: r.get("标题") or r.get("title")
+        )
 
     def _llm_analyze(
         self,
@@ -953,7 +1185,11 @@ class RiskPipeline:
         funnel: dict[str, Any],
         context: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        key = material_hash(text, module_code=module_code, source=source)
+        key = material_hash(
+            text,
+            module_code=module_code,
+            source=f"{source}:w{self.window_hours}",
+        )
         cached = get_cached_items(self.db, material_key=key, max_age_hours=self.cache_hours)
         if cached is not None:
             funnel["llm_cached"] = int(funnel.get("llm_cached") or 0) + 1
@@ -969,7 +1205,7 @@ class RiskPipeline:
             self.db,
             material_key=key,
             module_code=module_code,
-            source=source,
+            source=f"{source}:w{self.window_hours}",
             items=structured,
         )
         funnel["structured"] = int(funnel.get("structured") or 0) + len(structured)
@@ -999,13 +1235,16 @@ class RiskPipeline:
             rows.append(
                 {
                     "标题": title,
-                    "关联企业": metadata.get("company") or metadata.get("target") or "",
+                    "关联企业": it.get("company")
+                    or metadata.get("company")
+                    or metadata.get("target")
+                    or "",
                     "风险类别": metadata.get("category") or metadata.get("topic") or "资讯快讯",
                     "风险等级": "中",
                     "核心摘要": snippet[:800],
                     "影响分析": "结构化分析暂不可用，已按原始摘要入库，请人工复核。",
                     "来源链接": it.get("url") or "",
-                    "来源名称": "",
+                    "来源名称": it.get("publisher") or it.get("feed") or "",
                     "发布时间": it.get("published_at") or "",
                     "_degraded": True,
                     "_fingerprint": it.get("fingerprint"),
@@ -1013,8 +1252,6 @@ class RiskPipeline:
                     "_source_item": it,
                 }
             )
-            if len(rows) >= self.llm_top_k:
-                break
         return filter_publishable_rows(rows)
 
     def _purge_non_news_placeholders(self, report_date: date, module_code: str) -> int:
@@ -1026,6 +1263,7 @@ class RiskPipeline:
                 .filter(
                     NewsArticle.report_date == report_date,
                     NewsArticle.module_code == module_code,
+                    NewsArticle.window_hours == self.window_hours,
                 )
                 .all()
             )
@@ -1056,6 +1294,7 @@ class RiskPipeline:
             .filter(
                 DailyRiskEntry.report_date == report_date,
                 DailyRiskEntry.module_code == module_code,
+                DailyRiskEntry.window_hours == self.window_hours,
             )
             .all()
         )
@@ -1114,7 +1353,7 @@ class RiskPipeline:
     def _dedupe_structured(
         self, rows: list[dict[str, Any]], module_code: str, funnel: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        seen: set[str] = set()
+        seen_fp: set[str] = set()
         unique: list[dict[str, Any]] = []
         for row in rows:
             fp = row.get("_fingerprint") or content_fingerprint(
@@ -1123,15 +1362,15 @@ class RiskPipeline:
                 url=row.get("来源链接"),
                 published_at=row.get("发布时间"),
             )
-            title_key = (row.get("标题") or "").strip().lower()
-            keys = {fp, f"title:{title_key}" if title_key else ""}
-            if any(k and k in seen for k in keys):
+            if fp in seen_fp:
                 continue
-            for k in keys:
-                if k:
-                    seen.add(k)
+            seen_fp.add(fp)
             row["_fingerprint"] = fp
             unique.append(row)
+        # 跨媒体同一事件：标题相似合并
+        unique = dedupe_by_title_similarity(
+            unique, title_getter=lambda r: r.get("标题") or r.get("title")
+        )
         funnel["after_dedup"] = len(unique)
         return unique
 
@@ -1142,11 +1381,20 @@ class RiskPipeline:
     def _ensure_run(self, report_date: date, module_code: str) -> ReportRun:
         run = (
             self.db.query(ReportRun)
-            .filter(ReportRun.report_date == report_date, ReportRun.module_code == module_code)
+            .filter(
+                ReportRun.report_date == report_date,
+                ReportRun.module_code == module_code,
+                ReportRun.window_hours == self.window_hours,
+            )
             .first()
         )
         if not run:
-            run = ReportRun(report_date=report_date, module_code=module_code, status="running")
+            run = ReportRun(
+                report_date=report_date,
+                module_code=module_code,
+                window_hours=self.window_hours,
+                status="running",
+            )
             self.db.add(run)
         else:
             run.status = "running"
@@ -1176,7 +1424,11 @@ class RiskPipeline:
         if module_code in NEWS_MODULES:
             return (
                 self.db.query(NewsArticle)
-                .filter(NewsArticle.report_date == report_date, NewsArticle.module_code == module_code)
+                .filter(
+                    NewsArticle.report_date == report_date,
+                    NewsArticle.module_code == module_code,
+                    NewsArticle.window_hours == self.window_hours,
+                )
                 .count()
             )
         if module_code in ENTITY_MODULES:
@@ -1186,7 +1438,11 @@ class RiskPipeline:
             return q.count()
         return (
             self.db.query(DailyRiskEntry)
-            .filter(DailyRiskEntry.report_date == report_date, DailyRiskEntry.module_code == module_code)
+            .filter(
+                DailyRiskEntry.report_date == report_date,
+                DailyRiskEntry.module_code == module_code,
+                DailyRiskEntry.window_hours == self.window_hours,
+            )
             .count()
         )
 
@@ -1196,6 +1452,7 @@ class RiskPipeline:
             self.db.query(NewsArticle).filter(
                 NewsArticle.report_date == report_date,
                 NewsArticle.module_code == module_code,
+                NewsArticle.window_hours == self.window_hours,
             ).delete(synchronize_session=False)
 
         if module_code in ENTITY_MODULES:
@@ -1218,6 +1475,7 @@ class RiskPipeline:
             self.db.query(DailyRiskEntry).filter(
                 DailyRiskEntry.report_date == report_date,
                 DailyRiskEntry.module_code == module_code,
+                DailyRiskEntry.window_hours == self.window_hours,
             ).delete(synchronize_session=False)
         self.db.commit()
 
@@ -1275,6 +1533,136 @@ class RiskPipeline:
             if dt:
                 return dt.replace(tzinfo=None)
         return None
+
+    def sync_dual_route_mirrors(self, report_date: date) -> int:
+        """全量任务结束后：将双投 [B,D] 条目补齐到另一板块（不整表清空）。"""
+        if not NEWS_MODULES:
+            return 0
+        sources = (
+            self.db.query(DailyRiskEntry)
+            .filter(
+                DailyRiskEntry.report_date == report_date,
+                DailyRiskEntry.module_code.in_(tuple(NEWS_MODULES)),
+                DailyRiskEntry.window_hours == self.window_hours,
+            )
+            .all()
+        )
+        if not sources:
+            return 0
+
+        existing_keys: set[tuple[str, str]] = set()
+        for e in sources:
+            key = (e.module_code or "", (e.title or "").strip().lower())
+            existing_keys.add(key)
+            if e.source_url:
+                existing_keys.add((e.module_code or "", f"url:{(e.source_url or '').strip().lower()}"))
+
+        mirrored = 0
+        for entry in sources:
+            route = route_news_sections(
+                title=entry.title or "",
+                content=f"{entry.summary or ''} {entry.impact_analysis or ''}",
+                source=entry.source_url or "",
+                related_company=entry.related_company or "",
+            )
+            if len(route.sections) < 2:
+                continue
+            for target in route.sections:
+                if target == entry.module_code:
+                    continue
+                title_key = (target, (entry.title or "").strip().lower())
+                url_key = (
+                    (target, f"url:{(entry.source_url or '').strip().lower()}")
+                    if entry.source_url
+                    else None
+                )
+                if title_key in existing_keys or (url_key and url_key in existing_keys):
+                    continue
+                clone = DailyRiskEntry(
+                    report_date=report_date,
+                    module_code=target,
+                    country_or_region=entry.country_or_region,
+                    target_entity=entry.target_entity,
+                    title=entry.title,
+                    related_company=entry.related_company,
+                    risk_category=entry.risk_category,
+                    risk_level=entry.risk_level,
+                    summary=entry.summary,
+                    impact_analysis=entry.impact_analysis,
+                    source_url=entry.source_url,
+                    source_title=entry.source_title,
+                    pillar_or_topic=entry.pillar_or_topic,
+                    structured_json=entry.structured_json,
+                    search_log_id=entry.search_log_id,
+                    published_at=entry.published_at,
+                    window_hours=self.window_hours,
+                )
+                self.db.add(clone)
+                self.db.flush()
+                # 同步 NewsArticle（若源侧有）
+                src_news = (
+                    self.db.query(NewsArticle)
+                    .filter(NewsArticle.legacy_entry_id == entry.id)
+                    .first()
+                )
+                if src_news:
+                    self.db.add(
+                        NewsArticle(
+                            report_date=report_date,
+                            module_code=target,
+                            window_hours=self.window_hours,
+                            category_tag=src_news.category_tag,
+                            country_or_region=src_news.country_or_region,
+                            target_entity=src_news.target_entity,
+                            title=src_news.title,
+                            related_company=src_news.related_company,
+                            risk_category=src_news.risk_category,
+                            risk_level=src_news.risk_level,
+                            summary=src_news.summary,
+                            impact_analysis=src_news.impact_analysis,
+                            source_url=src_news.source_url,
+                            source_title=src_news.source_title,
+                            structured_json=src_news.structured_json,
+                            published_at=src_news.published_at,
+                            legacy_entry_id=clone.id,
+                        )
+                    )
+                else:
+                    self.db.add(
+                        NewsArticle(
+                            report_date=report_date,
+                            module_code=target,
+                            window_hours=self.window_hours,
+                            category_tag=entry.pillar_or_topic or entry.risk_category,
+                            country_or_region=entry.country_or_region,
+                            target_entity=entry.target_entity,
+                            title=entry.title,
+                            related_company=entry.related_company,
+                            risk_category=entry.risk_category,
+                            risk_level=entry.risk_level,
+                            summary=entry.summary or "",
+                            impact_analysis=entry.impact_analysis,
+                            source_url=entry.source_url,
+                            source_title=entry.source_title,
+                            structured_json=entry.structured_json,
+                            published_at=entry.published_at,
+                            legacy_entry_id=clone.id,
+                        )
+                    )
+                existing_keys.add(title_key)
+                if url_key:
+                    existing_keys.add(url_key)
+                mirrored += 1
+                logger.info(
+                    "双投镜像 %s → %s: %s",
+                    entry.module_code,
+                    target,
+                    (entry.title or "")[:80],
+                )
+
+        if mirrored:
+            self.db.commit()
+        return mirrored
 
     def _save_structured_entries(
         self,
@@ -1344,6 +1732,7 @@ class RiskPipeline:
                 structured_json=json.dumps(enriched, ensure_ascii=False),
                 search_log_id=search_log_id or row.get("_search_log_id"),
                 published_at=published_at,
+                window_hours=self.window_hours,
             )
             self.db.add(entry)
             self.db.flush()
@@ -1379,6 +1768,7 @@ class RiskPipeline:
                     NewsArticle(
                         report_date=entry.report_date,
                         module_code=entry.module_code,
+                        window_hours=self.window_hours,
                         category_tag=entry.pillar_or_topic or entry.risk_category,
                         country_or_region=entry.country_or_region,
                         target_entity=entry.target_entity,

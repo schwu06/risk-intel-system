@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}{{ page_title }} — {{ app_name }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/css/dashboard.css" />
+  <link rel="stylesheet" href="/static/css/dashboard.css?v=news-7x24-1" />
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
   {% block head_extra %}{% endblock %}
 </head>
@@ -15,22 +15,25 @@
       <span class="brand-sub">{% block brand_sub %}{{ page_subtitle }}{% endblock %}</span>
     </div>
     <nav class="main-nav" aria-label="主导航">
-      <a href="/daily-news" class="nav-link {% if active_page == 'daily_news' %}active{% endif %}">新闻日报</a>
+      <a href="/daily-news" class="nav-link {% if active_page in ('daily_news', 'news_7x24') %}active{% endif %}">新闻日报</a>
       <a href="/entity-assessment" class="nav-link {% if active_page == 'entity_assessment' %}active{% endif %}">主体评估</a>
       <a href="/deep-reports" class="nav-link {% if active_page == 'deep_reports' %}active{% endif %}">深度研报</a>
+      <a href="/intl-ratings" class="nav-link {% if active_page == 'intl_ratings' %}active{% endif %}">国际评级</a>
     </nav>
     <div class="header-tools">
       {% block header_extra %}{% endblock %}
     </div>
   </header>
 
-  {# 三栏顺序：操作/统计侧栏 → 主内容 → 数据源；各栏独立滚动 #}
-  <div class="app-shell" id="app-shell">
+  {# 侧栏 → 主内容；仅深度研报保留右侧数据源侧拉栏 #}
+  <div class="app-shell {% if active_page != 'deep_reports' %}no-sources-panel{% endif %}" id="app-shell">
     {% block page_sidebar %}{% endblock %}
     <div class="app-main">
       {% block content %}{% endblock %}
     </div>
+    {% if active_page == 'deep_reports' %}
     {% include "partials/source_drawer.html" %}
+    {% endif %}
   </div>
 
   <script src="/static/js/dashboard.js"></script>
