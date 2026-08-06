@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 from urllib.parse import urlparse
 
 from docx import Document
@@ -17,6 +17,7 @@ from docx.shared import Cm, Inches, Pt, RGBColor
 from app.config import MODULE_CODES, NEWS_WINDOW_HOURS_24, news_window_label
 from app.database.models import CreditUpdate, DailyRiskEntry, EntityRisk, IndustryReport, TargetEntity
 from app.services.chart_generator import extract_chart_specs, render_chart_png
+from app.services.citation_validation import CITATION_RE
 
 # 24小时核心新闻情报汇总 — 视觉规范色
 COLOR_PRIMARY = RGBColor(0x1B, 0x36, 0x5D)  # 深蓝标题/分割线
@@ -225,7 +226,125 @@ def build_daily_report_docx(
 
     return doc
 
-def build_industry_report_docx(report: IndustryReport) -> Document:
+def _add_cited_body(doc: Document, text: str, citation_context: dict[str, Any]) -> None:
+    p = doc.add_paragraph()
+    p.paragraph_format.line_spacing = 1.25
+    cursor = 0
+    for match in CITATION_RE.finditer(text or ""):
+        if match.start() > cursor:
+            _set_run_font(p.add_run(text[cursor:match.start()]), size_pt=11, color=COLOR_BODY)
+        code = match.group(1)
+        number = citation_context["number_map"].get(code)
+        shown = f"[{number}]" if code in citation_context["valid_codes"] and number else "[引用异常]"
+        run = p.add_run(shown)
+        _set_run_font(run, size_pt=8.5, bold=True, color=RGBColor(0x1D, 0x4E, 0x89))
+        run.font.superscript = True
+        cursor = match.end()
+    if cursor < len(text or ""):
+        _set_run_font(p.add_run(text[cursor:]), size_pt=11, color=COLOR_BODY)
+
+
+def _add_report_metadata(doc: Document, report: IndustryReport, grounded: bool) -> None:
+    _add_heading(doc, "报告信息", level=2)
+    _add_meta_line(doc, "报告版本", f"v{report.version}")
+    _add_meta_line(doc, "生成模式", "证据约束（grounded）" if grounded else "传统生成（legacy）")
+    _add_meta_line(doc, "生成时间", report.updated_at.strftime("%Y-%m-%d %H:%M") if report.updated_at else "未记录")
+    if grounded:
+        _add_meta_line(doc, "Prompt版本", report.prompt_version or "未记录")
+        _add_meta_line(doc, "引用验证", report.citation_validation_status or "未记录")
+        _add_meta_line(doc, "晋升方式", report.promotion_type or "未记录")
+        if report.promotion_note:
+            _add_meta_line(doc, "审批备注", report.promotion_note)
+    else:
+        p = doc.add_paragraph()
+        run = p.add_run("本报告不是证据约束报告，正文没有经过逐条引用绑定与导出前证据复核。")
+        _set_run_font(run, size_pt=10.5, bold=True, color=RGBColor(0x9A, 0x34, 0x12))
+
+
+def _display_url(value: str) -> str:
+    # Zero-width opportunities let Word wrap long URLs without changing the target shown to users.
+    return value.replace("/", "/\u200b").replace("?", "?\u200b").replace("&", "&\u200b")
+
+
+def _add_grounded_appendices(doc: Document, context: dict[str, Any]) -> None:
+    doc.add_page_break()
+    _add_heading(doc, "附录一：引用与来源", level=1)
+    for item in context["citations"]:
+        _add_heading(doc, f"[{item['display_number']}] {item['source_name']}", level=2)
+        if item.get("source_publisher"):
+            _add_meta_line(doc, "发布机构", item["source_publisher"])
+        _add_meta_line(doc, "来源类型", item.get("source_origin") or "未记录")
+        _add_meta_line(doc, "证据等级", item.get("evidence_grade") or "未记录")
+        _add_meta_line(doc, "原文位置", item.get("locator") or "未记录")
+        if item.get("published_at"):
+            _add_meta_line(doc, "发布日期", item["published_at"])
+        if item.get("retrieved_at"):
+            _add_meta_line(doc, "获取时间", item["retrieved_at"])
+        if item.get("url"):
+            _add_meta_line(doc, "网页地址", _display_url(item["url"]))
+        _add_meta_line(doc, "原文摘录", item.get("original_quote") or "未记录")
+
+    doc.add_page_break()
+    _add_heading(doc, "附录二：冲突与限制", level=1)
+    reported_conflicts = [str(item) for item in context.get("unresolved_conflicts") or []]
+    for item in reported_conflicts:
+        _add_body(doc, f"• {item}")
+    seen: set[str] = set()
+    for item in context["citations"]:
+        for conflict in item.get("related_conflicts") or []:
+            code = str(conflict.get("conflict_code") or "")
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            _add_heading(doc, f"{code} · {conflict.get('status') or '未记录'}", level=2)
+            _add_body(doc, str(conflict.get("description") or ""))
+            if conflict.get("resolution_note"):
+                _add_meta_line(doc, "处理说明", str(conflict["resolution_note"]))
+    if not seen and not reported_conflicts:
+        _add_body(doc, "当前引用未关联已登记的跨信源冲突。")
+    limitations = list(context.get("limitations") or [])
+    source_limitations = sorted({
+        limitation
+        for item in context["citations"] for limitation in item.get("limitations") or []
+    })
+    _add_heading(doc, "资料与方法限制", level=2)
+    for limitation in limitations + source_limitations:
+        _add_body(doc, f"• {limitation}")
+    if not limitations and not source_limitations:
+        _add_body(doc, "未登记额外限制。")
+
+    doc.add_page_break()
+    _add_heading(doc, "附录三：证据覆盖", level=1)
+    coverage = context.get("coverage") or {}
+    labels = {
+        "verified_evidence_count": "可用验证证据数",
+        "independent_source_count": "独立来源数",
+        "partial_text_count": "部分正文证据数",
+        "unresolved_conflict_count": "未解决冲突数",
+        "resolved_conflict_count": "已处理冲突数",
+        "network_lead_count": "网络线索数",
+        "missing_topic_count": "缺失主题数",
+        "factual_citation_coverage": "事实句引用覆盖率",
+    }
+    shown = False
+    for key, label in labels.items():
+        if key in coverage:
+            value = coverage[key]
+            if key == "factual_citation_coverage" and isinstance(value, (int, float)):
+                value = f"{value:.1%}"
+            _add_meta_line(doc, label, str(value))
+            shown = True
+    missing_topics = coverage.get("missing_topics") or []
+    if missing_topics:
+        _add_meta_line(doc, "缺失主题", "、".join(str(item) for item in missing_topics))
+        shown = True
+    if not shown:
+        _add_body(doc, "没有可展示的覆盖统计。")
+
+
+def build_industry_report_docx(
+    report: IndustryReport, citation_context: Optional[dict[str, Any]] = None,
+) -> Document:
     import json
 
     doc = Document()
@@ -240,6 +359,11 @@ def build_industry_report_docx(report: IndustryReport) -> Document:
         sr = sub.add_run(f"分析对象: {report.company_name}")
         _set_run_font(sr, size_pt=11, color=RGBColor(0x55, 0x55, 0x55))
 
+    grounded = report.generation_mode == "grounded"
+    if grounded and citation_context is None:
+        raise ValueError("grounded_report_requires_validated_citation_context")
+    _add_report_metadata(doc, report, grounded)
+
     payload = {}
     if report.report_json:
         try:
@@ -249,14 +373,36 @@ def build_industry_report_docx(report: IndustryReport) -> Document:
 
     if payload.get("summary"):
         _add_heading(doc, "执行摘要", level=1)
-        _add_body(doc, str(payload["summary"]))
+        if grounded:
+            _add_cited_body(doc, str(payload["summary"]), citation_context)
+        else:
+            _add_body(doc, str(payload["summary"]))
     for sec in payload.get("sections") or []:
         if isinstance(sec, dict):
             _add_heading(doc, str(sec.get("heading", "")), level=2)
-            _add_body(doc, str(sec.get("content", "")))
+            if grounded:
+                _add_cited_body(doc, str(sec.get("content", "")), citation_context)
+            else:
+                _add_body(doc, str(sec.get("content", "")))
     if payload.get("risk_outlook"):
         _add_heading(doc, "风险展望", level=1)
-        _add_body(doc, str(payload["risk_outlook"]))
+        if grounded:
+            _add_cited_body(doc, str(payload["risk_outlook"]), citation_context)
+        else:
+            _add_body(doc, str(payload["risk_outlook"]))
+
+    if payload.get("key_metrics"):
+        _add_heading(doc, "关键指标", level=1)
+        for metric in payload["key_metrics"]:
+            if not isinstance(metric, dict):
+                continue
+            text = f"{metric.get('name', '')}：{metric.get('value', '')}"
+            code = str(metric.get("evidence_code") or "")
+            if grounded and code:
+                text += f"[{code}]"
+                _add_cited_body(doc, text, citation_context)
+            else:
+                _add_body(doc, text)
 
     if report.chart_specs:
         try:
@@ -277,6 +423,9 @@ def build_industry_report_docx(report: IndustryReport) -> Document:
             if img_path and img_path.is_file():
                 doc.add_picture(str(img_path), width=Inches(5.5))
 
+    if grounded:
+        _add_grounded_appendices(doc, citation_context)
+
     footer = doc.add_paragraph()
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
     fr = footer.add_run("— 内部资料，未经许可不得对外传播 —")
@@ -284,8 +433,11 @@ def build_industry_report_docx(report: IndustryReport) -> Document:
     return doc
 
 
-def export_industry_report_to_path(report: IndustryReport, output_path: Path) -> Path:
-    doc = build_industry_report_docx(report)
+def export_industry_report_to_path(
+    report: IndustryReport, output_path: Path,
+    citation_context: Optional[dict[str, Any]] = None,
+) -> Path:
+    doc = build_industry_report_docx(report, citation_context=citation_context)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_path))
     return output_path

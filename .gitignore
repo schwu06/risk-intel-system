@@ -3,6 +3,7 @@ venv/
 .venv/
 __pycache__/
 *.py[cod]
+*.log
 
 # 本地数据库与上传文件夹（保证各自电脑数据独立）
 *.db

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}{{ page_title }} — {{ app_name }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/css/dashboard.css?v=hide-degraded-1" />
+  <link rel="stylesheet" href="/static/css/dashboard.css?v=20260806-1" />
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
   {% block head_extra %}{% endblock %}
 </head>
@@ -25,18 +25,16 @@
     </div>
   </header>
 
-  {# 侧栏 → 主内容；仅深度研报保留右侧数据源侧拉栏 #}
-  <div class="app-shell {% if active_page != 'deep_reports' %}no-sources-panel{% endif %}" id="app-shell">
+  {# 页面默认两栏；仅深度研报通过 source_panel block 增加右侧数据源栏。 #}
+  <div class="app-shell" id="app-shell">
     {% block page_sidebar %}{% endblock %}
     <div class="app-main">
       {% block content %}{% endblock %}
     </div>
-    {% if active_page == 'deep_reports' %}
-    {% include "partials/source_drawer.html" %}
-    {% endif %}
+    {% block source_panel %}{% endblock %}
   </div>
 
-  <script src="/static/js/dashboard.js?v=hourly-content-1"></script>
+  <script src="/static/js/dashboard.js?v=20260806-1"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

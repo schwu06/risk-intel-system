@@ -4,19 +4,43 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from datetime import datetime
 from html import escape
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.database.models import IndustryAnalysisReport, IndustryReport
+from app.config import Settings, get_settings
+from app.database.models import IndustryReport
 from app.services.chart_generator import extract_and_build_charts, to_echarts_option
-from app.services.data_source_service import get_industry_authoritative_text
-from app.services.deepseek_analyzer import DeepSeekAnalyzer
+from app.services.data_source_service import (
+    INDUSTRY_UPLOAD_ROOT,
+    append_industry_network_search_sources,
+    build_industry_authoritative_text,
+    clone_industry_sources,
+)
+from app.services.deepseek_analyzer import (
+    GROUNDED_REPORT_PROMPT_VERSION,
+    DeepSeekAnalyzer,
+    LEGACY_INDUSTRY_PROMPT_VERSION,
+)
+from app.services.grounded_readiness import check_grounded_readiness
+from app.services.grounded_report import (
+    GroundedPromotionError,
+    GroundedReportError,
+    GroundedReportService,
+)
 from app.services.mita_search import MitaSearchClient
 
 logger = logging.getLogger(__name__)
+
+
+class IndustryGenerationError(RuntimeError):
+    def __init__(self, code: str, message: str, next_step: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.next_step = next_step
 
 GENERIC_TEMPLATE = """
 通用行业分析框架：
@@ -48,16 +72,362 @@ def report_json_to_html(report: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def build_report_chart_specs(
+    report: dict[str, Any], source_text: str = "",
+) -> tuple[list[dict[str, Any]], Optional[str]]:
+    """Build existing chart payloads without requiring source text in grounded mode."""
+    combined_text = source_text + "\n" + json.dumps(report, ensure_ascii=False)
+    specs, chart_json = extract_and_build_charts(combined_text)
+    metrics = report.get("key_metrics") or []
+    if metrics and not specs:
+        labels = [str(item.get("name", "")) for item in metrics if isinstance(item, dict)]
+        values = []
+        for item in metrics:
+            if not isinstance(item, dict):
+                continue
+            try:
+                values.append(float(str(item.get("value", "0")).replace("%", "")))
+            except ValueError:
+                values.append(0)
+        if labels and values:
+            spec = {
+                "id": "chart_metrics", "type": "bar", "title": "关键指标",
+                "labels": labels, "series": [{"name": "指标值", "data": values}],
+            }
+            specs = [spec]
+            chart_json = json.dumps(
+                [{"id": spec["id"], "option": to_echarts_option(spec)}], ensure_ascii=False,
+            )
+    return specs, chart_json
+
+
 class IndustryAnalysisService:
     def __init__(
         self,
         db: Session,
         deepseek: Optional[DeepSeekAnalyzer] = None,
         mita: Optional[MitaSearchClient] = None,
+        settings: Optional[Settings] = None,
     ) -> None:
         self.db = db
         self.deepseek = deepseek or DeepSeekAnalyzer()
         self.mita = mita or MitaSearchClient()
+        self.settings = settings or get_settings()
+
+    def create_draft(
+        self,
+        industry_name: str,
+        company_name: Optional[str] = None,
+        supplement_search: bool = True,
+    ) -> IndustryReport:
+        industry_name = industry_name.strip()
+        if not industry_name:
+            raise ValueError("行业名称不能为空")
+        company_name = company_name.strip() if company_name else None
+        row = IndustryReport(
+            industry_name=industry_name,
+            company_name=company_name,
+            status="draft",
+            supplement_search=supplement_search,
+            version=1,
+        )
+        self.db.add(row)
+        self.db.flush()
+        row.root_report_id = row.id
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def fork_report(self, report_id: int) -> IndustryReport:
+        parent = self.get_report(report_id)
+        if not parent:
+            raise ValueError("报告不存在")
+        if parent.status != "completed":
+            raise ValueError("只有已完成的报告可以创建新版")
+        root_id = parent.root_report_id or parent.id
+        latest_version = (
+            self.db.query(IndustryReport.version)
+            .filter(IndustryReport.root_report_id == root_id)
+            .order_by(IndustryReport.version.desc())
+            .first()
+        )
+        version = (latest_version[0] if latest_version else parent.version) + 1
+        row = IndustryReport(
+            parent_report_id=parent.id,
+            root_report_id=root_id,
+            version=version,
+            report_name=parent.report_name,
+            industry_name=parent.industry_name,
+            company_name=parent.company_name,
+            status="draft",
+            supplement_search=parent.supplement_search,
+        )
+        self.db.add(row)
+        self.db.commit()
+        self.db.refresh(row)
+        try:
+            clone_industry_sources(self.db, parent.id, row.id)
+        except Exception:
+            self.db.rollback()
+            self.db.delete(row)
+            self.db.commit()
+            shutil.rmtree(INDUSTRY_UPLOAD_ROOT / str(row.id), ignore_errors=True)
+            raise
+        self.db.refresh(row)
+        return row
+
+    def rename_report(self, report_id: int, report_name: str) -> IndustryReport:
+        row = self.get_report(report_id)
+        if not row:
+            raise ValueError("报告不存在")
+        normalized = " ".join(report_name.split())
+        if not normalized:
+            raise ValueError("报告名称不能为空")
+        if len(normalized) > 256:
+            raise ValueError("报告名称不能超过 256 个字符")
+        row.report_name = normalized
+        row.updated_at = datetime.utcnow()
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def generate_report(self, report_id: int) -> IndustryReport:
+        mode = self.settings.industry_report_generation_mode
+        logger.info("行业正式报告生成模式: %s report_id=%s", mode, report_id)
+        if mode == "grounded":
+            return self._generate_grounded_report(report_id)
+        return self._generate_legacy_report(report_id)
+
+    def _generate_legacy_report(self, report_id: int) -> IndustryReport:
+        changed = (
+            self.db.query(IndustryReport)
+            .filter(
+                IndustryReport.id == report_id,
+                IndustryReport.status.in_(["draft", "failed", "awaiting_approval"]),
+            )
+            .update(
+                {
+                    IndustryReport.status: "running",
+                    IndustryReport.error_message: None,
+                    IndustryReport.updated_at: datetime.utcnow(),
+                },
+                synchronize_session=False,
+            )
+        )
+        self.db.commit()
+        if not changed:
+            row = self.get_report(report_id)
+            if not row:
+                raise ValueError("报告不存在")
+            raise ValueError("该报告当前不可生成；已完成报告请先创建新版")
+        row = self.get_report(report_id)
+        assert row is not None
+
+        try:
+            network_query = ""
+            network_added = 0
+            network_error = ""
+            if row.supplement_search:
+                network_query = (
+                    f"{row.industry_name} {row.company_name or ''} 行业分析 授信 信用风险"
+                ).strip()
+                try:
+                    response = self.mita.search(query=network_query, max_results=8)
+                    translator = getattr(self.deepseek, "translate_network_source_to_chinese", None)
+                    network_added = len(
+                        append_industry_network_search_sources(
+                            self.db,
+                            row.id,
+                            response.items,
+                            translator=translator if callable(translator) else None,
+                            require_translation=callable(translator),
+                        )
+                    )
+                except Exception as exc:
+                    network_error = str(exc)
+                    logger.warning("行业分析网络补充检索失败: %s", exc)
+
+            authority_text, manifest = build_industry_authoritative_text(self.db, row.id)
+            network_in_manifest = sum(
+                1 for item in manifest if item.get("source_type") == "network_search"
+            )
+            row.source_manifest_json = json.dumps(manifest, ensure_ascii=False)
+            row.generation_config_json = json.dumps(
+                {
+                    "supplement_search": row.supplement_search,
+                    "network_search_query": network_query,
+                    "network_search_added": network_added,
+                    "network_search_sources": network_in_manifest,
+                    "network_search_error": network_error or None,
+                    "authority_max_chars": 100_000,
+                    "source_count": len(manifest),
+                    "generation_mode": "legacy",
+                    "prompt_version": LEGACY_INDUSTRY_PROMPT_VERSION,
+                },
+                ensure_ascii=False,
+            )
+            self.db.commit()
+
+            raw_input = (
+                f"=== 当前报告专属数据源 ===\n{authority_text or '（无可用数据源，请使用通用模板）'}\n\n"
+                f"=== 分析模板 ===\n{GENERIC_TEMPLATE}\n\n"
+            )
+
+            report = self.deepseek.analyze_industry(
+                raw_input,
+                industry_name=row.industry_name,
+                company_name=row.company_name,
+                context={
+                    "supplement_used": network_in_manifest > 0,
+                    "network_search_added": network_added,
+                    "report_id": row.id,
+                    "source_manifest": manifest,
+                },
+            )
+
+            specs, chart_json = build_report_chart_specs(report, authority_text)
+
+            report_json = json.dumps(report, ensure_ascii=False)
+            report_html = report_json_to_html(report)
+            now = datetime.utcnow()
+
+            row.report_json = report_json
+            row.report_html = report_html
+            row.chart_specs = chart_json
+            row.status = "completed"
+            row.generation_mode = "legacy"
+            row.grounded_run_id = None
+            row.prompt_version = LEGACY_INDUSTRY_PROMPT_VERSION
+            row.evidence_snapshot_hash = None
+            row.conflict_snapshot_hash = None
+            row.citation_validation_status = "not_applicable"
+            row.promoted_at = None
+            row.promotion_type = None
+            row.promotion_note = None
+            row.grounded_generation_metadata = json.dumps(
+                {
+                    "generation_mode": "legacy",
+                    "prompt_version": LEGACY_INDUSTRY_PROMPT_VERSION,
+                    "citation_validation_status": "not_applicable",
+                },
+                ensure_ascii=False,
+            )
+            row.updated_at = now
+            self.db.commit()
+            self.db.refresh(row)
+            return row
+        except Exception as exc:
+            logger.exception("行业分析失败: report_id=%s", report_id)
+            row.status = "failed"
+            row.error_message = str(exc)
+            row.updated_at = datetime.utcnow()
+            self.db.commit()
+            raise
+
+    def _generate_grounded_report(self, report_id: int) -> IndustryReport:
+        readiness = check_grounded_readiness(self.db, report_id)
+        if not readiness["ready"]:
+            first = readiness["blocking_errors"][0]
+            raise IndustryGenerationError(first["code"], first["message"], first["next_step"])
+
+        changed = (
+            self.db.query(IndustryReport)
+            .filter(
+                IndustryReport.id == report_id,
+                IndustryReport.status.in_(["draft", "failed"]),
+            )
+            .update(
+                {
+                    IndustryReport.status: "running",
+                    IndustryReport.error_message: None,
+                    IndustryReport.updated_at: datetime.utcnow(),
+                },
+                synchronize_session=False,
+            )
+        )
+        self.db.commit()
+        if not changed:
+            raise IndustryGenerationError(
+                "REPORT_NOT_GENERATABLE",
+                "该报告当前不可生成；已完成报告请先创建新版。",
+                "create report revision",
+            )
+        row = self.get_report(report_id)
+        assert row is not None
+        grounded = GroundedReportService(self.db, analyzer=self.deepseek)
+        try:
+            run = grounded.generate(report_id)
+            if run.status != "validated":
+                raise IndustryGenerationError(
+                    "GROUNDING_VALIDATION_FAILED",
+                    "证据约束候选未通过引用校验，且未回退legacy流程。",
+                    "grounded generation",
+                )
+            audit = {
+                "generation_mode": "grounded",
+                "prompt_version": run.prompt_version,
+                "grounded_run_id": run.id,
+                "evidence_snapshot_hash": run.evidence_snapshot_hash,
+                "conflict_snapshot_hash": run.conflict_snapshot_hash,
+                "citation_validation_status": "validated",
+                "approval_required": bool(self.settings.grounded_report_require_approval),
+            }
+            if self.settings.grounded_report_require_approval:
+                row.generation_mode = "grounded"
+                row.grounded_run_id = run.id
+                row.prompt_version = run.prompt_version
+                row.evidence_snapshot_hash = run.evidence_snapshot_hash
+                row.conflict_snapshot_hash = run.conflict_snapshot_hash
+                row.citation_validation_status = "validated"
+                row.grounded_generation_metadata = json.dumps(audit, ensure_ascii=False)
+                row.generation_config_json = json.dumps(
+                    {
+                        "generation_mode": "grounded",
+                        "prompt_version": GROUNDED_REPORT_PROMPT_VERSION,
+                        "approval_required": True,
+                        "legacy_fallback_allowed": False,
+                    },
+                    ensure_ascii=False,
+                )
+                row.status = "awaiting_approval"
+                row.error_message = None
+                row.updated_at = datetime.utcnow()
+                self.db.commit()
+                self.db.refresh(row)
+                return row
+            return grounded.promote(
+                report_id, run.id, promotion_type="automatic",
+                promotion_note="配置允许validated候选自动晋升",
+            )
+        except IndustryGenerationError as exc:
+            row.status = "failed"
+            row.error_message = f"{exc.code}: {exc}"
+            row.updated_at = datetime.utcnow()
+            self.db.commit()
+            raise
+        except GroundedPromotionError as exc:
+            row.status = "failed"
+            row.error_message = f"{exc.code}: {exc}"
+            row.updated_at = datetime.utcnow()
+            self.db.commit()
+            raise IndustryGenerationError(exc.code, str(exc), exc.next_step) from exc
+        except GroundedReportError as exc:
+            row.status = "failed"
+            row.error_message = "GROUNDING_VALIDATION_FAILED: grounded generation failed"
+            row.updated_at = datetime.utcnow()
+            self.db.commit()
+            raise IndustryGenerationError(
+                "GROUNDING_VALIDATION_FAILED", str(exc), "grounded generation",
+            ) from exc
+        except Exception as exc:
+            row.status = "failed"
+            row.error_message = "GROUNDING_VALIDATION_FAILED: grounded generation failed"
+            row.updated_at = datetime.utcnow()
+            self.db.commit()
+            raise IndustryGenerationError(
+                "GROUNDING_VALIDATION_FAILED", "证据约束生成失败，未执行legacy回退。",
+                "grounded generation",
+            ) from exc
 
     def run_analysis(
         self,
@@ -65,107 +435,24 @@ class IndustryAnalysisService:
         company_name: Optional[str] = None,
         supplement_search: bool = True,
     ) -> IndustryReport:
-        # 双写：新表为主，旧表兼容
-        legacy = IndustryAnalysisReport(
-            industry_name=industry_name,
-            company_name=company_name,
-            status="running",
-        )
-        self.db.add(legacy)
-        self.db.flush()
-
-        row = IndustryReport(
-            industry_name=industry_name,
-            company_name=company_name,
-            status="running",
-            legacy_report_id=legacy.id,
-        )
-        self.db.add(row)
-        self.db.commit()
-        self.db.refresh(row)
-        self.db.refresh(legacy)
-
-        try:
-            authority_text = get_industry_authoritative_text(self.db, industry_name)
-            supplement = ""
-            if supplement_search and len(authority_text) < 3000:
-                try:
-                    query = f"{industry_name} {company_name or ''} 行业分析 授信 信用风险"
-                    resp = self.mita.search(query=query, max_results=8)
-                    supplement = json.dumps(
-                        [{"title": i.title, "url": i.url, "snippet": i.snippet} for i in resp.items],
-                        ensure_ascii=False,
-                        indent=2,
-                    )
-                except Exception as exc:
-                    logger.warning("行业分析网络补充检索失败: %s", exc)
-
-            raw_input = (
-                f"=== 权威/本地数据源 ===\n{authority_text or '（无上传数据源，请使用通用模板）'}\n\n"
-                f"=== 分析模板 ===\n{GENERIC_TEMPLATE}\n\n"
-            )
-            if supplement:
-                raw_input += f"=== 网络检索补充（广度参考，优先级低于本地源）===\n{supplement}\n"
-
-            report = self.deepseek.analyze_industry(
-                raw_input,
-                industry_name=industry_name,
-                company_name=company_name,
-                context={"supplement_used": bool(supplement)},
-            )
-
-            combined_text = authority_text + "\n" + json.dumps(report, ensure_ascii=False)
-            specs, chart_json = extract_and_build_charts(combined_text)
-            metrics = report.get("key_metrics") or []
-            if metrics and not specs:
-                labels = [str(m.get("name", "")) for m in metrics if isinstance(m, dict)]
-                values = []
-                for m in metrics:
-                    if not isinstance(m, dict):
-                        continue
-                    try:
-                        values.append(float(str(m.get("value", "0")).replace("%", "")))
-                    except ValueError:
-                        values.append(0)
-                if labels and values:
-                    spec = {
-                        "id": "chart_metrics",
-                        "type": "bar",
-                        "title": "关键指标",
-                        "labels": labels,
-                        "series": [{"name": "指标值", "data": values}],
-                    }
-                    specs = [spec]
-                    chart_json = json.dumps(
-                        [{"id": spec["id"], "option": to_echarts_option(spec)}],
-                        ensure_ascii=False,
-                    )
-
-            report_json = json.dumps(report, ensure_ascii=False)
-            report_html = report_json_to_html(report)
-            now = datetime.utcnow()
-
-            for target in (row, legacy):
-                target.report_json = report_json
-                target.report_html = report_html
-                target.chart_specs = chart_json
-                target.status = "completed"
-                target.updated_at = now
-            self.db.commit()
-            self.db.refresh(row)
-            return row
-        except Exception as exc:
-            logger.exception("行业分析失败: %s", industry_name)
-            now = datetime.utcnow()
-            for target in (row, legacy):
-                target.status = "failed"
-                target.error_message = str(exc)
-                target.updated_at = now
-            self.db.commit()
-            raise
+        """兼容旧调用：创建无共享数据源的草稿并立即生成。"""
+        row = self.create_draft(industry_name, company_name, supplement_search)
+        return self.generate_report(row.id)
 
     def get_report(self, report_id: int) -> Optional[IndustryReport]:
         return self.db.query(IndustryReport).filter(IndustryReport.id == report_id).first()
+
+    def delete_report(self, report_id: int) -> bool:
+        """删除一份历史报告及其级联来源、切片和证据记录。"""
+        row = self.get_report(report_id)
+        if not row:
+            return False
+        if row.status == "running":
+            raise ValueError("报告正在生成，暂不能删除")
+        self.db.delete(row)
+        self.db.commit()
+        shutil.rmtree(INDUSTRY_UPLOAD_ROOT / str(report_id), ignore_errors=True)
+        return True
 
     def list_reports(self, limit: int = 20) -> list[IndustryReport]:
         return (

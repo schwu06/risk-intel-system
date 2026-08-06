@@ -1,7 +1,7 @@
 """应用配置与业务模块 taxonomy。"""
 
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     deepseek_api_base_url: str = "https://api.deepseek.com"
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
+
+    # Existing deployments keep the original report path until explicitly switched.
+    industry_report_generation_mode: Literal["legacy", "grounded"] = "legacy"
+    grounded_report_require_approval: bool = True
+    # Automatic grounded -> legacy fallback is intentionally unsupported.
+    grounded_report_allow_legacy_fallback: Literal[False] = False
 
     daily_pipeline_cron: str = "0 6 * * *"
     request_timeout_seconds: int = 120
