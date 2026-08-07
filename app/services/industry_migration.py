@@ -52,26 +52,32 @@ def migrate_main_db_industry_reports(main_db: Session) -> dict[str, int]:
     main_path = _main_db_path()
     if not main_path or not main_path.is_file():
         return {}
+
+    # 启动前序任务可能给调用方会话留下只读事务。这里先提交前序工作，再仅提取
+    # 标量快照并关闭本函数的查询事务；之后原生 sqlite3 连接才能安全写主库。
+    if main_db.in_transaction():
+        main_db.commit()
     try:
-        report_count = main_db.query(IndustryReport).count()
+        rows = (
+            main_db.query(IndustryReport.id, IndustryReport.industry_name)
+            .order_by(IndustryReport.id.asc())
+            .all()
+        )
     except Exception:
+        main_db.rollback()
         return {}
-    if report_count == 0:
+    main_db.rollback()
+    if not rows:
         return {}
 
     init_all_industry_databases()
-    rows = (
-        main_db.query(IndustryReport)
-        .order_by(IndustryReport.id.asc())
-        .all()
-    )
     moved = {key: 0 for key in INDUSTRY_SECTORS}
-    for report in rows:
-        sector_key = guess_sector_key(report.industry_name)
+    for report_id, industry_name in rows:
+        sector_key = guess_sector_key(industry_name)
         sector_path = industry_db_path(sector_key)
-        _copy_report_with_attach(main_path, sector_path, report.id)
-        _delete_report_from_main(main_path, report.id)
-        _move_upload_dir(report.id, sector_key)
+        _copy_report_with_attach(main_path, sector_path, report_id)
+        _delete_report_from_main(main_path, report_id)
+        _move_upload_dir(report_id, sector_key)
         moved[sector_key] = moved.get(sector_key, 0) + 1
     logger.info("深度研报已迁移完成: %s", moved)
     return moved
@@ -114,8 +120,9 @@ def _copy_report_with_attach(
     sector_path: Path,
     report_id: int,
 ) -> None:
-    sector_conn = sqlite3.connect(sector_path)
+    sector_conn = sqlite3.connect(sector_path, timeout=30)
     try:
+        sector_conn.execute("PRAGMA busy_timeout=30000")
         sector_conn.execute("PRAGMA foreign_keys=OFF")
         sector_conn.execute("ATTACH DATABASE ? AS src", (str(main_path),))
         for table_name in _COPY_ORDER:
@@ -149,7 +156,8 @@ def _copy_report_with_attach(
 
 
 def _delete_report_from_main(main_path: Path, report_id: int) -> None:
-    main_conn = sqlite3.connect(main_path)
+    main_conn = sqlite3.connect(main_path, timeout=30)
+    main_conn.execute("PRAGMA busy_timeout=30000")
     main_conn.execute("PRAGMA foreign_keys=ON")
     try:
         for table_name in reversed(_COPY_ORDER):

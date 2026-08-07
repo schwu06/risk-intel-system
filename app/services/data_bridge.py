@@ -202,4 +202,7 @@ def migrate_legacy_data(db: Session) -> dict[str, int]:
         db.commit()
         logger.info("切片2回填完成: %s", stats)
     stats["warning_levels_rebuilt"] = rebuild_entity_warning_levels(db)
+    # rebuild 在无需更新时只执行查询。显式结束这个只读事务，避免后续启动
+    # 迁移另开 sqlite3 写连接时被当前 SQLAlchemy 会话自身阻塞。
+    db.commit()
     return stats

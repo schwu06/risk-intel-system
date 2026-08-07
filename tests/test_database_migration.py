@@ -3,13 +3,16 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, inspect
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.routes import router
 from app.database.models import Base, IndustryDataSource, IndustryReport
 from app.database.session import _ensure_sqlite_indexes, _migrate_sqlite_columns
+from app.services.data_bridge import migrate_legacy_data
+from app.services.industry_migration import migrate_main_db_industry_reports
 
 
 class DatabaseMigrationTests(unittest.TestCase):
@@ -90,6 +93,63 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("/industry/reports/{report_id}/data-sources/url", paths)
         self.assertIn("/industry/reports/{report_id}/generate", paths)
         self.assertIn("/industry/reports/{report_id}/evidence/extract", paths)
+
+    def test_startup_migrations_release_main_database_before_native_delete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main_path = root / "main.db"
+            sector_path = root / "aviation.db"
+            main_engine = create_engine(f"sqlite:///{main_path}")
+            sector_engine = create_engine(f"sqlite:///{sector_path}")
+            Base.metadata.create_all(main_engine)
+            Base.metadata.create_all(sector_engine)
+            db = sessionmaker(bind=main_engine)()
+            try:
+                migrate_legacy_data(db)
+                self.assertFalse(db.in_transaction())
+
+                report = IndustryReport(industry_name="航空运输", status="draft")
+                db.add(report)
+                db.commit()
+                report_id = report.id
+
+                # Reproduce a startup caller that already holds a read transaction.
+                db.query(IndustryReport).all()
+                self.assertTrue(db.in_transaction())
+
+                with (
+                    patch(
+                        "app.services.industry_migration._main_db_path",
+                        return_value=main_path,
+                    ),
+                    patch(
+                        "app.services.industry_migration.industry_db_path",
+                        return_value=sector_path,
+                    ),
+                    patch(
+                        "app.services.industry_migration.init_all_industry_databases"
+                    ),
+                    patch("app.services.industry_migration._move_upload_dir"),
+                ):
+                    moved = migrate_main_db_industry_reports(db)
+
+                self.assertEqual(moved["aviation"], 1)
+                with main_engine.connect() as conn:
+                    main_count = conn.exec_driver_sql(
+                        "SELECT COUNT(*) FROM industry_reports WHERE id = ?",
+                        (report_id,),
+                    ).scalar_one()
+                with sector_engine.connect() as conn:
+                    sector_count = conn.exec_driver_sql(
+                        "SELECT COUNT(*) FROM industry_reports WHERE id = ?",
+                        (report_id,),
+                    ).scalar_one()
+                self.assertEqual(main_count, 0)
+                self.assertEqual(sector_count, 1)
+            finally:
+                db.close()
+                main_engine.dispose()
+                sector_engine.dispose()
 
 
 if __name__ == "__main__":
