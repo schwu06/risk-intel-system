@@ -5,6 +5,33 @@
     return [detail.code, detail.message, detail.next_step ? "下一步：" + detail.next_step : ""]
       .filter(Boolean).join(" · ");
   }
+
+  function currentSector() {
+    var rail = document.querySelector(".page-rail[data-sector-key]");
+    return rail ? rail.getAttribute("data-sector-key") : "";
+  }
+
+  function sectorBasePath() {
+    var sector = currentSector();
+    return sector ? "/deep-reports/" + encodeURIComponent(sector) : "/deep-reports";
+  }
+
+  function industryApiHeaders(extra) {
+    var headers = Object.assign({}, extra || {});
+    var sector = currentSector();
+    if (sector) headers["X-Industry-Sector"] = sector;
+    return headers;
+  }
+
+  function industryFetch(url, options) {
+    options = options || {};
+    var headers = industryApiHeaders(options.headers || {});
+    if (options.body && !headers["Content-Type"]) {
+      headers["Content-Type"] = "application/json";
+    }
+    return fetch(url, Object.assign({}, options, { headers: headers }));
+  }
+
   const form = document.getElementById("analysis-form");
   const msg = document.getElementById("analysis-msg");
 
@@ -19,19 +46,17 @@
         supplement_search: fd.get("supplement_search") === "on",
       };
       try {
-        const resp = await fetch("/api/v1/industry/reports/drafts", {
+        const resp = await industryFetch("/api/v1/industry/reports/drafts", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
         const data = await resp.json();
-        if (!resp.ok) throw new Error(data.detail || "创建草稿失败");
-        window.location.href = "/deep-reports?report_id=" + data.id;
+        if (!resp.ok) throw new Error(apiError(data.detail, "创建草稿失败"));
+        window.location.href = sectorBasePath() + "?report_id=" + data.id;
       } catch (e) {
         msg.textContent = "错误：" + e.message;
       }
     });
-
   }
 
   const generateBtn = document.getElementById("btn-generate-report");
@@ -42,10 +67,10 @@
       generateBtn.disabled = true;
       if (generationMsg) generationMsg.textContent = "报告生成中，可能需要数分钟，请勿重复提交…";
       try {
-        const resp = await fetch("/api/v1/industry/reports/" + reportId + "/generate", { method: "POST" });
+        const resp = await industryFetch("/api/v1/industry/reports/" + reportId + "/generate", { method: "POST" });
         const data = await resp.json();
         if (!resp.ok) throw new Error(apiError(data.detail, "生成失败"));
-        window.location.href = "/deep-reports?report_id=" + data.id;
+        window.location.href = sectorBasePath() + "?report_id=" + data.id;
       } catch (e) {
         generateBtn.disabled = false;
         if (generationMsg) generationMsg.textContent = "错误：" + e.message;
@@ -59,10 +84,10 @@
       const reportId = forkBtn.getAttribute("data-report-id");
       forkBtn.disabled = true;
       try {
-        const resp = await fetch("/api/v1/industry/reports/" + reportId + "/fork", { method: "POST" });
+        const resp = await industryFetch("/api/v1/industry/reports/" + reportId + "/fork", { method: "POST" });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || "创建新版失败");
-        window.location.href = "/deep-reports?report_id=" + data.id;
+        window.location.href = sectorBasePath() + "?report_id=" + data.id;
       } catch (e) {
         forkBtn.disabled = false;
         alert("错误：" + e.message);
@@ -86,17 +111,16 @@
       try {
         const reportId = promoteBtn.getAttribute("data-report-id");
         const runId = promoteBtn.getAttribute("data-run-id");
-        const resp = await fetch(
+        const resp = await industryFetch(
           "/api/v1/industry/reports/" + reportId + "/grounded-runs/" + runId + "/promote",
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ promotion_note: note }),
           }
         );
         const data = await resp.json();
         if (!resp.ok) throw new Error(apiError(data.detail, "晋升失败"));
-        window.location.href = "/deep-reports?report_id=" + data.id;
+        window.location.href = sectorBasePath() + "?report_id=" + data.id;
       } catch (e) {
         promoteBtn.disabled = false;
         if (promotionMsg) promotionMsg.textContent = "错误：" + e.message;
@@ -129,6 +153,14 @@
     host.append(heading, list);
   }
 
+  function normalizeExternalUrl(url) {
+    var value = String(url || "").trim();
+    if (!value) return "";
+    if (/^https?:\/\//i.test(value)) return value;
+    if (/^\/\//.test(value)) return "https:" + value;
+    return "https://" + value;
+  }
+
   const citationDialog = document.getElementById("citation-dialog");
   const citationDetail = document.getElementById("citation-detail");
   const reportHost = document.querySelector(".industry-content[data-report-id]");
@@ -141,6 +173,7 @@
     document.addEventListener("click", async function (event) {
       const button = event.target.closest(".citation-ref");
       if (!button) return;
+      event.preventDefault();
       const reportId = reportHost.getAttribute("data-report-id");
       const status = reportHost.getAttribute("data-report-status");
       const runId = reportHost.getAttribute("data-run-id");
@@ -156,7 +189,7 @@
       citationDetail.appendChild(loading);
       citationDialog.showModal();
       try {
-        const resp = await fetch(url);
+        const resp = await industryFetch(url);
         const data = await resp.json();
         if (!resp.ok) throw new Error(apiError(data.detail, "证据详情不可用"));
         citationDetail.replaceChildren();
@@ -176,7 +209,8 @@
           const label = document.createElement("strong");
           label.textContent = "网页地址";
           const link = document.createElement("a");
-          link.href = data.url;
+          const href = normalizeExternalUrl(data.url);
+          link.href = href;
           link.target = "_blank";
           link.rel = "noopener noreferrer";
           link.textContent = data.url;
@@ -198,7 +232,9 @@
   }
 
   document.querySelectorAll(".report-rename-btn").forEach(function (button) {
-    button.addEventListener("click", async function () {
+    button.addEventListener("click", async function (event) {
+      event.preventDefault();
+      event.stopPropagation();
       const reportId = button.getAttribute("data-report-id");
       const currentName = button.getAttribute("data-report-name") || button.getAttribute("data-default-name") || "";
       const reportName = window.prompt("请输入新的报告名称（最多 256 个字符）：", currentName);
@@ -214,13 +250,12 @@
       }
       button.disabled = true;
       try {
-        const resp = await fetch("/api/v1/industry/reports/" + reportId + "/name", {
+        const resp = await industryFetch("/api/v1/industry/reports/" + reportId + "/name", {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ report_name: normalized }),
         });
         const data = await resp.json();
-        if (!resp.ok) throw new Error(data.detail || "修改名称失败");
+        if (!resp.ok) throw new Error(apiError(data.detail, "修改名称失败"));
         window.location.reload();
       } catch (e) {
         button.disabled = false;
@@ -230,15 +265,17 @@
   });
 
   document.querySelectorAll(".report-delete-btn").forEach(function (button) {
-    button.addEventListener("click", async function () {
+    button.addEventListener("click", async function (event) {
+      event.preventDefault();
+      event.stopPropagation();
       const reportId = button.getAttribute("data-report-id");
       if (!window.confirm("确认删除这份历史报告及其数据源、证据记录吗？此操作不可撤销。")) return;
       button.disabled = true;
       try {
-        const resp = await fetch("/api/v1/industry/reports/" + reportId, { method: "DELETE" });
+        const resp = await industryFetch("/api/v1/industry/reports/" + reportId, { method: "DELETE" });
         const data = await resp.json().catch(function () { return {}; });
-        if (!resp.ok) throw new Error(data.detail || "删除报告失败");
-        window.location.href = "/deep-reports";
+        if (!resp.ok) throw new Error(apiError(data.detail, "删除报告失败"));
+        window.location.href = sectorBasePath();
       } catch (e) {
         button.disabled = false;
         window.alert(e.message);

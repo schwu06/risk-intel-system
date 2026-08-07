@@ -9,11 +9,21 @@
 {% endblock %}
 
 {% block page_sidebar %}
-<aside class="industry-sidebar page-rail">
+<aside class="industry-sidebar page-rail" data-sector-key="{{ sector_key }}">
+  <h2>行业索引</h2>
+  <nav class="sector-nav" aria-label="行业分类">
+    {% for sector in sectors %}
+    <a
+      href="/deep-reports/{{ sector.key }}"
+      class="sector-nav-item {% if sector.key == sector_key %}active{% endif %}"
+    >{{ sector.label }}</a>
+    {% endfor %}
+  </nav>
+
   <h2>新建报告</h2>
   <form id="analysis-form" class="stack-form">
     <label>行业名称</label>
-    <input type="text" name="industry_name" placeholder="例如：航空运输" required />
+    <input type="text" name="industry_name" value="{{ sector_default_industry_name }}" placeholder="例如：{{ sector_default_industry_name }}" required />
     <label>企业名称（可选）</label>
     <input type="text" name="company_name" placeholder="例如：某航空公司" />
     <label class="checkbox-row">
@@ -31,7 +41,7 @@
   <ul class="report-list">
     {% for r in reports %}
     <li class="report-list-item">
-      <a href="/deep-reports?report_id={{ r.id }}" class="report-link {% if selected_report and selected_report.id == r.id %}active{% endif %}">
+      <a href="/deep-reports/{{ sector_key }}?report_id={{ r.id }}" class="report-link {% if selected_report and selected_report.id == r.id %}active{% endif %}">
         <span class="report-link-name">{% if r.report_name %}{{ r.report_name }}{% else %}{{ r.industry_name }}{% if r.company_name %} / {{ r.company_name }}{% endif %}{% endif %} · v{{ r.version }}</span>
         <span class="report-status status-{{ r.status }}">{{ r.status }}</span>
         <time class="report-created-at" datetime="{{ r.created_at.isoformat() if r.created_at else '' }}">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '日期未知' }}</time>

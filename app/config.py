@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
 
+    # 界面二（主体评估）结构化分析
+    gemini_api_base_url: str = "https://generativelanguage.googleapis.com"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
+
     # Existing deployments keep the original report path until explicitly switched.
     industry_report_generation_mode: Literal["legacy", "grounded"] = "legacy"
     grounded_report_require_approval: bool = True

@@ -32,6 +32,7 @@ from app.services.chart_generator import extract_and_build_charts
 from app.services.content_extractor import enrich_items_with_body
 from app.services.dedup import content_fingerprint, dedupe_by_title_similarity, titles_similar
 from app.services.deepseek_analyzer import DeepSeekAnalyzer
+from app.services.gemini_analyzer import GeminiAnalyzer
 from app.services.domain_rules import get_active_blacklist, get_active_whitelist
 from app.services.entity_credit import refresh_entity_credit, resolve_entity
 from app.services.llm_cache import get_cached_items, material_hash, set_cached_items
@@ -65,8 +66,8 @@ NEWS_MODULES = set(PAGE_MODULES.get("daily_news", ("B", "C", "D"))) | set(
 ENTITY_MODULES = set(PAGE_MODULES.get("entity_assessment", ("A",)))
 
 
-def _llm_failure_reason(exc: BaseException) -> str:
-    """将 DeepSeek/网络异常归纳为卡片可展示的短原因。"""
+def _llm_failure_reason(exc: BaseException, *, provider: str = "DeepSeek") -> str:
+    """将 LLM/网络异常归纳为卡片可展示的短原因。"""
     text = str(exc or "").strip()
     low = text.lower()
     if not text:
@@ -82,7 +83,7 @@ def _llm_failure_reason(exc: BaseException) -> str:
     if "json" in low or "解析" in text or "parse" in low:
         return "模型返回无法解析"
     if "placeholder" in low or "未配置" in text:
-        return "DeepSeek未配置"
+        return f"{provider}未配置"
     short = text.replace("\n", " ")
     if len(short) > 48:
         short = short[:48] + "…"
@@ -100,6 +101,7 @@ class RiskPipeline:
         db: Session,
         mita: Optional[MitaSearchClient] = None,
         deepseek: Optional[DeepSeekAnalyzer] = None,
+        gemini: Optional[GeminiAnalyzer] = None,
         rss: Optional[RssNewsCollector] = None,
         job_id: Optional[str] = None,
         authority_text: Optional[str] = None,
@@ -110,6 +112,7 @@ class RiskPipeline:
         self.db = db
         self.mita = mita or MitaSearchClient()
         self.deepseek = deepseek or DeepSeekAnalyzer()
+        self.gemini = gemini or GeminiAnalyzer()
         self.settings = get_settings()
         default_hours = int(getattr(self.settings, "news_window_hours", NEWS_WINDOW_HOURS_24) or NEWS_WINDOW_HOURS_24)
         self.window_hours = int(window_hours if window_hours is not None else default_hours)
@@ -436,9 +439,12 @@ class RiskPipeline:
 
             # 主体评估 + 外部能力未配置且无有效批次：直接演示降级，避免空转 LLM
             from app.services.api_keys import is_placeholder_key as _ph
-            external_offline = _ph(getattr(self.settings, "mita_api_key", None)) and _ph(
-                getattr(self.settings, "deepseek_api_key", None)
+            llm_key = (
+                getattr(self.settings, "gemini_api_key", None)
+                if module_code in ENTITY_MODULES
+                else getattr(self.settings, "deepseek_api_key", None)
             )
+            external_offline = _ph(getattr(self.settings, "mita_api_key", None)) and _ph(llm_key)
             has_external_items = any(
                 (b.get("items") or b.get("source") == "authority") for b in batches
             )
@@ -1314,7 +1320,8 @@ class RiskPipeline:
                 )
                 out.extend(filled)
             except Exception as exc:
-                reason = _llm_failure_reason(exc)
+                provider = "Gemini" if module_code in ENTITY_MODULES else "DeepSeek"
+                reason = _llm_failure_reason(exc, provider=provider)
                 logger.warning(
                     "LLM 分析失败，改用原文结构化兜底 (%s#%s): %s [%s]",
                     source_label,
@@ -1517,7 +1524,8 @@ class RiskPipeline:
             funnel["llm_cached"] = int(funnel.get("llm_cached") or 0) + 1
             funnel["structured"] = int(funnel.get("structured") or 0) + len(cached)
             return cached
-        structured = self.deepseek.analyze_raw(
+        analyzer = self.gemini if module_code in ENTITY_MODULES else self.deepseek
+        structured = analyzer.analyze_raw(
             text,
             module_code=module_code,
             context=context,

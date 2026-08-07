@@ -17,12 +17,15 @@ from app.database.models import (
     ReportRun, SearchLog, TargetEntity,
 )
 from app.database.session import get_db, init_db
+from app.database.industry_db import find_report_sector, industry_session, init_all_industry_databases
+from app.industry_sectors import INDUSTRY_SECTORS, require_sector_key
 from app.services.api_keys import is_placeholder_key
 from app.services.data_bridge import migrate_legacy_data
 from app.services.data_source_service import list_industry_sources
 from app.services.display_zh import build_display_cards
 from app.services.domain_rules import seed_default_domains
 from app.services.industry_analysis import IndustryAnalysisService
+from app.services.industry_migration import migrate_main_db_industry_reports
 from app.services.news_section_router import item_in_module_scope
 from app.services.citation_rendering import (
     CitationPresentationError, build_citation_context, render_report_html,
@@ -59,6 +62,8 @@ def on_startup():
         log.warning("MITA_API_KEY 未配置或为占位符，流水线检索将不可用")
     if is_placeholder_key(cfg.deepseek_api_key):
         log.warning("DEEPSEEK_API_KEY 未配置或为占位符，结构化分析将不可用")
+    if is_placeholder_key(cfg.gemini_api_key):
+        log.warning("GEMINI_API_KEY 未配置或为占位符，主体评估结构化分析将不可用")
     if "mita.ai" in cfg.mita_api_base_url:
         log.warning("MITA_API_BASE_URL 应设为 https://metaso.cn/api/v1，请更新 .env 后重启服务")
 
@@ -67,6 +72,10 @@ def on_startup():
         seed_default_domains(db)
         stats = migrate_legacy_data(db)
         log.info("切片2数据就绪: %s", stats)
+        init_all_industry_databases()
+        migrated = migrate_main_db_industry_reports(db)
+        if migrated:
+            log.info("深度研报已迁移至行业独立库: %s", migrated)
     finally:
         db.close()
     from app.services.pipeline_runner import recover_stale_jobs
@@ -385,8 +394,125 @@ def root_redirect():
 @app.get("/industry-analysis", response_class=HTMLResponse)
 def industry_analysis_redirect(request: Request):
     qs = request.url.query
-    target = "/deep-reports" + (f"?{qs}" if qs else "")
-    return RedirectResponse(url=target, status_code=302)
+    if qs:
+        report_id = request.query_params.get("report_id")
+        if report_id and report_id.isdigit():
+            sector_key = find_report_sector(int(report_id))
+            if sector_key:
+                return RedirectResponse(
+                    url=f"/deep-reports/{sector_key}?report_id={report_id}",
+                    status_code=302,
+                )
+    return RedirectResponse(url="/deep-reports", status_code=302)
+
+
+def _deep_reports_sector_context(
+    request: Request,
+    sector_key: str,
+    report_id: int | None,
+    db: Session,
+) -> dict:
+    sector = require_sector_key(sector_key)
+    reports = IndustryAnalysisService(db).list_reports(limit=15)
+    selected = None
+    if report_id:
+        selected = IndustryAnalysisService(db).get_report(report_id)
+    elif reports:
+        selected = reports[0]
+
+    industry_sources = list_industry_sources(db, selected.id) if selected else []
+    display_report_html = selected.report_html if selected else ""
+    citation_context = None
+    candidate_preview = None
+    candidate_validation = None
+    candidate_stale = False
+    if selected and selected.status == "completed" and selected.generation_mode == "grounded":
+        try:
+            citation_context = build_citation_context(db, selected)
+            display_report_html = render_report_html(citation_context)
+        except CitationPresentationError:
+            display_report_html = (
+                '<aside class="citation-warning" role="alert">'
+                "证据约束报告当前无法安全解析，已停止展示正文。请重新生成并晋升报告。"
+                "</aside>"
+            )
+    elif (
+        selected and selected.status == "awaiting_approval" and selected.grounded_run_id
+    ):
+        run = db.query(IndustryGroundedReportRun).filter(
+            IndustryGroundedReportRun.report_id == selected.id,
+            IndustryGroundedReportRun.id == selected.grounded_run_id,
+        ).first()
+        if run and run.candidate_report_json:
+            try:
+                citation_context = build_citation_context(
+                    db, selected, run.candidate_report_json,
+                )
+                candidate_preview = render_report_html(citation_context)
+                candidate_validation = json.loads(run.validation_errors_json or "{}")
+                packet = build_evidence_packet(db, selected.id)
+                candidate_stale = (
+                    run.status != "validated"
+                    or run.evidence_snapshot_hash != packet["evidence_snapshot_hash"]
+                    or run.conflict_snapshot_hash != packet["conflict_snapshot_hash"]
+                )
+            except (CitationPresentationError, json.JSONDecodeError, ValueError):
+                candidate_stale = True
+
+    meta = PAGE_META["deep_reports"]
+    return {
+        "request": request,
+        "app_name": settings.app_name,
+        "active_page": "deep_reports",
+        "page_title": f"{meta['title']} · {sector.label}",
+        "page_subtitle": meta["subtitle"],
+        "pages": PAGE_META,
+        "sector_key": sector.key,
+        "sector_label": sector.label,
+        "sector_default_industry_name": sector.default_industry_name,
+        "sectors": INDUSTRY_SECTORS.values(),
+        "reports": reports,
+        "selected_report": selected,
+        "display_report_html": display_report_html,
+        "citation_context": citation_context,
+        "candidate_preview": candidate_preview,
+        "candidate_validation": candidate_validation,
+        "candidate_stale": candidate_stale,
+        "drawer_sources": industry_sources,
+        "drawer_report_id": selected.id if selected else None,
+        "drawer_report_status": selected.status if selected else "",
+        "mita_configured": bool(settings.mita_api_key)
+        and not is_placeholder_key(settings.mita_api_key),
+        "industry_generation_mode": settings.industry_report_generation_mode,
+    }
+
+
+@app.get("/deep-reports", response_class=HTMLResponse)
+def deep_reports_index(request: Request, report_id: int | None = None):
+    if report_id:
+        sector_key = find_report_sector(report_id)
+        if sector_key:
+            return RedirectResponse(
+                url=f"/deep-reports/{sector_key}?report_id={report_id}",
+                status_code=302,
+            )
+    default_sector = next(iter(INDUSTRY_SECTORS))
+    return RedirectResponse(url=f"/deep-reports/{default_sector}", status_code=302)
+
+
+@app.get("/deep-reports/{sector_key}", response_class=HTMLResponse)
+def deep_reports_sector_page(
+    request: Request,
+    sector_key: str,
+    report_id: int | None = None,
+):
+    try:
+        require_sector_key(sector_key)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="行业分类不存在") from exc
+    with industry_session(sector_key) as db:
+        ctx = _deep_reports_sector_context(request, sector_key, report_id, db)
+    return templates.TemplateResponse("industry_analysis.html", ctx)
 
 
 @app.get("/daily-news", response_class=HTMLResponse)
@@ -438,84 +564,6 @@ def entity_assessment_page(
     )
     return templates.TemplateResponse("entity_assessment.html", ctx)
 
-
-@app.get("/deep-reports", response_class=HTMLResponse)
-def deep_reports_page(
-    request: Request,
-    report_id: int | None = None,
-    db: Session = Depends(get_db),
-):
-    reports = IndustryAnalysisService(db).list_reports(limit=15)
-    selected = None
-    if report_id:
-        selected = IndustryAnalysisService(db).get_report(report_id)
-    elif reports:
-        selected = reports[0]
-
-    industry_sources = list_industry_sources(db, selected.id) if selected else []
-    display_report_html = selected.report_html if selected else ""
-    citation_context = None
-    candidate_preview = None
-    candidate_validation = None
-    candidate_stale = False
-    if selected and selected.status == "completed" and selected.generation_mode == "grounded":
-        try:
-            citation_context = build_citation_context(db, selected)
-            display_report_html = render_report_html(citation_context)
-        except CitationPresentationError:
-            display_report_html = (
-                '<aside class="citation-warning" role="alert">'
-                "证据约束报告当前无法安全解析，已停止展示正文。请重新生成并晋升报告。"
-                "</aside>"
-            )
-    elif (
-        selected and selected.status == "awaiting_approval" and selected.grounded_run_id
-    ):
-        run = db.query(IndustryGroundedReportRun).filter(
-            IndustryGroundedReportRun.report_id == selected.id,
-            IndustryGroundedReportRun.id == selected.grounded_run_id,
-        ).first()
-        if run and run.candidate_report_json:
-            try:
-                citation_context = build_citation_context(
-                    db, selected, run.candidate_report_json,
-                )
-                candidate_preview = render_report_html(citation_context)
-                candidate_validation = json.loads(run.validation_errors_json or "{}")
-                packet = build_evidence_packet(db, selected.id)
-                candidate_stale = (
-                    run.status != "validated"
-                    or run.evidence_snapshot_hash != packet["evidence_snapshot_hash"]
-                    or run.conflict_snapshot_hash != packet["conflict_snapshot_hash"]
-                )
-            except (CitationPresentationError, json.JSONDecodeError, ValueError):
-                candidate_stale = True
-
-    meta = PAGE_META["deep_reports"]
-    return templates.TemplateResponse(
-        "industry_analysis.html",
-        {
-            "request": request,
-            "app_name": settings.app_name,
-            "active_page": "deep_reports",
-            "page_title": meta["title"],
-            "page_subtitle": meta["subtitle"],
-            "pages": PAGE_META,
-            "reports": reports,
-            "selected_report": selected,
-            "display_report_html": display_report_html,
-            "citation_context": citation_context,
-            "candidate_preview": candidate_preview,
-            "candidate_validation": candidate_validation,
-            "candidate_stale": candidate_stale,
-            "drawer_sources": industry_sources,
-            "drawer_report_id": selected.id if selected else None,
-            "drawer_report_status": selected.status if selected else "",
-            "mita_configured": bool(settings.mita_api_key)
-            and not is_placeholder_key(settings.mita_api_key),
-            "industry_generation_mode": settings.industry_report_generation_mode,
-        },
-    )
 
 
 @app.get("/intl-ratings", response_class=HTMLResponse)

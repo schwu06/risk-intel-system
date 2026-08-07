@@ -576,13 +576,25 @@
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.detail || "加载失败");
       if (sourceViewTitle) sourceViewTitle.textContent = data.name || "数据详情";
-      const meta = [
+      function externalHref(url) {
+        var value = String(url || "").trim();
+        if (!value) return "";
+        if (/^https?:\/\//i.test(value)) return value;
+        if (/^\/\//.test(value)) return "https:" + value;
+        return "https://" + value;
+      }
+      const metaParts = [
         "类型：" + (data.source_type === "network_search" ? "网络搜索" : (data.source_type || "-")),
         "来源：" + (data.origin_label || "用户添加"),
         data.original_filename ? ("文件：" + data.original_filename) : "",
-        data.url ? ("链接：" + data.url) : "",
         "字数：" + ((data.extracted_text || "").length),
-      ].filter(Boolean).map(escapeHtml).join("<br/>");
+      ];
+      let meta = metaParts.filter(Boolean).map(escapeHtml).join("<br/>");
+      if (data.url) {
+        const href = escapeHtml(externalHref(data.url));
+        const label = escapeHtml(data.url);
+        meta += '<br/>链接：<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + label + "</a>";
+      }
       const text = escapeHtml(data.extracted_text || data.text_preview || "（无提取正文）");
       if (sourceViewBody) {
         sourceViewBody.innerHTML =

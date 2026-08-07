@@ -19,3 +19,8 @@ def validate_mita_key(key: str | None) -> None:
 def validate_deepseek_key(key: str | None) -> None:
     if is_placeholder_key(key):
         raise RuntimeError("未配置有效的 DEEPSEEK_API_KEY，请在 .env 中填写 DeepSeek API 密钥")
+
+
+def validate_gemini_key(key: str | None) -> None:
+    if is_placeholder_key(key):
+        raise RuntimeError("未配置有效的 GEMINI_API_KEY，请在 .env 中填写 Gemini API 密钥")

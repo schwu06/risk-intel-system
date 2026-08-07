@@ -1128,6 +1128,43 @@ a:hover {
   border-bottom: 1px solid var(--border);
 }
 
+.sector-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 0.25rem;
+}
+
+.sector-nav-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.28rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-body, #f5f6f8);
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.sector-nav-item:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sector-nav-item.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, white);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.industry-sidebar h2:first-child {
+  margin-top: 0;
+}
+
 .report-link {
   display: flex;
   align-items: center;

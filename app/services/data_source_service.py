@@ -46,6 +46,10 @@ def ensure_upload_dirs() -> None:
     INDUSTRY_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
 
+def industry_report_upload_dir(sector_key: str, report_id: int) -> Path:
+    return INDUSTRY_UPLOAD_ROOT / sector_key / str(report_id)
+
+
 def list_all_sources(db: Session, *, entity_id: int | None = None) -> list[ModuleDataSource]:
     """列出启用的数据源。
 
