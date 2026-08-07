@@ -6,6 +6,7 @@
 
 | 文件 | 用途 |
 |------|------|
+| [`config/entity_targets.yaml`](config/entity_targets.yaml) | 主体监控清单、别名、股票代码与主体专属公开信源 |
 | [`config/rss_feeds.yaml`](config/rss_feeds.yaml) | RSS 订阅、Google 新闻检索主题 |
 | [`config/direct_sites.yaml`](config/direct_sites.yaml) | 通用无 RSS 站点（CSS 列表） |
 | [`app/services/scrapers/godiva_source_collector.py`](app/services/scrapers/godiva_source_collector.py) | Godiva 专用爬虫 |
@@ -14,7 +15,7 @@
 
 业务模块：`A` 主体评估 · `B` 中东 · `C` 日本企业 · `D` 宏观市场。
 
-采集顺序（风险日报 / 主体评估）：固定渠道 → 不足时秘塔补缺 → DeepSeek 整理入库。
+采集顺序（风险日报 / 主体评估）：固定渠道 → 不足时秘塔补缺 → 结构化模型整理 → 确定性时效、主体归属和来源门禁 → 入库。模块 A 使用 Gemini，其它资讯模块使用 DeepSeek。
 
 ---
 
@@ -67,31 +68,36 @@
 
 ## 2. 主体评估 `/entity-assessment`
 
-模块：`A`。监控主体、风险事件、授信等级；可导出 Word。
+模块：`A`。按主体展示公开信息事件、来源目录和舆情预警灯号；可导出公开信息风险监测 Word 简报。本模块不生成正式信用评级或授信审批意见。
 
 | 功能 | 数据来源 | 链接方式 |
 |------|----------|----------|
-| 监控主体列表 | 库表 `target_entities` | 本地库（默认含 Godiva、普洛斯） |
-| 风险事件 / 授信 | `entity_risks`、`credit_updates` | 本地库；采集后由模型整理写入 |
+| 监控主体列表 | `config/entity_targets.yaml` → `target_entities` | 启动/初始化时幂等同步，默认 10 个主体 |
+| 信息源目录 | `config/entity_targets.yaml` | 页面直接展示来源名称、地址、类型和 direct/contextual 关系 |
+| 风险事件 / 预警灯号 | `entity_risks`、`credit_updates` | 模型整理后再经过确定性门禁；只有有效直接负面信号参与观察期计算 |
 | 采集近 24 小时 | 见下方模块 A | 侧栏「采集」→ 异步流水线 |
-| 导出 Word | 当前主体评估内容 | 本地导出 |
-| 无真实结果时 | 演示样本 | 自动回填，避免空白（链接含 `example.com/mock`） |
+| 导出 Word | 所选主体和所选报告日 | 严格按日期导出，默认排除演示事件及其变化记录 |
+| 无真实结果时 | 空状态或保留同日已有真实结果 | 正常模式不自动回填 Mock |
 
-### 模块 A 数据源
+### 默认主体与信源覆盖
 
-#### RSS 直连
+默认目录包含 10 个主体、43 个可见来源条目：
 
-| 来源 | 地址 |
-|------|------|
-| ICI Cocoa Initiative | `https://www.cocoainitiative.org/rss.xml` |
-| Cacao.ci | `https://cacao.ci/feed/` |
-| Reuters Business | `https://feeds.reuters.com/reuters/businessNews` |
+- Godiva：主体官网、母公司新闻、美国 FDA、ICCO、COCOBOD、跨媒体主体检索；ICCO/COCOBOD 等只作为行业背景。
+- 普洛斯 GLP：全球官网、中国官网、新加坡交易所公告、跨媒体主体检索。
+- 三菱商事、三井物产、伊藤忠商事、住友商事、丸红、电装、日本邮船、大和证券：各自主体官网、TDnet、EDINET、跨媒体主体检索；大和证券另含日本金融厅。
 
-#### Google 新闻检索
+配置中的 `official`、`regulatory`、`exchange` 是主体直接来源；`industry + contextual` 只能作为背景，不得直接提高主体灯号。页面的“已采集来源”按真实入库记录中的来源名称或域名去重计算。
 
-主题见 `queries.A`：Godiva、日本歌帝梵、可可供应链、普洛斯等。
+### 采集方式
 
-#### 无 RSS 专用爬虫（`godiva_source_collector`）
+#### 主体目录检索
+
+每个来源可在 `config/entity_targets.yaml` 中声明 Google News RSS 查询词。运行模块 A 时只加载当前所选主体的查询，不再使用全局 Godiva/普洛斯查询混搜。日本上市主体还按 `stock_code` 限定 TDnet 披露。
+
+#### Godiva 专用背景采集
+
+只有当前主体为 Godiva 时才运行 `godiva_source_collector`，结果都带有 Godiva 范围标识；可可、乳制品、糖和百货销售等不直接点名 Godiva 的条目按 `contextual` 保存，不参与预警灯号。
 
 | 来源 | 方式 | 地址 |
 |------|------|------|
@@ -106,8 +112,16 @@
 
 | 来源 | 方式 |
 |------|------|
-| 秘塔搜索 | API，主源不足时按主体名补缺 |
-| DeepSeek | 整理为风险事件与授信依据 |
+| 秘塔搜索 | API，主源不足时按所选主体名称/别名补缺 |
+| Gemini | 拆分资讯重要度、影响方向、信用风险信号、主体相关性和置信度 |
+
+### 数据边界与演示模式
+
+- `provenance` 区分 `real`、`manual`、`degraded`、`demo`；演示和降级条目不参与灯号计算。
+- 自动结果必须能回连原始采集候选；跨主体或无法溯源的模型输出在保存前丢弃。
+- 已知发布时间超出采集窗口时一律丢弃；缺失发布时间会标为“待核验”。页面和导出严格使用所选 `report_date`，不回退到其它日期。
+- 灯号仅查看最近 `ENTITY_WARNING_LOOKBACK_DAYS` 天的主体直接、负面、可信信用信号。资讯重要度本身不会改变灯号。
+- 演示数据默认关闭。只有 `ENTITY_DEMO_MODE=true`、`python scripts/init_db.py --demo` 或显式调用管理端演示接口时才会生成，并默认从页面、查询 API 和正式导出中排除。
 
 #### 暂未稳定接入（页面可开，但无法保证准确自动采集）
 
@@ -164,6 +178,8 @@ CLI：`python -m intl_ratings.main`。配置：`config/intl_ratings.yaml`、`con
 |------|------|
 | 热加载 RSS | `POST /api/v1/pipeline/rss-config/reload` |
 | 热加载直连站点 | `POST /api/v1/pipeline/direct-sites/reload` |
-| 密钥 | `.env` 中 `MITA_API_KEY`、`DEEPSEEK_API_KEY` |
+| 主体目录 | 编辑 `config/entity_targets.yaml` 后重启应用 |
+| 密钥 | `.env` 中 `MITA_API_KEY`、`GEMINI_API_KEY`、`DEEPSEEK_API_KEY` |
 | 改主题 / 订阅 | 编辑 `config/rss_feeds.yaml` |
-| 改 Godiva 爬虫 | 编辑 `godiva_source_collector.py` |
+| 改主体 / 主体信源 | 编辑 `config/entity_targets.yaml` |
+| 改 Godiva 背景爬虫 | 编辑 `godiva_source_collector.py` |

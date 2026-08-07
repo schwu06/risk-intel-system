@@ -1689,6 +1689,56 @@ a:hover {
   color: var(--text-muted);
 }
 
+.entity-source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.entity-source-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.65rem 0.75rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 0.82rem;
+}
+
+.entity-source-item a {
+  flex: 1 1 145px;
+  color: var(--link);
+  text-decoration: none;
+}
+
+.entity-source-item a:hover { text-decoration: underline; }
+
+.source-kind,
+.risk-provenance {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.38rem;
+  border-radius: 3px;
+  background: #eef1f5;
+  color: #596474;
+  border: 1px solid #d9dee6;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.source-kind-official { background: #e8f0ea; color: #3d6b4f; border-color: #c5d9cb; }
+.source-kind-regulatory,
+.source-kind-exchange { background: #e8ecf3; color: #4a6578; border-color: #d0dde6; }
+.source-kind.contextual,
+.risk-provenance.contextual { background: #f3eee3; color: #7a6640; border-color: #ddd0b5; }
+.risk-provenance.degraded,
+.risk-provenance.unverified { background: #f5ebe4; color: #8a5a3a; border-color: #e0c8b6; }
+
 /* 授信时间轴 */
 .credit-timeline {
   list-style: none;

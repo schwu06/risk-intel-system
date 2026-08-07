@@ -6,6 +6,7 @@ __pycache__/
 *.log
 
 # 本地数据库与上传文件夹（保证各自电脑数据独立）
+tmp/
 *.db
 *.db-shm
 *.db-wal
@@ -20,5 +21,6 @@ logs/raw_responses/
 logs/intl_ratings/
 logs/error.log
 .env
+.aiignore
 .idea/
 .vscode/

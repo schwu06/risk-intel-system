@@ -66,6 +66,16 @@ def _migrate_sqlite_columns(target_engine=engine) -> None:
     alterations = [
         ("daily_risk_entries", "published_at", "DATETIME"),
         ("news_articles", "published_at", "DATETIME"),
+        ("entity_risks", "source_name", "VARCHAR(256)"),
+        ("entity_risks", "published_at", "DATETIME"),
+        ("entity_risks", "provenance", "VARCHAR(16) NOT NULL DEFAULT 'real'"),
+        ("entity_risks", "relevance", "VARCHAR(16) NOT NULL DEFAULT 'unknown'"),
+        ("entity_risks", "news_importance", "VARCHAR(16)"),
+        ("entity_risks", "sentiment_direction", "VARCHAR(16) NOT NULL DEFAULT 'unknown'"),
+        ("entity_risks", "credit_impact", "VARCHAR(16) NOT NULL DEFAULT 'none'"),
+        ("entity_risks", "confidence", "FLOAT"),
+        ("entity_risks", "review_status", "VARCHAR(16) NOT NULL DEFAULT 'pending'"),
+        ("entity_risks", "rule_version", "VARCHAR(32) NOT NULL DEFAULT 'entity-signal-v1'"),
         ("report_runs", "phase", "VARCHAR(32)"),
         ("report_runs", "funnel_json", "TEXT"),
         ("report_runs", "job_id", "VARCHAR(64)"),
@@ -133,6 +143,21 @@ def _migrate_sqlite_columns(target_engine=engine) -> None:
                 conn.exec_driver_sql(
                     f"UPDATE {table} SET window_hours = 24 WHERE window_hours IS NULL"
                 )
+        entity_columns = {
+            row[1]
+            for row in conn.exec_driver_sql("PRAGMA table_info(entity_risks)").fetchall()
+        }
+        if {"provenance", "review_status", "credit_impact"}.issubset(entity_columns):
+            # 旧库中的 example.com 样本只能是历史演示数据；保留记录但排除预警计算。
+            conn.exec_driver_sql(
+                "UPDATE entity_risks SET provenance='demo', review_status='rejected', "
+                "credit_impact='none' WHERE lower(COALESCE(source_url, '')) LIKE '%example.com/%'"
+            )
+            conn.exec_driver_sql(
+                "UPDATE entity_risks SET provenance='degraded', credit_impact='none' "
+                "WHERE lower(COALESCE(structured_json, '')) LIKE '%\"_degraded\": true%' "
+                "AND provenance <> 'demo'"
+            )
         _migrate_report_runs_window_hours(conn)
 
 
@@ -250,6 +275,9 @@ def _ensure_sqlite_indexes(target_engine=engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_industry_grounded_runs_evidence_snapshot ON industry_grounded_report_runs(evidence_snapshot_hash)",
         "CREATE INDEX IF NOT EXISTS ix_industry_grounded_runs_conflict_snapshot ON industry_grounded_report_runs(conflict_snapshot_hash)",
         "CREATE INDEX IF NOT EXISTS ix_industry_grounded_runs_status ON industry_grounded_report_runs(status)",
+        "CREATE INDEX IF NOT EXISTS ix_entity_risks_published_at ON entity_risks(published_at)",
+        "CREATE INDEX IF NOT EXISTS ix_entity_risks_provenance ON entity_risks(provenance)",
+        "CREATE INDEX IF NOT EXISTS ix_entity_risks_review_status ON entity_risks(review_status)",
     )
     with target_engine.begin() as conn:
         tables = {
@@ -259,7 +287,9 @@ def _ensure_sqlite_indexes(target_engine=engine) -> None:
             ).fetchall()
         }
         for statement in statements:
-            if "industry_reports_" in statement:
+            if "entity_risks" in statement:
+                table_name = "entity_risks"
+            elif "industry_reports_" in statement:
                 table_name = "industry_reports"
             elif "grounded_runs" in statement:
                 table_name = "industry_grounded_report_runs"

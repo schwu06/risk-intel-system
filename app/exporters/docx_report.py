@@ -490,7 +490,7 @@ def build_entity_assessment_docx(
     credit_logs: Iterable[CreditUpdate],
     institution_name: str = "风险管理部",
 ) -> Document:
-    """生成《企业主体风险评估简报》。"""
+    """生成《企业公开信息风险监测简报》。"""
     doc = Document()
     section = doc.sections[0]
     section.top_margin = Pt(72)
@@ -502,7 +502,7 @@ def build_entity_assessment_docx(
 
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    tr = title_p.add_run("企业主体风险评估简报")
+    tr = title_p.add_run("企业公开信息风险监测简报")
     _set_run_font(tr, size_pt=22, bold=True, color=RGBColor(0x0F, 0x17, 0x2A))
 
     sub = doc.add_paragraph()
@@ -517,20 +517,25 @@ def build_entity_assessment_docx(
         _add_meta_line(doc, "所属行业", entity.industry)
     if entity.region:
         _add_meta_line(doc, "区域", entity.region)
-    _add_meta_line(doc, "当前授信等级", entity.credit_level or "正常")
+    _add_meta_line(doc, "当前舆情预警灯号", entity.credit_level or "正常")
     _add_meta_line(doc, "监控状态", entity.monitor_status or "active")
+    _add_body(
+        doc,
+        "声明：本简报仅汇总公开信息并触发人工复核，不构成客户内部信用评级、授信审批意见或金融资产风险分类。",
+        indent=True,
+    )
 
-    _add_heading(doc, "二、授信变更历史", level=1)
+    _add_heading(doc, "二、舆情预警灯号变化", level=1)
     logs = list(credit_logs)
     if not logs:
-        _add_body(doc, "暂无授信变更记录。", indent=True)
+        _add_body(doc, "暂无舆情预警灯号变化记录。", indent=True)
     else:
         for idx, log in enumerate(logs, start=1):
             when = log.created_at.isoformat(sep=" ", timespec="minutes") if log.created_at else ""
             _add_heading(doc, f"{idx}. {log.previous_level} → {log.new_level}", level=2)
             if when:
                 _add_meta_line(doc, "变更时间", when)
-            _add_meta_line(doc, "调级原因", log.reason or "未注明")
+            _add_meta_line(doc, "变化原因", log.reason or "未注明")
 
     _add_heading(doc, "三、近期风险事件与 AI 摘要", level=1)
     risk_list = list(risks)
@@ -539,15 +544,30 @@ def build_entity_assessment_docx(
     else:
         for idx, e in enumerate(risk_list, start=1):
             _add_heading(doc, f"{idx}. {e.title}", level=2)
-            _add_meta_line(doc, "发生/报告日期", e.report_date.isoformat())
-            _add_meta_line(doc, "风险等级", e.risk_level)
+            _add_meta_line(doc, "报告日期", e.report_date.isoformat())
+            _add_meta_line(
+                doc,
+                "源发布时间",
+                e.published_at.isoformat(sep=" ", timespec="minutes")
+                if e.published_at
+                else "待核验",
+            )
+            _add_meta_line(doc, "信用风险信号级别", e.risk_level)
+            if e.news_importance:
+                _add_meta_line(doc, "资讯重要度", e.news_importance)
             if e.risk_category:
                 _add_meta_line(doc, "风险类别", e.risk_category)
+            _add_meta_line(doc, "主体相关性", e.relevance or "unknown")
+            _add_meta_line(doc, "数据血缘", e.provenance or "real")
             _add_meta_line(doc, "核心摘要", e.summary or "")
             if e.impact_analysis:
                 _add_meta_line(doc, "AI 风险影响", e.impact_analysis)
             if e.source_url:
-                _add_meta_line(doc, "数据来源", e.source_url)
+                _add_meta_line(
+                    doc,
+                    "数据来源",
+                    f"{e.source_name or '未命名来源'} | {e.source_url}",
+                )
 
     footer = doc.add_paragraph()
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER

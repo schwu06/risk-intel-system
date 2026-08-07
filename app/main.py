@@ -3,6 +3,7 @@
 from datetime import date
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -24,6 +25,7 @@ from app.services.data_bridge import migrate_legacy_data
 from app.services.data_source_service import list_industry_sources
 from app.services.display_zh import build_display_cards
 from app.services.domain_rules import seed_default_domains
+from app.services.entity_catalog import configured_entity_catalog
 from app.services.industry_analysis import IndustryAnalysisService
 from app.services.industry_migration import migrate_main_db_industry_reports
 from app.services.news_section_router import item_in_module_scope
@@ -328,18 +330,42 @@ def _entity_assessment_context(
 
     risks: list[EntityRisk] = []
     credit_logs: list[CreditUpdate] = []
+    entity_sources: list[dict] = []
+    recent_risks_count = 0
+    observed_source_count = 0
+    unverified_time_count = 0
     if selected_entity:
         risks = (
             db.query(EntityRisk)
-            .filter(EntityRisk.entity_id == selected_entity.id)
+            .filter(
+                EntityRisk.entity_id == selected_entity.id,
+                EntityRisk.provenance != "demo",
+            )
             .order_by(EntityRisk.report_date.desc(), EntityRisk.id.desc())
-            .limit(100)
+            .limit(500)
             .all()
         )
-        # 可选：按报告日期过滤展示
-        date_filtered = [r for r in risks if r.report_date == rd]
-        # 侧栏仍展示全部近期；主区优先当日，若无则展示全部
-        display_risks = date_filtered if date_filtered else risks
+        # 报告日期必须与内容严格一致，不再静默回退到其它日期。
+        display_risks = [r for r in risks if r.report_date == rd]
+        recent_risks_count = len(risks)
+        observed_source_count = len(
+            {
+                (
+                    risk.source_name
+                    or urlparse(risk.source_url or "").netloc
+                    or ""
+                ).strip().lower()
+                for risk in risks
+                if (risk.source_name or risk.source_url or "").strip()
+            }
+        )
+        unverified_time_count = sum(1 for risk in display_risks if risk.published_at is None)
+
+        profile = configured_entity_catalog().find(
+            (selected_entity.name, selected_entity.display_name, selected_entity.aliases)
+        )
+        if profile:
+            entity_sources = [source.as_dict() for source in profile.sources if source.enabled]
 
         credit_logs = (
             db.query(CreditUpdate)
@@ -348,6 +374,9 @@ def _entity_assessment_context(
             .limit(20)
             .all()
         )
+        credit_logs = [
+            log for log in credit_logs if "演示" not in (log.reason or "")
+        ]
     else:
         display_risks = []
 
@@ -378,6 +407,10 @@ def _entity_assessment_context(
         "selected_entity": selected_entity,
         "risks": display_risks,
         "all_risks_count": len(risks) if selected_entity else 0,
+        "recent_risks_count": recent_risks_count,
+        "observed_source_count": observed_source_count,
+        "unverified_time_count": unverified_time_count,
+        "entity_sources": entity_sources,
         "credit_logs": credit_logs,
         "credit_levels": CREDIT_LEVELS,
         "credit_counts": credit_counts,

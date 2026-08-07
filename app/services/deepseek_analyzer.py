@@ -55,6 +55,25 @@ AUTHORITY_FIRST_PROMPT_TEMPLATE = """你是一名企业与市场资讯编辑。�
 不要编造权威数据源中不存在的内容。不要输出 markdown 代码块，只输出 json。"""
 
 
+ENTITY_SYSTEM_PROMPT_TEMPLATE = """你是企业公开信息风险监测分析员。目标主体是「{target_entity}」。
+只分析近 {hours_label}内、与目标主体直接相关或明确属于其行业/供应链背景的材料。不得把其他公司的事件归给目标主体。
+
+只返回合法 JSON 对象，结构为 {{"items": [...]}}。每个元素必须包含：
+标题、关联企业、风险类别、风险等级、核心摘要、影响分析、来源链接、来源名称、发布时间、资讯重要度、影响方向、信用风险信号、主体相关性、置信度。
+
+字段规则：
+1. 「资讯重要度」只能是低/中/高/极高，表示新闻本身的重要程度。
+2. 「影响方向」只能是positive/neutral/negative/unknown；必须依据材料事实，不得因新闻重要就判为负面。
+3. 「信用风险信号」只能是none/low/medium/high/critical，表示材料对目标主体偿债能力、流动性、债务履约、持续经营、重大合规处罚或核心经营现金流的负面信号。正面、中性、纯宣传、一般投资、人事、行业价格或供应链背景材料必须为none。
+4. 「风险等级」是页面事件信号级别，只能是低/中/高/极高；应与信用风险信号一致：none→低、low→中、medium→高、high/critical→极高。不得沿用“新闻重要度”代替风险严重度。
+5. 「主体相关性」只能是direct/contextual/unrelated。主体本身的公告或明确点名事件为direct；上下游、宏观和行业背景为contextual；仅名称相似或其他公司事件为unrelated。unrelated 不得输出。
+6. 「置信度」是0到1的小数；无法确认主体或事件事实时不要输出。
+7. contextual 条目的信用风险信号必须为none，影响分析须说明它只是背景信息。
+8. 来源名称和来源链接必须来自材料；发布时间无法确认时留空，不得使用抓取时间冒充发布时间。
+9. 全部标题、摘要和分析使用简体中文；企业固有英文/日文名称可保留。禁止编造、外推授信结论或声称已完成银行信用评级。
+10. 同一事件只保留一条最完整来源；材料无可用条目时返回 {{"items": []}}；不要输出 Markdown。"""
+
+
 def _hours_label(window_hours: int | None) -> str:
     h = int(window_hours or 24)
     if h >= 168:
@@ -62,8 +81,19 @@ def _hours_label(window_hours: int | None) -> str:
     return f"{h}小时"
 
 
-def build_system_prompt(*, window_hours: int | None = None, authority_first: bool = False) -> str:
+def build_system_prompt(
+    *,
+    window_hours: int | None = None,
+    authority_first: bool = False,
+    module_code: str | None = None,
+    target_entity: str | None = None,
+) -> str:
     label = _hours_label(window_hours)
+    if str(module_code or "").upper() == "A":
+        return ENTITY_SYSTEM_PROMPT_TEMPLATE.format(
+            hours_label=label,
+            target_entity=target_entity or "当前选定主体",
+        )
     tmpl = AUTHORITY_FIRST_PROMPT_TEMPLATE if authority_first else SYSTEM_PROMPT_TEMPLATE
     return tmpl.format(hours_label=label)
 
@@ -190,6 +220,8 @@ class DeepSeekAnalyzer:
         system = build_system_prompt(
             window_hours=(context or {}).get("window_hours"),
             authority_first=authority_first,
+            module_code=module_code,
+            target_entity=(context or {}).get("target_entity"),
         )
         module_name = MODULE_CODES.get(module_code.upper(), module_code)
         force_cover = bool((context or {}).get("force_cover"))

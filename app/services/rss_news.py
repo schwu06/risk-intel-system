@@ -15,7 +15,7 @@ from app.config import get_settings
 from app.services.dedup import content_fingerprint
 from app.services.http_retry import with_retries
 from app.services.recency import is_within_hours, parse_published_at
-from app.services.rss_config import load_rss_config
+from app.services.rss_config import RssQuerySpec, load_rss_config
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,11 @@ class RssNewsItem:
     fingerprint: Optional[str] = None
     # Google News <source> 或标题后缀解析出的真实媒体名
     publisher: Optional[str] = None
+    # 主体目录赋予的采集范围；用于阻止跨主体误归属。
+    entity_key: Optional[str] = None
+    relation: str = "unscoped"
+    source_type: str = "media"
+    configured_source_url: Optional[str] = None
 
 
 @dataclass
@@ -83,9 +88,16 @@ class RssNewsCollector:
         hours: int = 24,
         max_items: int = 40,
         allow_unknown: bool = False,
+        entity_key: str | None = None,
+        extra_queries: list[RssQuerySpec] | None = None,
     ) -> list[RssNewsItem]:
         return self.collect_detailed(
-            module_code, hours=hours, max_items=max_items, allow_unknown=allow_unknown
+            module_code,
+            hours=hours,
+            max_items=max_items,
+            allow_unknown=allow_unknown,
+            entity_key=entity_key,
+            extra_queries=extra_queries,
         ).items
 
     def collect_detailed(
@@ -95,6 +107,8 @@ class RssNewsCollector:
         hours: int = 24,
         max_items: int = 40,
         allow_unknown: bool = False,
+        entity_key: str | None = None,
+        extra_queries: list[RssQuerySpec] | None = None,
     ) -> CollectResult:
         code = module_code.upper()
         seen: set[str] = set()
@@ -102,8 +116,13 @@ class RssNewsCollector:
         cfg = self.config
 
         # 1) Google News 查询（按 priority 降序）
+        configured_queries = list(cfg.queries.get(code, [])) + list(extra_queries or [])
         queries = sorted(
-            [q for q in cfg.queries.get(code, []) if q.enabled],
+            [
+                q
+                for q in configured_queries
+                if q.enabled and (not entity_key or not q.entity_key or q.entity_key == entity_key)
+            ],
             key=lambda x: x.priority,
             reverse=True,
         )
@@ -113,6 +132,11 @@ class RssNewsCollector:
             )
             url = google_news_rss_url(q.query, hl=hl, gl=gl, ceid=ceid)
             hits, health = self._fetch_feed_safe(url, feed_label=q.label)
+            for hit in hits:
+                hit.entity_key = q.entity_key
+                hit.relation = q.relation
+                hit.source_type = q.source_type
+                hit.configured_source_url = q.source_url
             result.feed_health.append(health)
             if health.ok:
                 result.fetch_ok += 1
@@ -133,7 +157,13 @@ class RssNewsCollector:
 
         # 2) 直连精选源（保底；即使 Google 全挂也尽量有内容）
         feeds = sorted(
-            [f for f in cfg.feeds if f.enabled and code in f.modules],
+            [
+                f
+                for f in cfg.feeds
+                if f.enabled
+                and code in f.modules
+                and (not entity_key or not f.entity_key or f.entity_key == entity_key)
+            ],
             key=lambda x: x.priority,
             reverse=True,
         )
@@ -147,6 +177,11 @@ class RssNewsCollector:
                 )
                 feed_url = google_news_rss_url(feed.url, hl=hl, gl=gl, ceid=ceid)
             hits, health = self._fetch_feed_safe(feed_url, feed_label=feed.label)
+            for hit in hits:
+                hit.entity_key = feed.entity_key
+                hit.relation = feed.relation
+                hit.source_type = feed.source_type
+                hit.configured_source_url = feed.url
             result.feed_health.append(health)
             if health.ok:
                 result.fetch_ok += 1

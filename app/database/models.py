@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -586,7 +586,23 @@ class EntityRisk(Base):
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     impact_analysis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     source_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    source_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
     related_company: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    provenance: Mapped[str] = mapped_column(String(16), default="real", nullable=False, index=True)
+    relevance: Mapped[str] = mapped_column(String(16), default="unknown", nullable=False)
+    news_importance: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    sentiment_direction: Mapped[str] = mapped_column(
+        String(16), default="unknown", nullable=False
+    )
+    credit_impact: Mapped[str] = mapped_column(String(16), default="none", nullable=False)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    review_status: Mapped[str] = mapped_column(
+        String(16), default="pending", nullable=False, index=True
+    )
+    rule_version: Mapped[str] = mapped_column(
+        String(32), default="entity-signal-v1", nullable=False
+    )
     structured_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     legacy_entry_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("daily_risk_entries.id"), nullable=True, index=True
@@ -597,7 +613,7 @@ class EntityRisk(Base):
 
 
 class CreditUpdate(Base):
-    """授信等级变更日志：正常 | 关注 | 预警 | 高风险。"""
+    """公开信息预警灯号变化日志：正常 | 关注 | 预警 | 高风险。"""
 
     __tablename__ = "credit_updates"
 

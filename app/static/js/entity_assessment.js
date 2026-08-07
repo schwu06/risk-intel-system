@@ -10,7 +10,7 @@
     if (!exportBtn) return;
     exportBtn.disabled = !!on || !window.ENTITY_ID;
     exportBtn.classList.toggle("is-loading", !!on);
-    exportBtn.textContent = on ? "正在生成…" : "导出 Word";
+    exportBtn.textContent = on ? "正在生成…" : "导出公开信息简报";
   }
 
   function showExportMsg(text, isError) {
@@ -31,7 +31,7 @@
     if (reportDate) url += "?report_date=" + encodeURIComponent(reportDate);
 
     setExportLoading(true);
-    showExportMsg("正在生成《企业主体风险评估简报》…");
+    showExportMsg("正在生成《企业公开信息风险监测简报》…");
     try {
       var resp = await fetch(url);
       if (!resp.ok) {
@@ -41,12 +41,12 @@
       }
       var blob = await resp.blob();
       var disp = resp.headers.get("Content-Disposition") || "";
-      var filename = "企业主体风险评估简报.docx";
+      var filename = "企业公开信息风险监测简报.docx";
       var m = /filename\*=UTF-8''([^;]+)|filename=\"?([^\";]+)\"?/i.exec(disp);
       if (m) {
         filename = decodeURIComponent(m[1] || m[2]);
       } else if (window.ENTITY_NAME) {
-        filename = "企业主体风险评估简报_" + window.ENTITY_NAME + ".docx";
+        filename = "企业公开信息风险监测简报_" + window.ENTITY_NAME + ".docx";
       }
       var a = document.createElement("a");
       var objectUrl = URL.createObjectURL(blob);

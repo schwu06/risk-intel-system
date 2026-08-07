@@ -35,6 +35,8 @@ from app.services.deepseek_analyzer import DeepSeekAnalyzer
 from app.services.gemini_analyzer import GeminiAnalyzer
 from app.services.domain_rules import get_active_blacklist, get_active_whitelist
 from app.services.entity_credit import refresh_entity_credit, resolve_entity
+from app.services.entity_catalog import EntityProfile, configured_entity_catalog
+from app.services.entity_relevance import classify_entity_relevance, prepare_entity_row
 from app.services.llm_cache import get_cached_items, material_hash, set_cached_items
 from app.services.mita_search import MitaSearchClient
 from app.services.news_quality import (
@@ -126,6 +128,9 @@ class RiskPipeline:
         # None = 实时读取数据源；非 None（含空串）= 任务启动时冻结的快照，运行中变更不影响本次
         self._authority_snapshot = authority_text
         self.entity_id = entity_id
+        self._entity_cache = None
+        self._entity_profile_cache: EntityProfile | None = None
+        self._entity_profile_loaded = False
         self._direct_sites_config = direct_sites_config
         self.llm_top_k = int(getattr(self.settings, "pipeline_llm_top_k", 12) or 12)
         self.cache_hours = int(getattr(self.settings, "pipeline_llm_cache_hours", 168) or 168)
@@ -276,7 +281,8 @@ class RiskPipeline:
                 funnel["source_fail"].append("direct_site")
                 logger.warning("模块 %s 直连站点采集失败（已跳过）: %s", module_code, exc)
 
-            if module_code in ("A",):
+            profile = self._entity_profile() if module_code in ENTITY_MODULES else None
+            if module_code == "A" and (profile is None or profile.key == "Godiva"):
                 try:
                     godiva_batch = self._collect_godiva_sources(module_code, funnel)
                     if godiva_batch["items"]:
@@ -312,7 +318,9 @@ class RiskPipeline:
                     funnel["source_fail"].append("sina_724")
                     logger.warning("模块 %s 新浪7x24 采集失败（已跳过）: %s", module_code, exc)
 
-            if module_code == "C":
+            if module_code == "C" or (
+                module_code == "A" and profile is not None and profile.stock_code
+            ):
                 try:
                     tdnet_batch = self._collect_tdnet(module_code, funnel)
                     if tdnet_batch["items"]:
@@ -331,15 +339,16 @@ class RiskPipeline:
                     funnel["source_fail"].append("tdnet")
                     logger.warning("模块 %s TDnet 采集失败（已跳过）: %s", module_code, exc)
                 try:
-                    # EDINET 仍作人工核对备注（需正式 API Key 后才能正文入库）
-                    portal_note = self._collect_portals_as_notes(
-                        module_code, report_date, funnel
-                    )
-                    if portal_note:
-                        authority_text = (
-                            f"{authority_text}\n\n=== EDINET 核对入口（非新闻正文）===\n"
-                            f"{portal_note}"
-                        ).strip()
+                    if module_code == "C":
+                        # EDINET 仍作人工核对备注（需正式 API Key 后才能正文入库）
+                        portal_note = self._collect_portals_as_notes(
+                            module_code, report_date, funnel
+                        )
+                        if portal_note:
+                            authority_text = (
+                                f"{authority_text}\n\n=== EDINET 核对入口（非新闻正文）===\n"
+                                f"{portal_note}"
+                            ).strip()
                 except Exception as exc:
                     logger.warning("EDINET 门户备注失败: %s", exc)
 
@@ -416,7 +425,7 @@ class RiskPipeline:
                     except Exception as exc:
                         mita_fail += 1
                         logger.warning("单条检索失败，已跳过: %s | %s", qcfg.get("query", ""), exc)
-                    # 主体采集：连续失败时提前结束，走演示降级，避免长时间空转
+                    # 主体采集：连续失败时提前结束；由空结果策略决定是否保留历史。
                     if (
                         module_code in ENTITY_MODULES
                         and self.entity_id
@@ -437,7 +446,7 @@ class RiskPipeline:
                 report_date, module_code, "collect", "all", {"batches": batches}, item_count=_batch_item_total(batches)
             )
 
-            # 主体评估 + 外部能力未配置且无有效批次：直接演示降级，避免空转 LLM
+            # 演示回填必须显式开启；正常模式为空时保留真实历史结果。
             from app.services.api_keys import is_placeholder_key as _ph
             llm_key = (
                 getattr(self.settings, "gemini_api_key", None)
@@ -453,6 +462,7 @@ class RiskPipeline:
                 and self.entity_id
                 and external_offline
                 and not has_external_items
+                and bool(getattr(self.settings, "entity_demo_mode", False))
             ):
                 from app.services.entity_mock import refresh_entity_demo_for_collect
 
@@ -465,7 +475,7 @@ class RiskPipeline:
                 run.kept_previous = False
                 run.status = "completed" if saved > 0 else "empty"
                 run.phase = "done"
-                run.notes = f"外部检索未配置，已写入近{news_window_label(self.window_hours)}演示样本并刷新授信"
+                run.notes = f"外部检索未配置，显式演示模式已写入近{news_window_label(self.window_hours)}样本"
                 run.finished_at = tokyo_now()
                 self._set_funnel(run, funnel)
                 self.db.commit()
@@ -498,6 +508,8 @@ class RiskPipeline:
                     )
                     pending_rows.extend(rows)
 
+            if module_code in ENTITY_MODULES and self.entity_id:
+                pending_rows = self._filter_entity_rows(pending_rows, funnel)
             pending_rows = self._dedupe_structured(pending_rows, module_code, funnel)
             pending_rows = filter_publishable_rows(pending_rows)
             funnel["after_quality_filter"] = len(pending_rows)
@@ -565,8 +577,11 @@ class RiskPipeline:
                     note += f"（路由剔除 {funnel['section_route']['routed_out']}）"
                 run.notes = note
             else:
-                # 主体评估：无真实产出时写入演示数据，保证页面可刷新
-                if module_code in ENTITY_MODULES and self.entity_id:
+                if (
+                    module_code in ENTITY_MODULES
+                    and self.entity_id
+                    and bool(getattr(self.settings, "entity_demo_mode", False))
+                ):
                     from app.services.entity_mock import refresh_entity_demo_for_collect
 
                     saved = refresh_entity_demo_for_collect(
@@ -578,7 +593,7 @@ class RiskPipeline:
                     run.kept_previous = False
                     run.status = "completed" if saved > 0 else "empty"
                     run.notes = (
-                        f"近{news_window_label(self.window_hours)}采集无新增源数据，已写入演示样本并刷新授信"
+                        f"近{news_window_label(self.window_hours)}采集无新增源数据，显式演示模式已写入样本"
                         if saved
                         else "今日无动态"
                     )
@@ -638,10 +653,13 @@ class RiskPipeline:
     # ------------------------------------------------------------------
 
     def _collect_rss(self, module_code: str, funnel: dict[str, Any]) -> dict[str, Any]:
+        profile = self._entity_profile() if module_code in ENTITY_MODULES else None
         detailed = self.rss.collect_detailed(
             module_code,
             hours=self.window_hours,
             max_items=self.collect_max_items,
+            entity_key=profile.key if profile else None,
+            extra_queries=profile.rss_queries() if profile else None,
         )
         funnel["rss_fetched"] = len(detailed.items)
         funnel["rss_feeds_ok"] = detailed.fetch_ok
@@ -656,6 +674,10 @@ class RiskPipeline:
                 "feed": h.feed_label,
                 "fingerprint": h.fingerprint,
                 "publisher": h.publisher,
+                "entity_key": h.entity_key,
+                "relation": h.relation,
+                "source_type": h.source_type,
+                "configured_source_url": h.configured_source_url,
             }
             for h in detailed.items
         ]
@@ -773,6 +795,10 @@ class RiskPipeline:
                 "published_at": h.published_at,
                 "source_domain": h.source_domain,
                 "feed": h.feed_label,
+                "publisher": h.feed_label,
+                "entity_key": "Godiva",
+                "relation": "contextual",
+                "source_type": "industry",
                 "fingerprint": content_fingerprint(
                     module_code=module_code,
                     title=h.title,
@@ -854,7 +880,11 @@ class RiskPipeline:
 
     def _collect_tdnet(self, module_code: str, funnel: dict[str, Any]) -> dict[str, Any]:
         """采集监控企业 TDnet 适时应披露，作为可分析/可入库资讯源。"""
-        collector = TdnetCollector()
+        profile = self._entity_profile() if module_code in ENTITY_MODULES else None
+        company_codes = None
+        if profile and profile.stock_code:
+            company_codes = {profile.key: profile.stock_code}
+        collector = TdnetCollector(company_codes=company_codes)
         hits = collector.collect(hours=self.window_hours, max_items=self.collect_max_items)
         funnel["tdnet_fetched"] = len(hits)
         items = [
@@ -866,6 +896,11 @@ class RiskPipeline:
                 "source_domain": "release.tdnet.info",
                 "company": h.company_name,
                 "company_code": h.company_code,
+                "publisher": "TDnet",
+                "feed": "TDnet 适时披露",
+                "entity_key": profile.key if profile else None,
+                "relation": "direct",
+                "source_type": "exchange",
                 "fingerprint": content_fingerprint(
                     module_code=module_code,
                     title=h.title,
@@ -981,6 +1016,7 @@ class RiskPipeline:
             for i in response.items
             if is_within_hours(i.published_at, self.window_hours, allow_unknown=True)
         ]
+        profile = self._entity_profile() if module_code in ENTITY_MODULES else None
         payload = [
             {
                 "title": i.title,
@@ -988,6 +1024,10 @@ class RiskPipeline:
                 "snippet": i.snippet,
                 "published_at": i.published_at,
                 "source_domain": i.source_domain,
+                "publisher": i.source_domain,
+                "entity_key": profile.key if profile else None,
+                "relation": "direct" if profile else "unscoped",
+                "source_type": "media",
                 "fingerprint": content_fingerprint(
                     module_code=module_code,
                     title=i.title,
@@ -1026,6 +1066,22 @@ class RiskPipeline:
                 it.get("published_at"), self.window_hours, allow_unknown=True
             ):
                 continue
+            if module_code in ENTITY_MODULES and self.entity_id:
+                entity = self._selected_entity()
+                if entity:
+                    relevance = classify_entity_relevance(
+                        entity,
+                        {
+                            "标题": it.get("title"),
+                            "关联企业": it.get("company"),
+                            "核心摘要": it.get("snippet") or it.get("body"),
+                            "_source_item": it,
+                        },
+                        self._entity_profile(),
+                    )
+                    # 背景材料可以展示，但不能占满“主体直接资讯”的补缺配额。
+                    if relevance != "direct":
+                        continue
             if module_code in NEWS_MODULES:
                 ok, _ = item_in_module_scope(
                     module_code,
@@ -1330,6 +1386,7 @@ class RiskPipeline:
                     reason,
                 )
                 fallback = self._fallback_structure_items(chunk, metadata)
+                funnel["degraded"] = int(funnel.get("degraded") or 0) + len(fallback)
                 funnel["structure_fallback"] = int(funnel.get("structure_fallback") or 0) + len(
                     fallback
                 )
@@ -1379,6 +1436,11 @@ class RiskPipeline:
                         "chunk_size": len(chunk),
                         "attempt": attempt + 1,
                         "force_cover": force_cover,
+                        "target_entity": (
+                            (self._selected_entity().display_name or self._selected_entity().name)
+                            if module_code in ENTITY_MODULES and self._selected_entity()
+                            else None
+                        ),
                     },
                 )
                 last_exc = None
@@ -1457,6 +1519,7 @@ class RiskPipeline:
         if missing:
             # 末级兜底：用原文组装正常字段，避免页面出现「结构化分析暂不可用」
             extra = self._fallback_structure_items(missing, metadata)
+            funnel["degraded"] = int(funnel.get("degraded") or 0) + len(extra)
             funnel["structure_fallback"] = int(funnel.get("structure_fallback") or 0) + len(
                 extra
             )
@@ -1470,7 +1533,7 @@ class RiskPipeline:
         items: list[dict[str, Any]],
         metadata: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """LLM 仍未覆盖时，基于原文生成可展示条目（无系统失败提示）。"""
+        """LLM 未覆盖时保留原始摘要，并显式标为降级数据。"""
         rows: list[dict[str, Any]] = []
         for it in items:
             if not is_substantive_news_item(it):
@@ -1480,21 +1543,32 @@ class RiskPipeline:
             if len(snippet) < 12:
                 continue
             summary = snippet[:800]
+            is_entity = bool(self.entity_id)
             rows.append(
                 {
                     "标题": title,
                     "关联企业": it.get("company")
                     or metadata.get("company")
                     or metadata.get("target")
+                    or it.get("entity_key")
                     or "",
                     "风险类别": metadata.get("category") or metadata.get("topic") or "资讯快讯",
-                    "风险等级": "中",
+                    "风险等级": "低" if is_entity else "中",
                     "核心摘要": summary,
-                    "影响分析": summary[:280],
+                    "影响分析": (
+                        _degraded_impact_text("模型未完成主体信用信号判定")
+                        if is_entity
+                        else summary[:280]
+                    ),
                     "来源链接": it.get("url") or "",
                     "来源名称": it.get("publisher") or it.get("feed") or "",
                     "发布时间": it.get("published_at") or "",
-                    "_degraded": False,
+                    "资讯重要度": "中" if is_entity else "",
+                    "影响方向": "unknown" if is_entity else "",
+                    "信用风险信号": "none" if is_entity else "",
+                    "主体相关性": it.get("relation") or "unknown",
+                    "置信度": "",
+                    "_degraded": True,
                     "_structure_fallback": True,
                     "_fingerprint": it.get("fingerprint"),
                     "_metadata": metadata,
@@ -1514,10 +1588,12 @@ class RiskPipeline:
         funnel: dict[str, Any],
         context: dict[str, Any],
     ) -> list[dict[str, Any]]:
+        target_cache_key = str(context.get("target_entity") or "")
+        cache_source = f"{source}:w{self.window_hours}:target={target_cache_key}"
         key = material_hash(
             text,
             module_code=module_code,
-            source=f"{source}:w{self.window_hours}",
+            source=cache_source,
         )
         cached = get_cached_items(self.db, material_key=key, max_age_hours=self.cache_hours)
         if cached is not None:
@@ -1535,7 +1611,7 @@ class RiskPipeline:
             self.db,
             material_key=key,
             module_code=module_code,
-            source=f"{source}:w{self.window_hours}",
+            source=cache_source,
             items=structured,
         )
         funnel["structured"] = int(funnel.get("structured") or 0) + len(structured)
@@ -1567,20 +1643,27 @@ class RiskPipeline:
             snippet = (it.get("snippet") or it.get("body") or "").strip()
             if len(snippet) < 12:
                 continue
+            is_entity = bool(self.entity_id)
             rows.append(
                 {
                     "标题": title,
                     "关联企业": it.get("company")
                     or metadata.get("company")
                     or metadata.get("target")
+                    or it.get("entity_key")
                     or "",
                     "风险类别": metadata.get("category") or metadata.get("topic") or "资讯快讯",
-                    "风险等级": "中",
+                    "风险等级": "低" if is_entity else "中",
                     "核心摘要": snippet[:800],
                     "影响分析": impact,
                     "来源链接": it.get("url") or "",
                     "来源名称": it.get("publisher") or it.get("feed") or "",
                     "发布时间": it.get("published_at") or "",
+                    "资讯重要度": "中" if is_entity else "",
+                    "影响方向": "unknown" if is_entity else "",
+                    "信用风险信号": "none" if is_entity else "",
+                    "主体相关性": it.get("relation") or "unknown",
+                    "置信度": "",
                     "_degraded": True,
                     "_degrade_reason": reason,
                     "_fingerprint": it.get("fingerprint"),
@@ -1737,12 +1820,23 @@ class RiskPipeline:
             enriched["_source_items"] = source_items
             enriched["_degraded"] = degraded
             src_url = (row.get("来源链接") or "").strip()
+            matched_source = None
             if src_url and source_items:
                 for it in source_items:
                     if (it.get("url") or "").strip() == src_url:
-                        enriched["_fingerprint"] = it.get("fingerprint")
-                        enriched["_source_item"] = it
+                        matched_source = it
                         break
+            if matched_source is None and source_items:
+                title = row.get("标题") or ""
+                for it in source_items:
+                    if titles_similar(title, it.get("title")):
+                        matched_source = it
+                        break
+            if matched_source is None and len(source_items) == 1:
+                matched_source = source_items[0]
+            if matched_source is not None:
+                enriched["_fingerprint"] = matched_source.get("fingerprint")
+                enriched["_source_item"] = matched_source
             if not enriched.get("_fingerprint"):
                 enriched["_fingerprint"] = content_fingerprint(
                     module_code=module_code,
@@ -1811,16 +1905,57 @@ class RiskPipeline:
         self.db.commit()
         return run
 
+    def _selected_entity(self):
+        if not self.entity_id:
+            return None
+        if self._entity_cache is None:
+            from app.database.models import TargetEntity
+
+            self._entity_cache = (
+                self.db.query(TargetEntity).filter(TargetEntity.id == self.entity_id).first()
+            )
+        return self._entity_cache
+
+    def _entity_profile(self) -> EntityProfile | None:
+        if self._entity_profile_loaded:
+            return self._entity_profile_cache
+        self._entity_profile_loaded = True
+        entity = self._selected_entity()
+        if entity:
+            self._entity_profile_cache = configured_entity_catalog().find(
+                (entity.name, entity.display_name, entity.aliases)
+            )
+        return self._entity_profile_cache
+
+    def _filter_entity_rows(
+        self, rows: list[dict[str, Any]], funnel: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        entity = self._selected_entity()
+        if not entity:
+            return rows
+        profile = self._entity_profile()
+        accepted: list[dict[str, Any]] = []
+        for row in rows:
+            if prepare_entity_row(entity, row, profile):
+                accepted.append(row)
+        funnel["entity_relevance_dropped"] = len(rows) - len(accepted)
+        funnel["entity_direct"] = sum(
+            1 for row in accepted if row.get("_entity_relevance") == "direct"
+        )
+        funnel["entity_contextual"] = sum(
+            1 for row in accepted if row.get("_entity_relevance") == "contextual"
+        )
+        return accepted
+
     def _entity_search_targets(self) -> list[str] | None:
         """主体评估限定检索目标；未指定 entity_id 则搜全部默认主体。"""
         if not self.entity_id:
             return None
-        from app.database.models import TargetEntity
-
-        ent = self.db.query(TargetEntity).filter(TargetEntity.id == self.entity_id).first()
+        ent = self._selected_entity()
         if not ent:
             return None
-        names = [ent.display_name or ent.name, ent.name]
+        profile = self._entity_profile()
+        names = list(profile.all_names[:3]) if profile else [ent.display_name or ent.name, ent.name]
         return [n for n in dict.fromkeys(names) if n]
 
     def _count_existing(self, report_date: date, module_code: str) -> int:
@@ -2083,7 +2218,7 @@ class RiskPipeline:
         chart_json = json.dumps(chart_specs, ensure_ascii=False) if chart_specs else None
 
         count = 0
-        touched_entities = []
+        touched_entities: dict[int, Any] = {}
         seen_titles: set[str] = set()
 
         for row in structured:
@@ -2096,9 +2231,8 @@ class RiskPipeline:
             if published_at and not is_within_hours(
                 published_at, self.window_hours, allow_unknown=False
             ):
-                # 降级条目若带时间且过期则丢弃；无时间保留
-                if not row.get("_degraded"):
-                    continue
+                # 已知发布时间超窗一律丢弃；降级状态不能绕过时间边界。
+                continue
             if not self._published_on_calendar_day(published_at):
                 continue
 
@@ -2120,6 +2254,8 @@ class RiskPipeline:
                 or meta.get("company")
                 or meta.get("topic")
             )
+            source_name = (row.get("来源名称") or "").strip() or None
+            provenance = "degraded" if row.get("_degraded") else "real"
             entry = DailyRiskEntry(
                 report_date=report_date,
                 module_code=module_code,
@@ -2132,7 +2268,7 @@ class RiskPipeline:
                 summary=row.get("核心摘要") or "",
                 impact_analysis=row.get("影响分析"),
                 source_url=row.get("来源链接"),
-                source_title=None,
+                source_title=source_name,
                 pillar_or_topic=meta.get("category") or meta.get("topic"),
                 structured_json=json.dumps(enriched, ensure_ascii=False),
                 search_log_id=search_log_id or row.get("_search_log_id"),
@@ -2217,18 +2353,41 @@ class RiskPipeline:
                         summary=entry.summary,
                         impact_analysis=entry.impact_analysis,
                         source_url=entry.source_url,
+                        source_name=source_name,
+                        published_at=published_at,
                         related_company=entry.related_company,
+                        provenance=provenance,
+                        relevance=str(
+                            row.get("_entity_relevance")
+                            or row.get("主体相关性")
+                            or "unknown"
+                        ).lower(),
+                        news_importance=row.get("资讯重要度") or None,
+                        sentiment_direction=str(
+                            row.get("影响方向") or "unknown"
+                        ).lower(),
+                        credit_impact=str(
+                            row.get("信用风险信号") or "none"
+                        ).lower(),
+                        confidence=row.get("_confidence"),
+                        review_status="pending",
+                        rule_version="entity-signal-v1",
                         structured_json=entry.structured_json,
                         legacy_entry_id=entry.id,
                     )
                     self.db.add(risk)
                     self.db.flush()
-                    touched_entities.append((ent, risk))
+                    touched_entities[ent.id] = ent
 
             count += 1
 
-        for ent, risk in touched_entities:
-            refresh_entity_credit(self.db, ent, trigger_risk=risk)
+        for ent in touched_entities.values():
+            refresh_entity_credit(
+                self.db,
+                ent,
+                reason="公开信息信用风险信号更新（规则 entity-signal-v1）",
+                force=True,
+            )
 
         self.db.commit()
         return count
@@ -2257,6 +2416,7 @@ class RiskPipeline:
                 summary=row.get("核心摘要") or "",
                 impact_analysis=row.get("影响分析"),
                 source_url=row.get("来源链接"),
+                source_title=row.get("来源名称"),
                 structured_json=json.dumps(row, ensure_ascii=False),
                 published_at=published_at,
             )
@@ -2298,7 +2458,21 @@ class RiskPipeline:
                         summary=entry.summary,
                         impact_analysis=entry.impact_analysis,
                         source_url=entry.source_url,
+                        source_name=entry.source_title,
+                        published_at=published_at,
                         related_company=entry.related_company,
+                        provenance="manual",
+                        relevance=str(row.get("主体相关性") or "direct").lower(),
+                        news_importance=row.get("资讯重要度") or row.get("风险等级"),
+                        sentiment_direction=str(row.get("影响方向") or "unknown").lower(),
+                        credit_impact=str(row.get("信用风险信号") or "none").lower(),
+                        confidence=(
+                            float(row["置信度"])
+                            if row.get("置信度") not in (None, "")
+                            else None
+                        ),
+                        review_status="accepted",
+                        rule_version="entity-signal-v1",
                         structured_json=entry.structured_json,
                         legacy_entry_id=entry.id,
                     )
@@ -2308,7 +2482,13 @@ class RiskPipeline:
             count += 1
 
         for ent, risk in touched:
-            refresh_entity_credit(self.db, ent, trigger_risk=risk)
+            refresh_entity_credit(
+                self.db,
+                ent,
+                trigger_risk=risk,
+                reason="人工录入的公开信息信用风险信号更新",
+                force=True,
+            )
         self.db.commit()
         return count
 

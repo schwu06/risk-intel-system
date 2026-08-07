@@ -14,10 +14,12 @@ from app.database.models import (
     NewsArticle,
 )
 from app.services.entity_credit import (
+    rebuild_entity_warning_levels,
     refresh_entity_credit,
     resolve_entity,
     seed_default_entities,
 )
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +64,15 @@ def migrate_legacy_data(db: Session) -> dict[str, int]:
         "entity_risks": 0,
         "industry_reports": 0,
         "entity_demo": 0,
+        "warning_levels_rebuilt": 0,
     }
 
     try:
         from app.services.entity_mock import seed_entity_demo_data
 
-        demo = seed_entity_demo_data(db, force=False)
-        stats["entity_demo"] = int(demo.get("risks") or 0)
+        if bool(getattr(get_settings(), "entity_demo_mode", False)):
+            demo = seed_entity_demo_data(db, force=False)
+            stats["entity_demo"] = int(demo.get("risks") or 0)
     except Exception as exc:
         logger.warning("主体演示数据写入跳过: %s", exc)
 
@@ -139,7 +143,24 @@ def migrate_legacy_data(db: Session) -> dict[str, int]:
             summary=e.summary,
             impact_analysis=e.impact_analysis,
             source_url=e.source_url,
+            source_name=e.source_title,
+            published_at=e.published_at,
             related_company=e.related_company,
+            provenance=(
+                "demo"
+                if "example.com" in (e.source_url or "").lower()
+                else "degraded"
+                if '"_degraded": true' in (e.structured_json or "").lower()
+                else "real"
+            ),
+            relevance="direct",
+            news_importance=e.risk_level,
+            sentiment_direction="unknown",
+            credit_impact="none",
+            review_status=(
+                "rejected" if "example.com" in (e.source_url or "").lower() else "pending"
+            ),
+            rule_version="entity-signal-v1",
             structured_json=e.structured_json,
             legacy_entry_id=e.id,
             created_at=e.created_at,
@@ -180,4 +201,5 @@ def migrate_legacy_data(db: Session) -> dict[str, int]:
     if any(stats[k] for k in ("news_articles", "entity_risks", "industry_reports", "entities_seeded")):
         db.commit()
         logger.info("切片2回填完成: %s", stats)
+    stats["warning_levels_rebuilt"] = rebuild_entity_warning_levels(db)
     return stats

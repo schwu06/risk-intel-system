@@ -17,7 +17,7 @@
 
 {% block page_sidebar %}
 <aside class="sidebar page-rail" data-modules="{{ module_codes_csv }}">
-  <h2>授信等级分布</h2>
+  <h2>舆情预警分布</h2>
   <ul class="stat-list">
     {% for level in credit_levels %}
     <li>
@@ -65,10 +65,10 @@
       {% if not selected_entity %}disabled{% endif %}
       data-entity-id="{{ selected_entity.id if selected_entity else '' }}"
       data-report-date="{{ report_date }}"
-    >导出 Word</button>
+    >导出公开信息简报</button>
     <button type="button" class="btn secondary" id="btn-run-pipeline">采集近24小时资讯</button>
   </div>
-  <p class="hint" id="pipeline-msg">异步采集近 24 小时主体相关资讯；失败时保留上次结果，必要时回填演示样本。</p>
+  <p class="hint" id="pipeline-msg">异步采集近 24 小时主体专属公开信源；空结果不会生成演示数据。</p>
   <p class="hint" id="export-msg" hidden></p>
 </aside>
 {% endblock %}
@@ -92,13 +92,33 @@
           </span>
         </div>
       </div>
-      <p class="entity-header-hint">授信状态随风险事件递进调整：正常 → 关注 → 预警 → 高风险</p>
+      <p class="entity-header-hint">公开信息舆情预警：正常 → 关注 → 预警 → 高风险。本结果用于触发人工复核，不构成内部信用评级、授信审批意见或资产风险分类。</p>
     </header>
 
-    {# 授信更新与预警 #}
+    <section class="ea-panel" aria-labelledby="source-panel-title">
+      <div class="ea-panel-head">
+        <h2 id="source-panel-title">主体信息源</h2>
+        <span class="ea-panel-count">配置 {{ entity_sources|length }} 个 · 已采集 {{ observed_source_count }} 个独立来源</span>
+      </div>
+      {% if entity_sources %}
+      <ul class="entity-source-grid">
+        {% for src in entity_sources %}
+        <li class="entity-source-item">
+          <a href="{{ src.url }}" target="_blank" rel="noopener noreferrer">{{ src.label }}</a>
+          <span class="source-kind source-kind-{{ src.source_type }}">{{ {'official':'主体官方','regulatory':'监管','exchange':'交易所披露','industry':'行业背景','media':'跨媒体检索'}.get(src.source_type, src.source_type) }}</span>
+          {% if src.relation == 'contextual' %}<span class="source-kind contextual">背景信号</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="ea-empty"><p class="ea-empty-title">该主体尚未配置信息源</p></div>
+      {% endif %}
+    </section>
+
+    {# 公开信息预警变化 #}
     <section class="ea-panel" aria-labelledby="credit-panel-title">
       <div class="ea-panel-head">
-        <h2 id="credit-panel-title">授信更新与预警</h2>
+        <h2 id="credit-panel-title">舆情预警变化</h2>
         {% if credit_logs %}
         <span class="ea-panel-count">{{ credit_logs|length }} 条记录</span>
         {% endif %}
@@ -121,7 +141,7 @@
             {% if log.reason %}
             <p class="credit-reason">{{ log.reason }}</p>
             {% else %}
-            <p class="credit-reason muted">未注明调级原因</p>
+            <p class="credit-reason muted">未注明变化原因</p>
             {% endif %}
           </div>
         </li>
@@ -135,8 +155,8 @@
             <circle cx="12" cy="12" r="3.5" stroke="currentColor" stroke-width="1.4"/>
           </svg>
         </div>
-        <p class="ea-empty-title">暂无授信变更记录</p>
-        <p class="ea-empty-desc">风险事件入库后，将按「正常 → 关注 → 预警 → 高风险」自动递进调整，并在此展示调级原因。</p>
+        <p class="ea-empty-title">暂无预警灯号变化</p>
+        <p class="ea-empty-desc">只有主体直接相关、负面且可信的信用风险信号会影响灯号；演示、降级和行业背景条目均被排除。</p>
       </div>
       {% endif %}
     </section>
@@ -144,7 +164,8 @@
     {# 多维风险事件 #}
     <section class="ea-panel" aria-labelledby="risk-panel-title">
       <div class="ea-panel-head">
-        <h2 id="risk-panel-title">多维风险事件{% if risks %}（{{ risks|length }}）{% endif %}</h2>
+        <h2 id="risk-panel-title">{{ report_date }} 公开信息事件{% if risks %}（{{ risks|length }}）{% endif %}</h2>
+        {% if unverified_time_count %}<span class="ea-panel-count">{{ unverified_time_count }} 条发布时间待核验</span>{% endif %}
       </div>
 
       <div class="risk-tabs" role="tablist" aria-label="风险事件分类">
@@ -163,15 +184,19 @@
           data-category="{{ e.risk_category or '' }}"
         >
           <div class="risk-event-top">
-            <span class="risk-level-tag risk-tag-{{ e.risk_level }}">{{ e.risk_level }}</span>
+            <span class="risk-level-tag risk-tag-{{ e.risk_level }}">信号 {{ e.risk_level }}</span>
+            {% if e.news_importance %}<span class="risk-category-chip">重要度 {{ e.news_importance }}</span>{% endif %}
             {% if e.risk_category %}
             <span class="risk-category-chip">{{ e.risk_category }}</span>
             {% endif %}
-            <time class="risk-event-time">{{ e.report_date }}{% if e.created_at %} · {{ e.created_at }}{% endif %}</time>
+            {% if e.provenance == 'degraded' %}<span class="risk-provenance degraded">降级摘要</span>{% endif %}
+            {% if e.relevance == 'contextual' %}<span class="risk-provenance contextual">背景信息</span>{% endif %}
+            {% if not e.published_at %}<span class="risk-provenance unverified">时间待核验</span>{% endif %}
+            <time class="risk-event-time">{% if e.published_at %}源发布时间 {{ e.published_at }}{% else %}报告日 {{ e.report_date }}{% endif %}</time>
           </div>
           <h3 class="risk-event-title">{{ e.title }}</h3>
           {% if e.impact_analysis %}
-          <p class="risk-event-impact"><span class="impact-label">AI 风险影响</span>{{ e.impact_analysis }}</p>
+            <p class="risk-event-impact"><span class="impact-label">公开信息影响</span>{{ e.impact_analysis }}</p>
           {% elif e.summary %}
           <p class="risk-event-impact"><span class="impact-label">AI 风险影响</span>{{ e.summary }}</p>
           {% endif %}
@@ -180,7 +205,7 @@
           {% endif %}
           <footer class="risk-event-footer">
             {% if e.source_url %}
-            <a class="risk-event-source" href="{{ e.source_url }}" target="_blank" rel="noopener noreferrer">数据来源</a>
+            <a class="risk-event-source" href="{{ e.source_url }}" target="_blank" rel="noopener noreferrer">{{ e.source_name or '查看原始来源' }}</a>
             {% else %}
             <span class="risk-event-source muted">来源未标注</span>
             {% endif %}
@@ -203,8 +228,8 @@
             <path d="M8 9h8M8 12h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
           </svg>
         </div>
-        <p class="ea-empty-title">该主体暂无风险事件</p>
-        <p class="ea-empty-desc">可点击左侧「采集近24小时资讯」补充近期资讯。</p>
+        <p class="ea-empty-title">该主体在 {{ report_date }} 暂无已核验来源事件</p>
+        <p class="ea-empty-desc">{% if recent_risks_count %}其它日期共有 {{ recent_risks_count }} 条真实/降级记录，请切换报告日期查看。{% else %}已配置 {{ entity_sources|length }} 个公开信息源，可点击左侧「采集近24小时资讯」获取真实结果。{% endif %}</p>
       </div>
       {% endif %}
     </section>
@@ -212,7 +237,7 @@
     {% else %}
     <div class="ea-empty ea-empty-page" role="status">
       <p class="ea-empty-title">暂无监控主体</p>
-      <p class="ea-empty-desc">系统启动时将写入默认主体（Godiva / 普洛斯等）。写入后可在左侧栏切换查看评估详情。</p>
+      <p class="ea-empty-desc">系统启动时会从主体目录写入默认监控清单。</p>
     </div>
     {% endif %}
   </section>
@@ -228,7 +253,7 @@
   window.ENTITY_ID = {% if selected_entity %}{{ selected_entity.id }}{% else %}null{% endif %};
   window.ENTITY_NAME = {% if selected_entity %}{{ (selected_entity.display_name or selected_entity.name)|tojson }}{% else %}null{% endif %};
 </script>
-<script src="/static/js/entity_assessment.js?v=20260805-1"></script>
+<script src="/static/js/entity_assessment.js?v=20260807-1"></script>
 <script>
   (function initRiskTabs() {
     var tabs = document.querySelectorAll(".risk-tab");

@@ -18,7 +18,7 @@ python scripts\init_db.py
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-在 `.env` 中填写 `MITA_API_KEY`、`DEEPSEEK_API_KEY`。
+在 `.env` 中填写 `MITA_API_KEY`、`DEEPSEEK_API_KEY`；主体评估的结构化分析还需 `GEMINI_API_KEY`。
 
 ---
 
@@ -40,15 +40,15 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | 页面 | 做什么 |
 |------|--------|
 | 新闻日报 | 按模块 B/C/D 汇总近 24 小时资讯，可导出 Word |
-| 主体评估 | 监控企业风险与授信变化（模块 A），可导出 Word |
+| 主体评估 | 按主体汇总可追溯公开信息与舆情预警灯号（模块 A），可导出 Word |
 | 深度研报 | 报告草稿、专属数据源、版本派生、在线预览与 Word 导出 |
 | 国际评级 | 发行体评级监测（`GET/POST /api/v1/intl-ratings` + 流水线），可导出 Excel |
 
-授信等级：正常 → 关注 → 预警 → 高风险。
+主体评估灯号：正常 → 关注 → 预警 → 高风险。灯号只用于公开信息复核触发，不是内部信用评级或授信审批结论。
 
 业务模块：`A` 主体评估 · `B` 中东 · `C` 日本企业 · `D` 宏观市场。
 
-采集失败时尽量保留上次结果；主体评估无真实结果时可能回填演示样本。
+采集失败时尽量保留上次结果；主体评估默认不会因空结果生成演示样本。仅在显式设置 `ENTITY_DEMO_MODE=true` 或执行 `python scripts/init_db.py --demo` 时写入演示数据，且演示数据不参与灯号计算和正式导出。
 
 ### 深度研报工作流
 
@@ -70,7 +70,7 @@ PDF 支持原生文本提取和扫描页 OCR。网址以 `.pdf` 结尾、响应�
 
 ## 数据源
 
-配置文件：[`config/rss_feeds.yaml`](config/rss_feeds.yaml)（改后可 `POST /api/v1/pipeline/rss-config/reload` 或重启）。
+通用 RSS 配置：[`config/rss_feeds.yaml`](config/rss_feeds.yaml)（改后可 `POST /api/v1/pipeline/rss-config/reload` 或重启）。主体清单及其专属来源配置：[`config/entity_targets.yaml`](config/entity_targets.yaml)（改后重启）。
 
 ### 采集通道
 
@@ -80,8 +80,9 @@ PDF 支持原生文本提取和扫描页 OCR。网址以 `.pdf` 结尾、响应�
 | Google News RSS | YAML `queries`；默认中国版，模块 C 为日本版 `ja/JP` |
 | 直连 RSS | YAML `feeds` 固定 Feed |
 | TDnet | 模块 C：適時開示列表 + PDF 正文 |
+| 主体专属来源 | 模块 A：主体官网、监管、交易所披露、行业背景和跨媒体检索 |
 | 秘塔搜索 | 主源候选不足或主源故障时补充 |
-| DeepSeek | 结构化中文资讯字段 |
+| Gemini / DeepSeek | 主体评估使用 Gemini；其它资讯模块使用 DeepSeek 整理字段 |
 
 完整查询词见 YAML。域名规则见 `app/services/domain_rules.py`。
 
@@ -94,6 +95,9 @@ PDF 支持原生文本提取和扫描页 OCR。网址以 `.pdf` 结尾、响应�
 | `NEWS_WINDOW_HOURS` | 资讯时间窗口（小时） | `24` |
 | `PIPELINE_ASYNC_DEFAULT` | 是否默认异步采集 | `true` |
 | `RSS_CONFIG_PATH` | 订阅与检索配置 | `config/rss_feeds.yaml` |
+| `ENTITY_TARGETS_CONFIG_PATH` | 主体清单与专属信源目录 | `config/entity_targets.yaml` |
+| `ENTITY_DEMO_MODE` | 是否显式启用主体演示数据 | `false` |
+| `ENTITY_WARNING_LOOKBACK_DAYS` | 舆情预警信号观察期（天） | `90` |
 | `DAILY_PIPELINE_CRON` | 定时采集 | `0 6 * * *` |
 | `INDUSTRY_REPORT_GENERATION_MODE` | 深度研报模式：`legacy` 或 `grounded` | `legacy` |
 | `GROUNDED_REPORT_REQUIRE_APPROVAL` | grounded 候选是否需要人工晋升 | `true` |
@@ -107,7 +111,7 @@ PDF 支持原生文本提取和扫描页 OCR。网址以 `.pdf` 结尾、响应�
 
 ```
 app/           页面、接口、采集与分析
-config/        rss_feeds.yaml、direct_sites.yaml、intl_ratings.yaml
+config/        rss_feeds.yaml、entity_targets.yaml、direct_sites.yaml、intl_ratings.yaml
 intl_ratings/  界面四：发行体评级监测流水线（CLI）
 data/intl_ratings/  发行体清单 input / 报表 output
 scripts/       init_db.py 等
@@ -123,7 +127,7 @@ DATA_SOURCES.md  各页功能与数据源说明
 | 表 | 存什么 |
 |------|--------|
 | `news_articles` | 日报资讯 |
-| `target_entities` / `entity_risks` / `credit_updates` | 主体与授信 |
+| `target_entities` / `entity_risks` / `credit_updates` | 监控主体、可追溯公开信息事件与预警灯号变化 |
 | `industry_reports` | 深度研报 |
 | `industry_data_sources` | 按 `report_id` 隔离的研报专属数据源 |
 | `module_data_sources` | 侧栏权威数据源 |
@@ -147,9 +151,11 @@ DATA_SOURCES.md  各页功能与数据源说明
 | GET | `/api/v1/industry/export/docx/{id}` | 导出研报 Word |
 | GET | `/api/v1/export/docx` | 导出日报 |
 | GET | `/api/v1/entities/{id}/export/docx` | 导出主体评估 |
+| GET | `/api/v1/entities/{id}/source-catalog` | 查看主体配置的信息源目录 |
+| GET | `/api/v1/entities/{id}/risks` | 查看主体事件；默认排除演示数据 |
 | GET | `/api/v1/intl-ratings` | 国际评级快照 |
 
-详细变更见 [`CHANGELOG.md`](CHANGELOG.md)。
+本次主体评估完善记录见 [`changelog_20260807100746.zh.md`](changelog/changelog_20260807100746.zh.md)。
 
 ---
 

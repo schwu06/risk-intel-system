@@ -341,7 +341,17 @@ class EntityRiskOut(BaseModel):
     summary: str
     impact_analysis: Optional[str] = None
     source_url: Optional[str] = None
+    source_name: Optional[str] = None
+    published_at: Optional[datetime] = None
     related_company: Optional[str] = None
+    provenance: str = "real"
+    relevance: str = "unknown"
+    news_importance: Optional[str] = None
+    sentiment_direction: str = "unknown"
+    credit_impact: str = "none"
+    confidence: Optional[float] = None
+    review_status: str = "pending"
+    rule_version: str = "entity-signal-v1"
     created_at: datetime
 
     model_config = {"from_attributes": True}

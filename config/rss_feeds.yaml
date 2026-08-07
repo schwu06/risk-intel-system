@@ -18,19 +18,8 @@ module_defaults:
     google_ceid: "JP:ja"
 
 queries:
-  A:
-    - label: Godiva 动态
-      query: "Godiva chocolate OR Godiva Chocolatier news OR lawsuit OR recall"
-      priority: 20
-    - label: Godiva 日本
-      query: "ゴディバ OR Godiva Japan OR Godiva 日本 ニュース OR 店舗 OR 業績"
-      priority: 18
-    - label: 可可供应链
-      query: "cocoa price OR Côte d'Ivoire cocoa OR Ghana COCOBOD OR ICCO cocoa"
-      priority: 16
-    - label: 普洛斯 GLP
-      query: "普洛斯 OR GLP logistics property 新闻 OR 动态"
-      priority: 20
+  # A 的主体专属查询集中维护在 config/entity_targets.yaml，避免全量查询跨主体混入。
+  A: []
   B:
     - label: 中东地缘
       query: "Middle East news OR geopolitics OR Gaza OR Iran OR Israel"
@@ -102,7 +91,7 @@ feeds:
     enabled: false
   - label: Reuters Business
     url: "https://feeds.reuters.com/reuters/businessNews"
-    modules: [C, D, A]
+    modules: [C, D]
     type: direct
     priority: 30
     enabled: true
@@ -113,6 +102,9 @@ feeds:
     type: direct
     priority: 32
     enabled: true
+    entity_key: Godiva
+    relation: contextual
+    source_type: industry
   # 科特迪瓦可可产业新闻（官方 CCC 站点证书/鉴权异常时的可用替代 RSS）
   - label: Cacao.ci
     url: "https://cacao.ci/feed/"
@@ -120,6 +112,9 @@ feeds:
     type: direct
     priority: 28
     enabled: true
+    entity_key: Godiva
+    relation: contextual
+    source_type: industry
   - label: BBC Middle East
     url: "http://feeds.bbci.co.uk/news/world/middle_east/rss.xml"
     modules: [B, D]

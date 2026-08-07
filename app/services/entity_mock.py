@@ -1,4 +1,4 @@
-"""主体评估 Mock / 演示数据：未接真实检索时保证页面与导出可演示。"""
+"""主体评估显式演示数据；正常采集不会自动调用。"""
 
 from __future__ import annotations
 
@@ -8,10 +8,11 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.database.models import CreditUpdate, EntityRisk, TargetEntity
-from app.services.entity_credit import apply_credit_update, refresh_entity_credit, seed_default_entities
+from app.services.entity_credit import refresh_entity_credit, seed_default_entities
+from app.timeutil import tokyo_today
 
 
-# 风险事件风险等级：低/中/高/极高 → 映射授信 正常/关注/预警/高风险
+# 这些等级仅用于演示事件外观；演示条目的信用信号固定为 none。
 DEMO_RISKS: dict[str, list[dict[str, Any]]] = {
     "Godiva": [
         {
@@ -105,7 +106,7 @@ def _entity_key(entity: TargetEntity) -> Optional[str]:
 
 
 def seed_entity_demo_data(db: Session, *, force: bool = False) -> dict[str, int]:
-    """为默认主体写入演示风险事件与授信日志（已有真实数据时可跳过）。"""
+    """为兼容主体显式写入演示事件；force 也不会删除真实数据。"""
     seed_default_entities(db)
     created_risks = 0
     created_credits = 0
@@ -115,21 +116,27 @@ def seed_entity_demo_data(db: Session, *, force: bool = False) -> dict[str, int]
         .filter(TargetEntity.monitor_status == "active")
         .all()
     )
-    today = date.today()
+    today = tokyo_today()
 
     for ent in entities:
         key = _entity_key(ent)
         if not key:
             continue
-        existing = db.query(EntityRisk).filter(EntityRisk.entity_id == ent.id).count()
-        if existing and not force:
+        demo_ids = [
+            row_id
+            for (row_id,) in db.query(EntityRisk.id).filter(
+                EntityRisk.entity_id == ent.id,
+                EntityRisk.provenance == "demo",
+            )
+        ]
+        if demo_ids and not force:
             continue
 
-        if force and existing:
-            db.query(CreditUpdate).filter(CreditUpdate.entity_id == ent.id).delete(
-                synchronize_session=False
-            )
-            db.query(EntityRisk).filter(EntityRisk.entity_id == ent.id).delete(
+        if force and demo_ids:
+            db.query(CreditUpdate).filter(
+                CreditUpdate.trigger_risk_id.in_(demo_ids)
+            ).delete(synchronize_session=False)
+            db.query(EntityRisk).filter(EntityRisk.id.in_(demo_ids)).delete(
                 synchronize_session=False
             )
 
@@ -144,6 +151,14 @@ def seed_entity_demo_data(db: Session, *, force: bool = False) -> dict[str, int]
                 summary=item["summary"],
                 impact_analysis=item["impact_analysis"],
                 source_url=item.get("source_url"),
+                source_name="演示数据",
+                provenance="demo",
+                relevance="direct",
+                news_importance=item["risk_level"],
+                sentiment_direction="unknown",
+                credit_impact="none",
+                review_status="rejected",
+                rule_version="entity-signal-v1",
                 related_company=ent.display_name or ent.name,
                 structured_json=None,
                 created_at=datetime.utcnow() - timedelta(days=int(item.get("days_ago") or 0)),
@@ -154,7 +169,8 @@ def seed_entity_demo_data(db: Session, *, force: bool = False) -> dict[str, int]
         log = refresh_entity_credit(
             db,
             ent,
-            reason="演示数据初始化：按已入库风险事件重估授信等级",
+            reason="演示数据初始化：演示条目不参与舆情预警计算",
+            force=True,
         )
         if log:
             created_credits += 1
@@ -165,7 +181,7 @@ def seed_entity_demo_data(db: Session, *, force: bool = False) -> dict[str, int]
                     entity_id=ent.id,
                     previous_level="正常",
                     new_level=ent.credit_level or "正常",
-                    reason="演示：完成主体授信基线评估",
+                    reason="演示：完成主体公开信息预警基线展示",
                 )
             )
             created_credits += 1
@@ -180,7 +196,7 @@ def refresh_entity_demo_for_collect(
     entity_id: int,
     report_date: date,
 ) -> int:
-    """采集无结果时的降级：为指定主体写入/刷新当日 Mock 资讯并重估授信。"""
+    """仅在显式演示模式下写入/刷新当日样本，不覆盖真实事件。"""
     ent = db.query(TargetEntity).filter(TargetEntity.id == entity_id).first()
     if not ent:
         return 0
@@ -188,11 +204,15 @@ def refresh_entity_demo_for_collect(
     if not key:
         return 0
 
-    # 清除该主体当日旧 mock/采集结果，写入最新演示条目
+    # 只清除该主体当日旧演示条目，真实/人工/降级事件必须保留。
     old_ids = [
         r[0]
         for r in db.query(EntityRisk.id)
-        .filter(EntityRisk.entity_id == entity_id, EntityRisk.report_date == report_date)
+        .filter(
+            EntityRisk.entity_id == entity_id,
+            EntityRisk.report_date == report_date,
+            EntityRisk.provenance == "demo",
+        )
         .all()
     ]
     if old_ids:
@@ -213,6 +233,14 @@ def refresh_entity_demo_for_collect(
             summary=item["summary"],
             impact_analysis=item["impact_analysis"],
             source_url=item.get("source_url"),
+            source_name="演示数据",
+            provenance="demo",
+            relevance="direct",
+            news_importance=item["risk_level"],
+            sentiment_direction="unknown",
+            credit_impact="none",
+            review_status="rejected",
+            rule_version="entity-signal-v1",
             related_company=ent.display_name or ent.name,
         )
         db.add(risk)
@@ -221,7 +249,8 @@ def refresh_entity_demo_for_collect(
     refresh_entity_credit(
         db,
         ent,
-        reason="近24小时采集（演示降级）完成，按最新风险事件重估授信",
+        reason="演示样本已刷新；演示条目不参与舆情预警计算",
+        force=True,
     )
     db.commit()
     return saved

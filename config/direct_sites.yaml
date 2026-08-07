@@ -2,7 +2,7 @@
 #
 # 说明：
 # - 新浪财经 7×24：专用采集器 sina_724_collector（模块 B/D）
-# - Godiva 供应链/品牌无 RSS 源：专用采集器 godiva_source_collector（模块 A）
+# - 选中 Godiva 时的供应链/品牌背景源：专用采集器 godiva_source_collector（模块 A）
 #   含 COCOBOD / ICCO / 欧盟乳制品·糖观测站 / 日本百货店协会销售额
 # - 其它无 RSS 站点可在此用 CSS 选择器配置：
 #   list_url / modules / item_selector / title_selector / link_selector

@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     pipeline_collect_max_items: int = 80
     rss_config_path: str = "config/rss_feeds.yaml"
     direct_sites_config_path: str = "config/direct_sites.yaml"
+    entity_targets_config_path: str = "config/entity_targets.yaml"
+    # 演示数据必须显式开启；正常运行不再因空结果写入 Mock。
+    entity_demo_mode: bool = False
+    # 舆情预警仅考虑观察期内的有效负面信用信号。
+    entity_warning_lookback_days: int = 90
 
 
 @lru_cache
@@ -140,7 +145,18 @@ def modules_for_page(page_key: str) -> dict[str, str]:
     codes = PAGE_MODULES.get(page_key, ())
     return {c: MODULE_CODES[c] for c in codes if c in MODULE_CODES}
 
-MODULE_A_TARGETS = ["Godiva", "普洛斯"]
+MODULE_A_TARGETS = [
+    "Godiva",
+    "普洛斯",
+    "三菱商事",
+    "三井物産",
+    "伊藤忠商事",
+    "住友商事",
+    "丸紅",
+    "デンソー",
+    "日本郵船",
+    "大和証券",
+]
 MODULE_A_CATEGORIES = [
     "司法与行政监管",
     "金融与经营数据",
@@ -203,11 +219,11 @@ MODULE_E_TEMPLATES = [
 
 RISK_LEVELS = ["低", "中", "高", "极高"]
 
-# 授信风险等级（递进，避免「预警」与「高风险」语义重叠）
+# 兼容现有数据库字段的公开信息预警灯号。
 CREDIT_LEVELS = ["正常", "关注", "预警", "高风险"]
 CREDIT_LEVEL_ORDER = {"正常": 1, "关注": 2, "预警": 3, "高风险": 4}
 
-# 事件风险等级 → 授信建议等级
+# 仅保留给旧调用兼容；新主体规则使用独立的 credit_impact 字段。
 RISK_TO_CREDIT = {
     "低": "正常",
     "中": "关注",
@@ -215,23 +231,7 @@ RISK_TO_CREDIT = {
     "极高": "高风险",
 }
 
-# 默认监控主体（主体评估页种子数据）
-DEFAULT_TARGET_ENTITIES = [
-    {
-        "name": "Godiva",
-        "display_name": "歌帝梵 Godiva",
-        "aliases": "歌帝梵,Godiva Chocolatier",
-        "industry": "消费品 / 巧克力",
-        "region": "全球",
-    },
-    {
-        "name": "普洛斯",
-        "display_name": "普洛斯 GLP",
-        "aliases": "GLP,Global Logistic Properties,普洛斯",
-        "industry": "物流地产",
-        "region": "亚太 / 全球",
-    },
-]
+# 默认监控主体与主体专属信源统一维护在 config/entity_targets.yaml。
 
 STRUCTURED_FIELDS_CN = [
     "标题",
@@ -243,6 +243,12 @@ STRUCTURED_FIELDS_CN = [
     "来源链接",
     "来源名称",
     "发布时间",
+    # 主体评估专用；其它模块可留空。
+    "资讯重要度",
+    "影响方向",
+    "信用风险信号",
+    "主体相关性",
+    "置信度",
 ]
 
 
@@ -265,7 +271,7 @@ def module_search_queries(
     else:
         recency = "最新 过去24小时 OR today OR 速报"
     if module == "A":
-        targets = entity_targets or ["Godiva", "普洛斯 GLP"]
+        targets = entity_targets or MODULE_A_TARGETS
         for target in targets:
             for cat in MODULE_A_CATEGORIES:
                 queries.append(

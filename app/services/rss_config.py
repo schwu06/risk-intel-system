@@ -24,6 +24,10 @@ class RssQuerySpec:
     google_hl: Optional[str] = None
     google_gl: Optional[str] = None
     google_ceid: Optional[str] = None
+    entity_key: Optional[str] = None
+    relation: str = "unscoped"
+    source_type: str = "media"
+    source_url: Optional[str] = None
 
 
 @dataclass
@@ -38,6 +42,9 @@ class RssFeedSpec:
     google_hl: Optional[str] = None
     google_gl: Optional[str] = None
     google_ceid: Optional[str] = None
+    entity_key: Optional[str] = None
+    relation: str = "unscoped"
+    source_type: str = "media"
 
 
 @dataclass
@@ -105,6 +112,10 @@ def _parse_config(data: dict[str, Any]) -> RssConfig:
                     google_hl=str(row["google_hl"]) if row.get("google_hl") else None,
                     google_gl=str(row["google_gl"]) if row.get("google_gl") else None,
                     google_ceid=str(row["google_ceid"]) if row.get("google_ceid") else None,
+                    entity_key=str(row["entity_key"]).strip() if row.get("entity_key") else None,
+                    relation=str(row.get("relation") or "unscoped").lower(),
+                    source_type=str(row.get("source_type") or "media").lower(),
+                    source_url=str(row["source_url"]).strip() if row.get("source_url") else None,
                 )
             )
         cfg.queries[str(code).upper()] = specs
@@ -126,6 +137,9 @@ def _parse_config(data: dict[str, Any]) -> RssConfig:
                 google_hl=str(row["google_hl"]) if row.get("google_hl") else None,
                 google_gl=str(row["google_gl"]) if row.get("google_gl") else None,
                 google_ceid=str(row["google_ceid"]) if row.get("google_ceid") else None,
+                entity_key=str(row["entity_key"]).strip() if row.get("entity_key") else None,
+                relation=str(row.get("relation") or "unscoped").lower(),
+                source_type=str(row.get("source_type") or "media").lower(),
             )
         )
     return cfg

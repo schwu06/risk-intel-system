@@ -115,7 +115,17 @@ CREATE TABLE IF NOT EXISTS entity_risks (
     summary TEXT NOT NULL,
     impact_analysis TEXT,
     source_url VARCHAR(1024),
+    source_name VARCHAR(256),
+    published_at DATETIME,
     related_company VARCHAR(256),
+    provenance VARCHAR(16) NOT NULL DEFAULT 'real',
+    relevance VARCHAR(16) NOT NULL DEFAULT 'unknown',
+    news_importance VARCHAR(16),
+    sentiment_direction VARCHAR(16) NOT NULL DEFAULT 'unknown',
+    credit_impact VARCHAR(16) NOT NULL DEFAULT 'none',
+    confidence FLOAT,
+    review_status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    rule_version VARCHAR(32) NOT NULL DEFAULT 'entity-signal-v1',
     structured_json TEXT,
     legacy_entry_id INTEGER REFERENCES daily_risk_entries(id),
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -337,6 +347,9 @@ CREATE TABLE IF NOT EXISTS industry_grounded_report_runs (
 CREATE INDEX IF NOT EXISTS idx_news_report_date ON news_articles(report_date);
 CREATE INDEX IF NOT EXISTS idx_news_module ON news_articles(module_code);
 CREATE INDEX IF NOT EXISTS idx_entity_risks_entity ON entity_risks(entity_id);
+CREATE INDEX IF NOT EXISTS ix_entity_risks_published_at ON entity_risks(published_at);
+CREATE INDEX IF NOT EXISTS ix_entity_risks_provenance ON entity_risks(provenance);
+CREATE INDEX IF NOT EXISTS ix_entity_risks_review_status ON entity_risks(review_status);
 CREATE INDEX IF NOT EXISTS idx_credit_updates_entity ON credit_updates(entity_id);
 CREATE INDEX IF NOT EXISTS idx_industry_reports_name ON industry_reports(industry_name);
 CREATE INDEX IF NOT EXISTS ix_industry_reports_generation_mode ON industry_reports(generation_mode);

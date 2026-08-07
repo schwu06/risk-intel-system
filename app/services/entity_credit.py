@@ -1,7 +1,8 @@
-"""主体授信等级推断与变更日志。"""
+"""主体公开信息预警灯号推断与变化日志。"""
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -9,18 +10,54 @@ from sqlalchemy.orm import Session
 from app.config import (
     CREDIT_LEVEL_ORDER,
     CREDIT_LEVELS,
-    DEFAULT_TARGET_ENTITIES,
     RISK_TO_CREDIT,
+    get_settings,
 )
 from app.database.models import CreditUpdate, EntityRisk, TargetEntity
+from app.services.entity_catalog import configured_entity_catalog
+from app.timeutil import tokyo_today
+
+
+CREDIT_IMPACT_TO_WARNING = {
+    "none": "正常",
+    "low": "关注",
+    "medium": "预警",
+    "high": "高风险",
+    "critical": "高风险",
+}
 
 
 def seed_default_entities(db: Session) -> int:
     """写入默认监控主体，已存在则跳过。返回新增数量。"""
     created = 0
-    for item in DEFAULT_TARGET_ENTITIES:
+    profiles = configured_entity_catalog().profiles
+    items = [profile.as_seed() for profile in profiles]
+    if not items:
+        # 配置文件异常时至少保留旧版两个核心主体，不因启动而清空清单。
+        items = [
+            {
+                "name": "Godiva",
+                "display_name": "歌帝梵 Godiva",
+                "aliases": "歌帝梵,Godiva Chocolatier",
+                "industry": "消费品 / 巧克力",
+                "region": "全球",
+            },
+            {
+                "name": "普洛斯",
+                "display_name": "普洛斯 GLP",
+                "aliases": "GLP,Global Logistic Properties,普洛斯",
+                "industry": "物流地产",
+                "region": "亚太 / 全球",
+            },
+        ]
+    for item in items:
         exists = db.query(TargetEntity).filter(TargetEntity.name == item["name"]).first()
         if exists:
+            # 目录是默认主体元数据的唯一来源；不覆盖运行状态和当前预警灯号。
+            exists.display_name = item.get("display_name") or exists.display_name
+            exists.aliases = item.get("aliases") or exists.aliases
+            exists.industry = item.get("industry") or exists.industry
+            exists.region = item.get("region") or exists.region
             continue
         db.add(
             TargetEntity(
@@ -41,7 +78,7 @@ def seed_default_entities(db: Session) -> int:
 
 
 def _dedupe_glp_entity(db: Session) -> None:
-    """将独立 GLP 主体的风险/授信记录归并到「普洛斯」，并停用 GLP。"""
+    """将独立 GLP 主体的风险/预警记录归并到「普洛斯」，并停用 GLP。"""
     glp = db.query(TargetEntity).filter(TargetEntity.name == "GLP").first()
     if not glp:
         return
@@ -120,14 +157,43 @@ def credit_from_risk_level(risk_level: str) -> str:
 
 
 def suggested_credit_for_entity(db: Session, entity_id: int) -> str:
-    """按该主体全部风险事件中的最高事件等级推导授信建议。"""
-    risks = db.query(EntityRisk).filter(EntityRisk.entity_id == entity_id).all()
+    """按观察期内有效负面信用信号推导舆情预警灯号。
+
+    演示、降级、已驳回、上下文资讯和低置信度条目不会触发灯号。
+    该结果是公开信息预警，不是客户内部评级或授信审批结论。
+    """
+    lookback_days = max(
+        1, int(getattr(get_settings(), "entity_warning_lookback_days", 90) or 90)
+    )
+    cutoff = tokyo_today() - timedelta(days=lookback_days)
+    risks = (
+        db.query(EntityRisk)
+        .filter(EntityRisk.entity_id == entity_id, EntityRisk.report_date >= cutoff)
+        .all()
+    )
     if not risks:
         return "正常"
     best = "正常"
     best_rank = CREDIT_LEVEL_ORDER[best]
     for r in risks:
-        cand = credit_from_risk_level(r.risk_level)
+        if (r.provenance or "real") not in {"real", "manual"}:
+            continue
+        if (r.review_status or "pending") == "rejected":
+            continue
+        if (r.relevance or "unknown") != "direct":
+            continue
+        if (r.sentiment_direction or "unknown") != "negative":
+            continue
+        # 自动整理的真实来源必须给出达到门槛的置信度；缺失不能默认为可信。
+        if r.provenance == "real" and (
+            r.confidence is None or float(r.confidence) < 0.55
+        ):
+            continue
+        if r.provenance == "manual" and (
+            r.confidence is not None and float(r.confidence) < 0.55
+        ):
+            continue
+        cand = CREDIT_IMPACT_TO_WARNING.get((r.credit_impact or "none").lower(), "正常")
         rank = CREDIT_LEVEL_ORDER.get(cand, 0)
         if rank > best_rank:
             best = cand
@@ -145,7 +211,7 @@ def apply_credit_update(
     force: bool = False,
 ) -> Optional[CreditUpdate]:
     """
-    更新主体授信等级并写变更日志。
+    更新主体公开信息预警灯号并写变化日志。
     默认仅在等级上升时更新；force=True 时按建议等级同步（含下调）。
     """
     target = new_level or suggested_credit_for_entity(db, entity.id)
@@ -169,7 +235,7 @@ def apply_credit_update(
         entity_id=entity.id,
         previous_level=prev,
         new_level=target,
-        reason=reason or f"依据风险事件自动调整：{prev} → {target}",
+        reason=reason or f"依据公开信息信号调整灯号：{prev} → {target}",
         trigger_risk_id=trigger_risk_id,
     )
     db.add(log)
@@ -183,6 +249,7 @@ def refresh_entity_credit(
     *,
     trigger_risk: Optional[EntityRisk] = None,
     reason: str = "",
+    force: bool = False,
 ) -> Optional[CreditUpdate]:
     suggested = suggested_credit_for_entity(db, entity.id)
     return apply_credit_update(
@@ -191,9 +258,26 @@ def refresh_entity_credit(
         new_level=suggested,
         reason=reason
         or (
-            f"风险事件「{trigger_risk.title}」触发授信复核"
+            f"风险事件「{trigger_risk.title}」触发人工复核"
             if trigger_risk
-            else "风险事件集合变更后复核授信等级"
+            else "公开信息事件集合变更后复核预警灯号"
         ),
         trigger_risk_id=trigger_risk.id if trigger_risk else None,
+        force=force,
     )
+
+
+def rebuild_entity_warning_levels(db: Session) -> int:
+    """按新规则重算所有主体灯号；用于升级旧库并清除 Mock 导致的误预警。"""
+    changed = 0
+    for entity in db.query(TargetEntity).all():
+        if refresh_entity_credit(
+            db,
+            entity,
+            reason="主体舆情预警规则升级：仅采用观察期内有效负面信用信号",
+            force=True,
+        ):
+            changed += 1
+    if changed:
+        db.commit()
+    return changed

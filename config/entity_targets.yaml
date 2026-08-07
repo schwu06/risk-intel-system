@@ -1,0 +1,333 @@
+version: 1
+
+# 主体评估的默认监控清单与可追溯公开信源。
+# source_type: official | regulatory | exchange | industry | media
+# relation: direct（主体本身）| contextual（行业/供应链背景，不触发主体预警）
+entities:
+  - key: Godiva
+    display_name: 歌帝梵 Godiva
+    aliases: [Godiva Chocolatier, GODIVA, 歌帝梵]
+    industry: 消费品 / 巧克力
+    region: 全球
+    sources:
+      - label: Godiva Media Center
+        url: https://www.godiva.com/blogs/media
+        source_type: official
+        relation: direct
+        priority: 40
+        query: 'site:godiva.com/blogs/media (Godiva OR GODIVA) (press OR recall OR store OR partnership)'
+      - label: Yıldız Holding Newsroom
+        url: https://www.yildizholding.com.tr/en/press-room
+        source_type: official
+        relation: direct
+        priority: 34
+        query: 'site:yildizholding.com.tr (Godiva OR GODIVA) (news OR results OR debt OR strategy)'
+      - label: 美国 FDA 召回与安全警报
+        url: https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts
+        source_type: regulatory
+        relation: direct
+        priority: 38
+        query: 'site:fda.gov (Godiva OR "Godiva Chocolatier") (recall OR warning OR safety)'
+      - label: 国际可可组织 ICCO
+        url: https://www.icco.org/statistics/
+        source_type: industry
+        relation: contextual
+        priority: 24
+        query: 'site:icco.org cocoa (market report OR supply OR price)'
+      - label: 加纳可可局 COCOBOD
+        url: https://cocobod.gh/news/
+        source_type: industry
+        relation: contextual
+        priority: 22
+        query: 'site:cocobod.gh cocoa (supply OR crop OR financing OR disease)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 30
+        query: '(Godiva OR "Godiva Chocolatier" OR 歌帝梵) (earnings OR lawsuit OR recall OR debt OR store OR supply chain)'
+
+  - key: 普洛斯
+    display_name: 普洛斯 GLP
+    aliases: [GLP, GLP Pte. Ltd., Global Logistic Properties, 普洛斯]
+    industry: 物流地产 / 基础设施
+    region: 亚太 / 全球
+    sources:
+      - label: GLP Global Newsroom
+        url: https://www.glp.com/global/global_news
+        source_type: official
+        relation: direct
+        priority: 40
+        query: 'site:glp.com/global (GLP OR "GLP Pte") (press release OR results OR financing OR logistics)'
+      - label: 普洛斯中国新闻中心
+        url: https://www.glp.com.cn/
+        source_type: official
+        relation: direct
+        priority: 36
+        query: 'site:glp.com.cn 普洛斯 (公告 OR 融资 OR 物流园 OR 数据中心 OR 基金)'
+      - label: 新加坡交易所公司公告
+        url: https://www.sgx.com/securities/company-announcements
+        source_type: exchange
+        relation: direct
+        priority: 34
+        query: 'site:links.sgx.com "GLP Pte" (announcement OR notes OR results)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 30
+        query: '(普洛斯 OR "GLP Pte" OR "Global Logistic Properties") (debt OR refinancing OR bond OR logistics OR data center)'
+
+  - key: 三菱商事
+    display_name: 三菱商事 Mitsubishi Corporation
+    aliases: [Mitsubishi Corporation, 三菱商事株式会社]
+    industry: 综合商社
+    region: 日本 / 全球
+    stock_code: '8058'
+    sources:
+      - label: 三菱商事 News Release
+        url: https://www.mitsubishicorp.com/jp/en/news/release/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:mitsubishicorp.com (三菱商事 OR "Mitsubishi Corporation") (news OR IR OR results OR impairment)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (三菱商事 OR 8058)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(三菱商事 OR "Mitsubishi Corporation") (results OR investment OR loss OR lawsuit OR rating)'
+
+  - key: 三井物産
+    display_name: 三井物产 Mitsui & Co.
+    aliases: [三井物产, Mitsui & Co., MITSUI & CO.,LTD., 三井物産株式会社]
+    industry: 综合商社
+    region: 日本 / 全球
+    stock_code: '8031'
+    sources:
+      - label: 三井物产 IR News
+        url: https://www.mitsui.com/jp/en/ir/news/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:mitsui.com (三井物産 OR 三井物产 OR "Mitsui & Co") (release OR IR OR results OR impairment)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (三井物産 OR 8031)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(三井物産 OR 三井物产 OR "Mitsui & Co") (results OR investment OR loss OR lawsuit OR rating)'
+
+  - key: 伊藤忠商事
+    display_name: 伊藤忠商事 ITOCHU
+    aliases: [伊藤忠, ITOCHU, ITOCHU Corporation, 伊藤忠商事株式会社]
+    industry: 综合商社
+    region: 日本 / 全球
+    stock_code: '8001'
+    sources:
+      - label: 伊藤忠商事 News
+        url: https://www.itochu.co.jp/en/news/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:itochu.co.jp (伊藤忠 OR ITOCHU) (news OR IR OR results OR impairment)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (伊藤忠 OR 8001)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(伊藤忠 OR ITOCHU) (results OR investment OR loss OR lawsuit OR rating)'
+
+  - key: 住友商事
+    display_name: 住友商事 Sumitomo Corporation
+    aliases: [Sumitomo Corporation, 住友商事株式会社]
+    industry: 综合商社
+    region: 日本 / 全球
+    stock_code: '8053'
+    sources:
+      - label: 住友商事 News Release
+        url: https://www.sumitomocorp.com/en/jp/news/release
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:sumitomocorp.com (住友商事 OR "Sumitomo Corporation") (release OR IR OR results OR impairment)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (住友商事 OR 8053)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(住友商事 OR "Sumitomo Corporation") (results OR investment OR loss OR lawsuit OR rating)'
+
+  - key: 丸紅
+    display_name: 丸红 Marubeni
+    aliases: [丸红, Marubeni, Marubeni Corporation, 丸紅株式会社]
+    industry: 综合商社
+    region: 日本 / 全球
+    stock_code: '8002'
+    sources:
+      - label: 丸红 News Release
+        url: https://www.marubeni.com/en/news/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:marubeni.com (丸紅 OR 丸红 OR Marubeni) (news OR IR OR results OR impairment)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (丸紅 OR 8002)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(丸紅 OR 丸红 OR Marubeni) (results OR investment OR loss OR lawsuit OR rating)'
+
+  - key: デンソー
+    display_name: 电装 DENSO
+    aliases: [电装, DENSO, DENSO CORPORATION, 株式会社デンソー]
+    industry: 汽车零部件
+    region: 日本 / 全球
+    stock_code: '6902'
+    sources:
+      - label: DENSO Newsroom
+        url: https://www.denso.com/global/en/news/newsroom/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:denso.com/global (デンソー OR DENSO) (newsroom OR results OR recall OR quality)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (デンソー OR 6902)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(デンソー OR DENSO OR 电装) (results OR recall OR quality OR lawsuit OR rating)'
+
+  - key: 日本郵船
+    display_name: 日本邮船 NYK Line
+    aliases: [日本邮船, NYK, NYK Line, Nippon Yusen, 日本郵船株式会社]
+    industry: 航运 / 物流
+    region: 日本 / 全球
+    stock_code: '9101'
+    sources:
+      - label: NYK Line News
+        url: https://www.nyk.com/english/news/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:nyk.com (日本郵船 OR "NYK Line" OR "Nippon Yusen") (news OR IR OR results OR incident)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (日本郵船 OR 9101)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(日本郵船 OR 日本邮船 OR "NYK Line") (results OR shipping OR incident OR lawsuit OR rating)'
+
+  - key: 大和証券
+    display_name: 大和证券集团 Daiwa Securities
+    aliases: [大和证券, Daiwa Securities, Daiwa Securities Group, 大和証券グループ本社]
+    industry: 证券 / 金融服务
+    region: 日本 / 全球
+    stock_code: '8601'
+    sources:
+      - label: 大和证券集团 News Release
+        url: https://www.daiwa-grp.jp/english/press/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:daiwa-grp.jp (大和証券 OR "Daiwa Securities") (news OR IR OR results OR compliance)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (大和証券 OR 8601)'
+      - label: 日本金融厅
+        url: https://www.fsa.go.jp/news/
+        source_type: regulatory
+        relation: direct
+        priority: 38
+        query: 'site:fsa.go.jp 大和証券 (処分 OR 行政 OR 検査 OR 業務改善)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(大和証券 OR 大和证券 OR "Daiwa Securities") (results OR compliance OR loss OR lawsuit OR rating)'

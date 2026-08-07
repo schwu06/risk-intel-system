@@ -100,6 +100,7 @@ from app.services.citation_rendering import (
     citation_detail,
 )
 from app.services.domain_rules import seed_default_domains
+from app.services.entity_catalog import configured_entity_catalog
 from app.services.industry_analysis import IndustryAnalysisService, IndustryGenerationError
 from app.services.pipeline_runner import (
     get_current_job,
@@ -119,6 +120,36 @@ from app.services.intl_ratings_service import get_job, load_snapshot, start_refr
 from app.timeutil import tokyo_today
 
 router = APIRouter()
+
+
+def _non_demo_credit_updates(
+    db: Session, entity_id: int, *, limit: int
+) -> list[CreditUpdate]:
+    """Return public warning changes without entries caused by demo risks."""
+    rows = (
+        db.query(CreditUpdate)
+        .filter(CreditUpdate.entity_id == entity_id)
+        .order_by(CreditUpdate.created_at.desc())
+        .limit(max(limit * 3, limit))
+        .all()
+    )
+    demo_risk_ids = {
+        row_id
+        for (row_id,) in (
+            db.query(EntityRisk.id)
+            .filter(
+                EntityRisk.entity_id == entity_id,
+                EntityRisk.provenance == "demo",
+            )
+            .all()
+        )
+    }
+    return [
+        row
+        for row in rows
+        if "演示" not in (row.reason or "")
+        and (row.trigger_risk_id is None or row.trigger_risk_id not in demo_risk_ids)
+    ][:limit]
 
 
 def _source_mutation_payload(row, *, message: str) -> dict:
@@ -1071,7 +1102,7 @@ def export_industry_docx(report_id: int, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
-# 切片 2：资讯 / 主体 / 授信 API
+# 切片 2：资讯 / 主体公开信息预警 API
 # ---------------------------------------------------------------------------
 
 
@@ -1112,6 +1143,7 @@ def get_target_entity(entity_id: int, db: Session = Depends(get_db)):
 def list_entity_risks(
     entity_id: int,
     report_date: date | None = Query(None),
+    include_demo: bool = Query(False, description="是否包含显式演示数据"),
     db: Session = Depends(get_db),
 ):
     if not db.query(TargetEntity).filter(TargetEntity.id == entity_id).first():
@@ -1121,22 +1153,49 @@ def list_entity_risks(
         .filter(EntityRisk.entity_id == entity_id)
         .order_by(EntityRisk.report_date.desc(), EntityRisk.id.desc())
     )
+    if not include_demo:
+        q = q.filter(EntityRisk.provenance != "demo")
     if report_date:
         q = q.filter(EntityRisk.report_date == report_date)
     return q.limit(200).all()
 
 
+@router.get("/entities/{entity_id}/source-catalog")
+def get_entity_source_catalog(entity_id: int, db: Session = Depends(get_db)):
+    entity = db.query(TargetEntity).filter(TargetEntity.id == entity_id).first()
+    if not entity:
+        raise HTTPException(status_code=404, detail="主体不存在")
+    profile = configured_entity_catalog().find(
+        (entity.name, entity.display_name, entity.aliases)
+    )
+    return {
+        "entity_id": entity.id,
+        "entity_name": entity.display_name or entity.name,
+        "sources": [source.as_dict() for source in profile.sources if source.enabled]
+        if profile
+        else [],
+    }
+
+
 @router.get("/entities/{entity_id}/credit-updates", response_model=list[CreditUpdateOut])
-def list_credit_updates(entity_id: int, limit: int = 50, db: Session = Depends(get_db)):
+def list_credit_updates(
+    entity_id: int,
+    limit: int = 50,
+    include_demo: bool = Query(False, description="是否包含显式演示记录"),
+    db: Session = Depends(get_db),
+):
     if not db.query(TargetEntity).filter(TargetEntity.id == entity_id).first():
         raise HTTPException(status_code=404, detail="主体不存在")
-    return (
-        db.query(CreditUpdate)
-        .filter(CreditUpdate.entity_id == entity_id)
-        .order_by(CreditUpdate.created_at.desc())
-        .limit(min(limit, 200))
-        .all()
-    )
+    capped = min(max(limit, 1), 200)
+    if include_demo:
+        return (
+            db.query(CreditUpdate)
+            .filter(CreditUpdate.entity_id == entity_id)
+            .order_by(CreditUpdate.created_at.desc())
+            .limit(capped)
+            .all()
+        )
+    return _non_demo_credit_updates(db, entity_id, limit=capped)
 
 
 @router.get("/entities/{entity_id}/export/docx")
@@ -1145,28 +1204,26 @@ def export_entity_assessment_docx(
     report_date: date | None = Query(None, description="评估日期，缺省为今天"),
     db: Session = Depends(get_db),
 ):
-    """导出当前主体的《企业主体风险评估简报》。"""
+    """导出当前主体指定报告日的《企业公开信息风险监测简报》。"""
     entity = db.query(TargetEntity).filter(TargetEntity.id == entity_id).first()
     if not entity:
         raise HTTPException(status_code=404, detail="主体不存在")
-    rd = report_date or date.today()
+    rd = report_date or tokyo_today()
     risks = (
         db.query(EntityRisk)
-        .filter(EntityRisk.entity_id == entity_id)
+        .filter(
+            EntityRisk.entity_id == entity_id,
+            EntityRisk.report_date == rd,
+            EntityRisk.provenance != "demo",
+        )
         .order_by(EntityRisk.report_date.desc(), EntityRisk.id.desc())
         .limit(100)
         .all()
     )
-    credit_logs = (
-        db.query(CreditUpdate)
-        .filter(CreditUpdate.entity_id == entity_id)
-        .order_by(CreditUpdate.created_at.desc())
-        .limit(50)
-        .all()
-    )
+    credit_logs = _non_demo_credit_updates(db, entity_id, limit=50)
     display = entity.display_name or entity.name
     safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in display).strip() or "entity"
-    filename = f"企业主体风险评估简报_{safe_name}_{rd.isoformat()}.docx"
+    filename = f"企业公开信息风险监测简报_{safe_name}_{rd.isoformat()}.docx"
     out_path = Path("data/exports") / filename
     export_entity_assessment_to_path(
         entity,
