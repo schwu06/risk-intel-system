@@ -37,8 +37,8 @@
       {% for level, count in stats.items() %}<span class="level level-{{ level }}">{{ level }} <b>{{ count }}</b></span>{% endfor %}
     </div>
     <div class="daily-sidebar-actions">
-      <a class="daily-export" href="/api/v1/export/pdf?report_date={{ report_date }}&module_codes={{ module_codes_csv }}&window_hours={{ window_hours }}">导出 PDF</a>
-      <button type="button" class="daily-refresh" id="btn-run-pipeline">刷新</button>
+      <a class="daily-export sidebar-action-primary" href="/api/v1/export/pdf?report_date={{ report_date }}&module_codes={{ module_codes_csv }}&window_hours={{ window_hours }}">导出 PDF</a>
+      <button type="button" class="daily-refresh sidebar-action-secondary" id="btn-run-pipeline">刷新资讯</button>
     </div>
     <p class="hint" id="pipeline-msg">{{ collect_label }}</p>
   </div>

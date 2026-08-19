@@ -1334,11 +1334,71 @@ body.daily-news-ui #pipeline-msg { margin: 0.9rem 0 0; font-size: 0.72rem; }
 .daily-sidebar-actions .daily-refresh {
   width: 100%;
   min-width: 0;
-  border-color: #7e89a5;
-  background: #7e89a5;
+}
+
+/* 左侧操作统一为主／次两级按钮：日报、主体评估、国际评级共用。 */
+.sidebar-action-primary,
+.sidebar-action-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 4.9rem;
+  height: auto;
+  padding: 0.85rem 1rem;
+  border-radius: 0.8rem;
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.sidebar-action-primary {
+  border: 1px solid #4d5f75;
+  background: #4d5f75;
   color: #fff;
 }
-.daily-sidebar-actions .daily-refresh:hover { background: #68748f; }
+
+.sidebar-action-primary:hover {
+  border-color: #405168;
+  background: #405168;
+  color: #fff;
+}
+
+.sidebar-action-secondary {
+  border: 1px solid #aeb9c6;
+  background: #96a3b3;
+  color: #fff;
+}
+
+.sidebar-action-secondary:hover {
+  border-color: #8795a7;
+  background: #8795a7;
+}
+
+/* 覆盖旧 .btn/.btn.secondary 的默认色，确保三个侧栏一致。 */
+.sidebar .actions .sidebar-action-primary {
+  border-color: #4d5f75;
+  background: #4d5f75;
+  color: #fff;
+  box-shadow: none;
+}
+
+.sidebar .actions .sidebar-action-secondary {
+  border-color: #aeb9c6;
+  background: #96a3b3;
+  color: #fff;
+  box-shadow: none;
+}
+
+.sidebar-action-primary:focus-visible,
+.sidebar-action-secondary:focus-visible {
+  outline: 3px solid #c4d4e6;
+  outline-offset: 2px;
+}
 
 body.daily-news-ui .content { padding: 1.2rem 1.35rem 3rem; }
 body.daily-news-ui .content h1 { display: none; }

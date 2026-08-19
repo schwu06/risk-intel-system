@@ -107,13 +107,13 @@
     <div class="actions">
       <button
         type="button"
-        class="btn"
+        class="btn sidebar-action-primary"
         id="btn-export-entity-docx"
         {% if not selected_entity %}disabled{% endif %}
         data-entity-id="{{ selected_entity.id if selected_entity else '' }}"
         data-report-date="{{ report_date }}"
       >导出公开信息简报</button>
-      <button type="button" class="btn secondary" id="btn-run-pipeline">采集近三个月资讯</button>
+      <button type="button" class="btn secondary sidebar-action-secondary" id="btn-run-pipeline">采集近三个月资讯</button>
     </div>
     <p class="hint" id="pipeline-msg">异步采集当前主体近三个月公开信源；空结果不会生成演示数据。</p>
     <p class="hint" id="export-msg" hidden></p>
