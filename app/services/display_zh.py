@@ -16,6 +16,7 @@ from app.services.api_keys import is_placeholder_key
 from app.config import get_settings
 from app.services.gemini_analyzer import gemini_for
 from app.services.risk_reasoning import build_risk_reasoning
+from app.services.news_risk_tags import assess_news_risk
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class NewsDisplayCard:
     social_source_url: Optional[str] = None
     risk_reasoning: dict[str, str | bool] | None = None
     overview: str = ""
+    risk_tags: tuple[str, ...] = ()
 
 
 def needs_chinese_display(text: Optional[str]) -> bool:
@@ -260,6 +262,12 @@ def build_display_cards(
         eid = str(e.id)
         tr = translated.get(eid) or {}
         social = social_resolver(e)
+        assessment = assess_news_risk(
+            title=tr.get("title") or e.title,
+            summary=tr.get("summary") or e.summary,
+            impact=tr.get("impact") if tr.get("impact") is not None else e.impact_analysis,
+            stored_level=e.risk_level,
+        )
         cards.append(
             NewsDisplayCard(
                 id=e.id,
@@ -268,7 +276,7 @@ def build_display_cards(
                 related_company=e.related_company,
                 risk_category=e.risk_category,
                 category_tag=getattr(e, "category_tag", None),
-                risk_level=e.risk_level,
+                risk_level=assessment.level,
                 summary=tr.get("summary") or e.summary,
                 impact_analysis=tr.get("impact") if tr.get("impact") is not None else e.impact_analysis,
                 source_url=e.source_url,
@@ -280,8 +288,8 @@ def build_display_cards(
                     title=tr.get("title") or e.title,
                     summary=tr.get("summary") or e.summary,
                     impact=tr.get("impact") if tr.get("impact") is not None else e.impact_analysis,
-                    risk_level=e.risk_level,
-                    category=e.risk_category,
+                    risk_level=assessment.level,
+                    category=assessment.tags[0] if assessment.tags else e.risk_category,
                 ),
                 overview=format_news_overview(
                     title=tr.get("title") or e.title,
@@ -291,6 +299,7 @@ def build_display_cards(
                     published_at=e.published_at,
                     subject=e.related_company,
                 ),
+                risk_tags=assessment.tags,
             )
         )
     return cards

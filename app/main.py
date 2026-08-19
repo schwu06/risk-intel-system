@@ -276,7 +276,7 @@ def _daily_news_context(
     run_map = {r.module_code: r for r in runs}
 
     stats = {"低": 0, "中": 0, "高": 0, "极高": 0}
-    for e in entries:
+    for e in display_cards:
         if e.risk_level in stats:
             stats[e.risk_level] += 1
 
