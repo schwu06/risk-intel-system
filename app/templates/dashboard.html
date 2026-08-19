@@ -64,9 +64,12 @@
     {% endif %}
     <div class="daily-page-caption">
       <span>{% if active_page == 'news_7x24' %}7×24 小时资讯时间轴{% else %}{{ page_title }}{% endif %}</span>
-      <small>{% if active_page == 'news_7x24' %}{{ timeline_start }} 至 {{ report_date }}{% else %}{{ report_date }}{% endif %} · {{ overview.total }} 条已收录资讯</small>
+      <div class="daily-page-caption-actions">
+        <small>{% if active_page == 'news_7x24' %}{{ timeline_start }} 至 {{ report_date }}{% else %}{{ report_date }}{% endif %} · {{ overview.total }} 条已收录资讯</small>
+        <button type="button" class="news-filter-toggle" id="news-filter-toggle" aria-expanded="false" aria-controls="news-filter-panel">筛选 <span aria-hidden="true">⌄</span></button>
+      </div>
     </div>
-    <div class="news-filter-panel">
+    <div class="news-filter-panel" id="news-filter-panel" hidden>
     <nav class="news-risk-filters" aria-label="风险类型筛选">
       <button type="button" class="news-risk-filter" data-news-risk="信贷风险">信贷风险</button>
       <button type="button" class="news-risk-filter" data-news-risk="市场风险">市场风险</button>
@@ -82,16 +85,18 @@
       <button type="button" class="news-level-filter level-high" data-news-level="高">高</button>
       <button type="button" class="news-level-filter level-extreme" data-news-level="极高">极高</button>
     </nav>
+    {% if active_page == 'news_7x24' %}
+    <nav class="timeline-category-filters" aria-label="资讯栏目筛选">
+      <button type="button" class="timeline-category-filter active" data-timeline-module="all">全部栏目</button>
+      {% for code, name in modules.items() %}
+      <button type="button" class="timeline-category-filter" data-timeline-module="{{ code }}">{{ name }}</button>
+      {% endfor %}
+    </nav>
+    {% endif %}
     </div>
 
     {% if active_page == 'news_7x24' %}
     <section class="news-timeline" aria-label="近七日新闻时间轴">
-      <nav class="timeline-category-filters" aria-label="资讯分类筛选">
-        <button type="button" class="timeline-category-filter active" data-timeline-module="all">全部</button>
-        {% for code, name in modules.items() %}
-        <button type="button" class="timeline-category-filter" data-timeline-module="{{ code }}">{{ name }}</button>
-        {% endfor %}
-      </nav>
       {% for e in timeline_entries %}
       <article class="timeline-item" data-module="{{ e.module_code }}" data-risk-tags="{{ e.risk_tags|join('|') }}" data-risk-level="{{ e.risk_level }}">
         <time class="timeline-time">{% if e.published_at %}{{ e.published_at }}{% else %}发布时间待核验{% endif %}</time>
@@ -208,6 +213,16 @@
 </script>
 <script>
   (function () {
+    var toggle = document.getElementById("news-filter-toggle");
+    var panel = document.getElementById("news-filter-panel");
+    if (toggle && panel) {
+      toggle.addEventListener("click", function () {
+        var willOpen = panel.hidden;
+        panel.hidden = !willOpen;
+        toggle.setAttribute("aria-expanded", String(willOpen));
+        toggle.classList.toggle("active", willOpen);
+      });
+    }
     var input = document.getElementById("daily-module-search");
     if (!input) return;
     input.addEventListener("input", function () {
