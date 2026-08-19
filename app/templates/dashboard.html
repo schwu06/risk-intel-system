@@ -55,7 +55,7 @@
     <nav class="day-tabs" aria-label="近七日日期">
       {% for tab in day_tabs %}
       <a
-        href="{{ page_path }}?report_date={{ tab.date }}{% if selected_module %}&module_code={{ selected_module }}{% endif %}"
+        href="{{ tab.href }}{% if selected_module %}&module_code={{ selected_module }}{% endif %}"
         class="day-tab {% if tab.active %}active{% endif %}"
         {% if tab.active %}aria-current="page"{% endif %}
       >{{ tab.label }}</a>
@@ -65,7 +65,7 @@
     <div class="daily-page-caption">
       <span>{% if active_page == 'news_7x24' %}7×24 小时资讯时间轴{% else %}{{ page_title }}{% endif %}</span>
       <div class="daily-page-caption-actions">
-        <small>{% if active_page == 'news_7x24' %}{{ timeline_start }} 至 {{ report_date }}{% else %}{{ report_date }}{% endif %} · {{ overview.total }} 条已收录资讯</small>
+        <small>{% if active_page == 'news_7x24' %}{{ timeline_range_label }}{% else %}{{ report_date }}{% endif %} · {{ overview.total }} 条已收录资讯</small>
         <button type="button" class="news-filter-toggle" id="news-filter-toggle" aria-expanded="false" aria-controls="news-filter-panel">筛选 <span aria-hidden="true">⌄</span></button>
       </div>
     </div>

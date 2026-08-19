@@ -191,6 +191,7 @@ def _daily_news_context(
     *,
     request: Request,
     report_date: str | None,
+    timeline_day: str | None = None,
     module_code: str | None,
     db: Session,
     page_key: str = "daily_news",
@@ -204,10 +205,36 @@ def _daily_news_context(
     rd = _parse_report_date(report_date)
     today = tokyo_today()
     day_tabs: list[dict] = []
+    selected_timeline_day: date | None = None
     if page_key == "news_7x24":
-        # 7×24 固定展示连续七日时间轴，不再用日期标签将历史切成单日页面。
+        # 7×24 默认连续展示七日；日期导航可将时间轴暂时聚焦到其中某一天。
         if rd < today - timedelta(days=6) or rd > today:
             rd = today
+        if timeline_day:
+            candidate = _parse_report_date(timeline_day)
+            if rd - timedelta(days=6) <= candidate <= rd:
+                selected_timeline_day = candidate
+        for offset, tab_day in enumerate(tokyo_day_tabs(7)):
+            if tab_day > rd or tab_day < rd - timedelta(days=6):
+                continue
+            label = "今日" if offset == 0 else "昨天" if offset == 1 else "前天" if offset == 2 else f"{tab_day.month}/{tab_day.day}"
+            day_tabs.append(
+                {
+                    "label": label,
+                    "date": tab_day.isoformat(),
+                    "href": f"{meta['path']}?report_date={rd.isoformat()}&timeline_day={tab_day.isoformat()}",
+                    "active": selected_timeline_day == tab_day,
+                }
+            )
+        day_tabs.insert(
+            0,
+            {
+                "label": "全部",
+                "date": rd.isoformat(),
+                "href": f"{meta['path']}?report_date={rd.isoformat()}",
+                "active": selected_timeline_day is None,
+            },
+        )
 
     selected = (module_code or "").upper() or None
     if selected and selected not in allowed:
@@ -219,9 +246,12 @@ def _daily_news_context(
         .filter(NewsArticle.window_hours == window_hours)
     )
     if page_key == "news_7x24":
-        q = q.filter(NewsArticle.report_date >= rd - timedelta(days=6)).filter(
-            NewsArticle.report_date <= rd
-        )
+        if selected_timeline_day:
+            q = q.filter(NewsArticle.report_date == selected_timeline_day)
+        else:
+            q = q.filter(NewsArticle.report_date >= rd - timedelta(days=6)).filter(
+                NewsArticle.report_date <= rd
+            )
     else:
         q = q.filter(NewsArticle.report_date == rd)
     if selected:
@@ -366,6 +396,11 @@ def _daily_news_context(
         "overview": overview,
         "timeline_entries": display_cards if page_key == "news_7x24" else [],
         "timeline_start": (rd - timedelta(days=6)).isoformat() if page_key == "news_7x24" else None,
+        "timeline_range_label": (
+            f"仅查看 {selected_timeline_day.isoformat()}"
+            if selected_timeline_day
+            else f"{(rd - timedelta(days=6)).isoformat()} 至 {rd.isoformat()}"
+        ) if page_key == "news_7x24" else None,
         "run_map": run_map,
         "module_ui": module_ui,
         "entry_charts_json": _news_charts_json(entries),
@@ -747,12 +782,14 @@ def daily_news_page(
 def daily_news_7x24_page(
     request: Request,
     report_date: str | None = None,
+    timeline_day: str | None = None,
     module_code: str | None = None,
     db: Session = Depends(get_db),
 ):
     ctx = _daily_news_context(
         request=request,
         report_date=report_date,
+        timeline_day=timeline_day,
         module_code=module_code,
         db=db,
         page_key="news_7x24",
