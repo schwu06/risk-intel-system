@@ -1155,7 +1155,8 @@ a:hover {
 /* ---------- 新闻汇总：参考日报式工作台 ---------- */
 body.daily-news-ui {
   background: #f5f6f8;
-  overflow: auto;
+  /* 仅右侧 app-main 滚动，左侧栏始终固定在当前视口。 */
+  overflow: hidden;
 }
 
 body.daily-news-ui .top-bar {
