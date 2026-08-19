@@ -10,6 +10,7 @@
 
   var rows = [];
   var selectedId = null;
+  var activeFilter = "all";
   var groupCollapsed = {};
   groupCollapsed[CATEGORY_SIMPLE] = false;
   groupCollapsed[CATEGORY_NON_SIMPLE] = false;
@@ -25,6 +26,11 @@
     msg: document.getElementById("ir-action-msg"),
     btnRefresh: document.getElementById("btn-ir-refresh"),
     btnExport: document.getElementById("btn-ir-export"),
+    headerStatus: document.getElementById("ir-header-status"),
+    statTotal: document.getElementById("ir-stat-total"),
+    statRated: document.getElementById("ir-stat-rated"),
+    statChanges: document.getElementById("ir-stat-changes"),
+    statAlerts: document.getElementById("ir-stat-alerts"),
   };
 
   function setMsg(text, isError) {
@@ -45,10 +51,21 @@
 
   function filteredRows() {
     var q = getQuery();
-    if (!q) return rows.slice();
     return rows.filter(function (r) {
-      return (r.issuer || "").toLowerCase().indexOf(q) !== -1;
+      var matchesSearch = !q || (r.issuer || "").toLowerCase().indexOf(q) !== -1;
+      return matchesSearch && matchesFilter(r);
     });
+  }
+
+  function text(v) { return String(v == null ? "" : v).trim(); }
+  function isRated(r) { return [r.moodys, r.sp, r.fitch].some(function (v) { return text(v) && text(v).toUpperCase() !== "NR" && text(v) !== "—"; }); }
+  function isChanged(r) { return /是|yes|变动|上调|下调|调整/i.test(text(r.ratingChanged)); }
+  function hasAlert(r) { return /是|yes|亏损|废止|下跌|风险|预警/i.test([r.loss, r.delisted, r.priceDrop].map(text).join(" ")); }
+  function matchesFilter(r) {
+    if (activeFilter === "rated") return isRated(r);
+    if (activeFilter === "changed") return isChanged(r);
+    if (activeFilter === "alert") return hasAlert(r);
+    return true;
   }
 
   function groupRows(list) {
@@ -85,11 +102,33 @@
     );
   }
 
+  function ratingPackHtml(r) {
+    var values = [["穆", r.moodys], ["标", r.sp], ["惠", r.fitch]];
+    return '<td class="ir-cell col-rating-pack"><div class="ir-rating-pack">' + values.map(function (pair) {
+      var rating = text(pair[1]) || "NR";
+      var isNr = rating.toUpperCase() === "NR" || rating === "—";
+      return '<span class="ir-rating-pill' + (isNr ? ' is-nr' : '') + '"><b>' + pair[0] + '</b>' + escapeHtml(rating) + '</span>';
+    }).join("") + "</div></td>";
+  }
+
+  function signalHtml(value, emptyText) {
+    var v = text(value);
+    if (!v || v === "否" || v.toLowerCase() === "no" || v === "无") return '<span class="ir-signal muted">' + escapeHtml(emptyText || "无异常") + "</span>";
+    return '<span class="ir-signal alert">' + escapeHtml(v) + "</span>";
+  }
+
+  function combinedSignal(values, emptyText) {
+    var signals = values.map(text).filter(function (v) {
+      return v && v !== "否" && v.toLowerCase() !== "no" && v !== "无";
+    });
+    return signalHtml(signals.join("；"), emptyText);
+  }
+
   function renderTable(list) {
     if (!els.tbody) return;
     if (!list.length) {
       els.tbody.innerHTML =
-        '<tr class="ir-empty-row"><td colspan="11">暂无匹配数据</td></tr>';
+        '<tr class="ir-empty-row"><td colspan="7">暂无匹配数据</td></tr>';
       return;
     }
     els.tbody.innerHTML = list
@@ -104,19 +143,13 @@
           escapeHtml(r.id) +
           '">' +
           cellHtml(r.issuer, "col-issuer") +
-          cellHtml(r.moodys, "col-rating") +
-          cellHtml(r.sp, "col-rating") +
-          cellHtml(r.fitch, "col-rating") +
-          cellHtml(r.loss, "col-yn") +
-          cellHtml(r.listed, "col-yn") +
-          cellHtml(r.delisted, "col-yn") +
-          cellHtml(r.priceDrop, "col-price") +
+          ratingPackHtml(r) +
+          '<td class="ir-cell col-change">' + signalHtml(r.ratingChanged, "未见变动") + "</td>" +
+          '<td class="ir-cell col-signal">' + combinedSignal([r.loss, r.delisted], "未见异常") + "</td>" +
+          '<td class="ir-cell col-signal">' + signalHtml(r.priceDrop, "未见异常") + "</td>" +
           cellHtml(r.noRatingReason, "col-reason") +
-          cellHtml(r.ratingChanged, "col-change") +
           '<td class="ir-cell col-rss">' +
-          '<button type="button" class="btn small ir-rss-btn" data-issuer-id="' +
-          escapeHtml(r.id) +
-          '">打开 RSS</button>' +
+          (r.rssUrl ? '<button type="button" class="btn small ir-rss-btn" data-issuer-id="' + escapeHtml(r.id) + '">查看来源</button>' : '<span class="ir-signal muted">待接入</span>') +
           "</td>" +
           "</tr>"
         );
@@ -187,6 +220,17 @@
     if (els.clear) {
       els.clear.hidden = !getQuery();
     }
+  }
+
+  function renderOverview() {
+    var total = rows.length;
+    var rated = rows.filter(isRated).length;
+    var changed = rows.filter(isChanged).length;
+    var alerts = rows.filter(hasAlert).length;
+    if (els.statTotal) els.statTotal.textContent = total;
+    if (els.statRated) els.statRated.textContent = rated;
+    if (els.statChanges) els.statChanges.textContent = changed;
+    if (els.statAlerts) els.statAlerts.textContent = alerts;
   }
 
   function selectIssuer(issuerId, scroll) {
@@ -278,6 +322,7 @@
 
   function applySnapshot(data) {
     rows = (data.rows || []).slice();
+    renderOverview();
     refresh();
     var tip = data.message || "";
     if (data.updated_at) {
@@ -286,6 +331,9 @@
       tip = "共 " + rows.length + " 家发行体";
     }
     setMsg(tip, data.source === "skeleton");
+    if (els.headerStatus) {
+      els.headerStatus.textContent = data.updated_at ? "快照已更新" : "等待评级数据接入";
+    }
   }
 
   function loadSnapshot() {
@@ -409,6 +457,15 @@
     if (els.btnExport) {
       els.btnExport.addEventListener("click", exportExcel);
     }
+    document.querySelectorAll(".ir-filter").forEach(function (button) {
+      button.addEventListener("click", function () {
+        activeFilter = button.getAttribute("data-ir-filter") || "all";
+        document.querySelectorAll(".ir-filter").forEach(function (item) {
+          item.classList.toggle("active", item === button);
+        });
+        refresh();
+      });
+    });
   }
 
   bindEvents();
