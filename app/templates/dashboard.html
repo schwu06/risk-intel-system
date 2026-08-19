@@ -4,13 +4,6 @@
 
 {% block brand_sub %}{{ page_subtitle }}{% endblock %}
 
-{% block header_extra %}
-<div class="daily-header-actions">
-  <button type="button" class="daily-refresh" id="btn-run-pipeline">刷新</button>
-  <a class="daily-export" href="/api/v1/export/pdf?report_date={{ report_date }}&module_codes={{ module_codes_csv }}&window_hours={{ window_hours }}">导出</a>
-</div>
-{% endblock %}
-
 {% block page_sidebar %}
 <aside class="sidebar page-rail" data-modules="{{ module_codes_csv }}" data-page-path="{{ page_path }}">
   <label class="daily-search" aria-label="筛选板块">
@@ -42,6 +35,10 @@
     <p class="daily-rail-label">风险等级分布</p>
     <div class="daily-risk-counts">
       {% for level, count in stats.items() %}<span class="level level-{{ level }}">{{ level }} <b>{{ count }}</b></span>{% endfor %}
+    </div>
+    <div class="daily-sidebar-actions">
+      <a class="daily-export" href="/api/v1/export/pdf?report_date={{ report_date }}&module_codes={{ module_codes_csv }}&window_hours={{ window_hours }}">导出 PDF</a>
+      <button type="button" class="daily-refresh" id="btn-run-pipeline">刷新</button>
     </div>
     <p class="hint" id="pipeline-msg">{{ collect_label }}</p>
   </div>

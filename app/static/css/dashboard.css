@@ -1192,9 +1192,8 @@ body.daily-news-ui .nav-link.active {
   color: #151515;
 }
 
-.daily-header-actions { display: flex; align-items: center; gap: 0.65rem; }
-
 .daily-header-actions button,
+.daily-sidebar-actions button,
 .daily-export {
   display: inline-flex;
   align-items: center;
@@ -1233,6 +1232,8 @@ body.daily-news-ui .app-shell {
 body.daily-news-ui .app-shell > .page-rail {
   flex-basis: 230px;
   width: 230px;
+  display: flex;
+  flex-direction: column;
   padding: 1.25rem 1.1rem;
   border-right: none;
   background: #fff;
@@ -1318,7 +1319,7 @@ body.daily-news-ui .daily-index-list .mod-name:focus {
 }
 
 .daily-sidebar-footer {
-  margin-top: 2rem;
+  margin-top: auto;
   padding-top: 1rem;
   border-top: 1px solid #edf0f3;
 }
@@ -1328,6 +1329,16 @@ body.daily-news-ui .daily-index-list .mod-name:focus {
 .daily-risk-counts .level { font-size: 0.75rem; }
 .daily-risk-counts b { color: #323842; }
 body.daily-news-ui #pipeline-msg { margin: 0.9rem 0 0; font-size: 0.72rem; }
+.daily-sidebar-actions { display: grid; gap: 0.55rem; margin-top: 1.35rem; }
+.daily-sidebar-actions .daily-export,
+.daily-sidebar-actions .daily-refresh {
+  width: 100%;
+  min-width: 0;
+  border-color: #7e89a5;
+  background: #7e89a5;
+  color: #fff;
+}
+.daily-sidebar-actions .daily-refresh:hover { background: #68748f; }
 
 body.daily-news-ui .content { padding: 1.2rem 1.35rem 3rem; }
 body.daily-news-ui .content h1 { display: none; }
