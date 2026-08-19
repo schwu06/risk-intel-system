@@ -18,16 +18,6 @@
 {% block page_sidebar %}
 <aside class="sidebar page-rail entity-sidebar" data-modules="{{ module_codes_csv }}" aria-label="监控主体索引">
   <div class="entity-sidebar-top">
-    <h2>舆情预警分布</h2>
-    <ul class="stat-list">
-      {% for level in credit_levels %}
-      <li>
-        <span class="credit credit-{{ level }}">{{ level }}</span>
-        <span class="count">{{ credit_counts.get(level, 0) }}</span>
-      </li>
-      {% endfor %}
-    </ul>
-
     <h2>监控主体</h2>
     <div class="entity-search-box">
       <input
@@ -91,19 +81,6 @@
   </div>
 
   <div class="entity-sidebar-footer">
-    <h2>运行状态</h2>
-    <ul class="run-list">
-      {% for code, name in modules.items() %}
-      {% set run = run_map.get(code) %}
-      <li>
-        <span class="mod-name">{{ name }}</span>
-        <span class="run-status status-{{ run.status if run else 'pending' }}">
-          {% if run %}{{ run.status }} ({{ run.entry_count }}){% else %}未运行{% endif %}
-        </span>
-      </li>
-      {% endfor %}
-    </ul>
-
     <div class="actions">
       <button
         type="button"
