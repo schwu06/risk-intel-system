@@ -210,6 +210,17 @@
 </script>
 <script>
   (function () {
+    function positionDailySidebarFooter() {
+      var rail = document.querySelector("body.daily-news-ui .page-rail");
+      var footer = document.querySelector(".daily-sidebar-footer");
+      if (!rail || !footer || window.innerWidth <= 640) return;
+      var rect = rail.getBoundingClientRect();
+      rail.style.setProperty("--daily-sidebar-footer-left", rect.left + "px");
+      rail.style.setProperty("--daily-sidebar-footer-width", rect.width + "px");
+    }
+    positionDailySidebarFooter();
+    window.addEventListener("resize", positionDailySidebarFooter);
+
     var toggle = document.getElementById("news-filter-toggle");
     var panel = document.getElementById("news-filter-panel");
     if (toggle && panel) {
