@@ -11,6 +11,7 @@ from app.services.pipeline_runner import (
     run_modules_sync,
     start_pipeline_job,
 )
+from app.services.intl_ratings_service import start_refresh_job
 from app.timeutil import TOKYO, tokyo_today
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,20 @@ def _hourly_news_job():
         logger.exception("整点新闻采集失败")
 
 
+def _intl_ratings_job():
+    """每日更新三大评级快照和市场信号；任务已在运行时由服务自动去重。"""
+    try:
+        started = start_refresh_job(quick=True)
+        logger.info(
+            "国际评级自动刷新: accepted=%s job_id=%s message=%s",
+            started.get("accepted"),
+            started.get("job_id"),
+            started.get("message"),
+        )
+    except Exception:
+        logger.exception("国际评级自动刷新失败")
+
+
 def start_scheduler() -> BackgroundScheduler | None:
     global _scheduler
     if _scheduler is not None:
@@ -111,6 +126,29 @@ def start_scheduler() -> BackgroundScheduler | None:
         logger.info("已注册每日流水线 cron: %s Asia/Tokyo", settings.daily_pipeline_cron)
     else:
         logger.warning("无效的 cron 表达式，跳过每日调度: %s", settings.daily_pipeline_cron)
+
+    rating_parts = settings.intl_ratings_refresh_cron.strip().split()
+    if len(rating_parts) == 5:
+        minute, hour, day, month, dow = rating_parts
+        _scheduler.add_job(
+            _intl_ratings_job,
+            trigger=CronTrigger(
+                minute=minute,
+                hour=hour,
+                day=day,
+                month=month,
+                day_of_week=dow,
+                timezone=TOKYO,
+            ),
+            id="daily_intl_ratings_refresh",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+        logger.info("已注册国际评级自动刷新 cron: %s Asia/Tokyo", settings.intl_ratings_refresh_cron)
+    else:
+        logger.warning("无效的国际评级 cron，跳过调度: %s", settings.intl_ratings_refresh_cron)
 
     _scheduler.start()
     for job in _scheduler.get_jobs():

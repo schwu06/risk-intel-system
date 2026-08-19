@@ -132,6 +132,23 @@ def _market_source_url(pipeline: Any, issuer_name: str) -> str:
     return ""
 
 
+def _rating_change_label(current: dict[str, Any], previous: Optional[dict[str, Any]]) -> str:
+    """仅在两期均有正式评级且等级不同的情况下提示变动。"""
+    if not previous:
+        return "否"
+    changed: list[str] = []
+    labels = (("moodys", "穆迪"), ("sp", "标普"), ("fitch", "惠誉"))
+    for key, label in labels:
+        before = str(previous.get(key) or "").strip()
+        after = str(current.get(key) or "").strip()
+        # NR / 空值只是尚未核验，并不代表评级变化。
+        if not before or not after or before.upper() == "NR" or after.upper() == "NR":
+            continue
+        if before != after:
+            changed.append(f"{label} {before}→{after}")
+    return "；".join(changed) if changed else "否"
+
+
 def load_snapshot() -> dict[str, Any]:
     if SNAPSHOT_PATH.is_file():
         try:
@@ -249,6 +266,12 @@ def _run_job(*, job_id: str, limit: int, quick: bool) -> None:
             JOBS[job_id]["status"] = "running"
             JOBS[job_id]["message"] = "正在抓取与分析…"
 
+        previous_by_issuer = {
+            str(item.get("issuer") or ""): item
+            for item in (load_snapshot().get("rows") or [])
+            if isinstance(item, dict)
+        }
+
         get_intl_config.cache_clear()
         cfg = get_intl_config().model_copy(deep=True)
         if limit and limit > 0:
@@ -286,8 +309,7 @@ def _run_job(*, job_id: str, limit: int, quick: bool) -> None:
         for i, row in enumerate(report_rows, start=1):
             d = row.to_excel_dict()
             name = d.get("发行体") or ""
-            api_rows.append(
-                {
+            api_row = {
                     "id": f"ir-{i}",
                     "issuer": name,
                     "category": _resolve_category(name, cat_map.get(name, "")),
@@ -299,10 +321,13 @@ def _run_job(*, job_id: str, limit: int, quick: bool) -> None:
                     "delisted": d.get("若上市，债务人是否被上市废止(是/否)") or "",
                     "priceDrop": d.get("债券价格是否大幅下跌（月环比跌幅超过5%）等") or "",
                     "noRatingReason": d.get("皆无评级的話请写明理由") or "",
-                    "ratingChanged": d.get("评级是否变化") or "",
+                    "ratingChanged": d.get("评级是否变化") or "否",
                     "rssUrl": _market_source_url(pipeline, name),
                 }
+            api_row["ratingChanged"] = _rating_change_label(
+                api_row, previous_by_issuer.get(name)
             )
+            api_rows.append(api_row)
 
         save_snapshot(api_rows, source="pipeline_quick" if quick else "pipeline")
         with _LOCK:

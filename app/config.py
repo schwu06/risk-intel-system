@@ -50,6 +50,8 @@ class Settings(BaseSettings):
         return value
 
     daily_pipeline_cron: str = "0 6 * * *"
+    # 国际评级与市场信号：默认东京时间每日 06:30 刷新。
+    intl_ratings_refresh_cron: str = "30 6 * * *"
     request_timeout_seconds: int = 120
     news_window_hours: int = 24
     # 内容摘要必须基于新闻详情页正文，不以标题/RSS 片段扩写。
