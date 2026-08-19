@@ -1234,6 +1234,7 @@ body.daily-news-ui .app-shell > .page-rail {
   width: 230px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   padding: 1.25rem 1.1rem;
   border-right: none;
   background: #fff;
@@ -1295,6 +1296,9 @@ body.daily-news-ui .daily-index-list {
   margin-left: 0.05rem;
   padding-left: 0.55rem;
   border-left: 2px solid #dcdfe4;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 body.daily-news-ui .daily-index-list li {
@@ -1319,7 +1323,8 @@ body.daily-news-ui .daily-index-list .mod-name:focus {
 }
 
 .daily-sidebar-footer {
-  margin-top: auto;
+  flex: 0 0 auto;
+  margin-top: 0.75rem;
   padding-top: 1rem;
   border-top: 1px solid #edf0f3;
 }
