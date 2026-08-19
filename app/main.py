@@ -1,6 +1,6 @@
 """FastAPI 应用入口与 Web 仪表盘。"""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
 from urllib.parse import urlparse
@@ -146,21 +146,33 @@ def _parse_report_date(value: str | None) -> date:
         raise HTTPException(status_code=400, detail="报告日期格式无效，请使用 YYYY-MM-DD") from exc
 
 
+def _published_timestamp(value: object) -> float:
+    """兼容 SQLite 历史字符串和 datetime，供新闻时间轴稳定排序。"""
+    if value is None:
+        return 0.0
+    if isinstance(value, datetime):
+        try:
+            return float(value.timestamp())
+        except (OSError, OverflowError, ValueError):
+            return 0.0
+    if isinstance(value, date):
+        return float(datetime.combine(value, datetime.min.time()).timestamp())
+    if isinstance(value, str):
+        text = value.strip().replace("Z", "+00:00")
+        try:
+            return float(datetime.fromisoformat(text).timestamp())
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
 def _sort_news(entries: list[NewsArticle]) -> list[NewsArticle]:
     """按事件发生/发布时间倒序；缺失发布时间的旧记录排在最后。"""
-    def _timestamp(entry: NewsArticle) -> float:
-        value = getattr(entry, "published_at", None)
-        if value is not None:
-            try:
-                return float(value.timestamp())
-            except (AttributeError, OSError, OverflowError, ValueError):
-                pass
-        return 0.0
 
     return sorted(
         entries,
         key=lambda e: (
-            _timestamp(e),
+            _published_timestamp(getattr(e, "published_at", None)),
             (e.report_date.toordinal() if e.report_date else 0),
             e.id,
         ),
@@ -295,6 +307,12 @@ def _daily_news_context(
         )
 
     display_cards = build_display_cards(db, entries, social_resolver=_social_for)
+
+    # 各日报板块与 7×24 共用同一时间轴顺序：最新发布时间优先，未核验时间置后。
+    def _display_card_sort_key(card) -> tuple[float, int]:
+        return _published_timestamp(getattr(card, "published_at", None)), int(getattr(card, "id", 0) or 0)
+
+    display_cards.sort(key=_display_card_sort_key, reverse=True)
 
     runs = (
         db.query(ReportRun)

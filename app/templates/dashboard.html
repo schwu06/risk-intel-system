@@ -149,6 +149,7 @@
             <time class="risk-event-time">{{ e.published_at }}</time>
             {% endif %}
           </div>
+          <time class="daily-entry-time">{% if e.published_at %}{{ e.published_at|tokyo_time("%m/%d %H:%M") }}{% else %}发布时间待核验{% endif %}</time>
           <h3 class="risk-event-title">{{ e.title }}</h3>
           {% if e.overview %}
           <div class="entry-news-detail">

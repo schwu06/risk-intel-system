@@ -1231,6 +1231,13 @@ body.daily-news-ui .app-shell {
   background: #eef0f3;
 }
 
+/* 新闻卡片只在右侧工作区内滚动，保留稳定的可见滚动条。 */
+body.daily-news-ui .app-main {
+  height: 100%;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+}
+
 body.daily-news-ui .app-shell > .page-rail {
   flex-basis: 230px;
   width: 230px;
@@ -1523,6 +1530,14 @@ body.daily-news-ui .entry-card.risk-event-card {
 }
 
 body.daily-news-ui .risk-event-top { display: none; }
+.daily-entry-time {
+  display: block;
+  margin: 0 0 0.3rem;
+  color: #8994a3;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  text-align: right;
+}
 body.daily-news-ui .risk-event-title {
   display: flex;
   align-items: flex-start;
