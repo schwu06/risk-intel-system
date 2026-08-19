@@ -6,7 +6,8 @@
 # module_defaults: 可按模块覆盖 Google News 地区/语言（模块 C 用日本版）
 
 defaults:
-  max_items_per_feed: 20
+  # 扩大每个可信检索源的候选覆盖，后续仍按时效、财经相关性和板块规则过滤。
+  max_items_per_feed: 30
   google_hl: zh-CN
   google_gl: CN
   google_ceid: "CN:zh-Hans"
@@ -31,6 +32,21 @@ queries:
     - label: 沙特外交部
       query: "site:mofa.gov.sa (statement OR sanctions OR Iran OR Gaza OR Israel)"
       priority: 30
+    - label: 卡塔尔通讯社 QNA
+      query: "site:qna.org.qa (economy OR energy OR finance OR Iran OR Gaza OR Israel)"
+      priority: 29
+    - label: 科威特通讯社 KUNA
+      query: "site:kuna.net.kw (economy OR oil OR energy OR finance OR Middle East)"
+      priority: 29
+    - label: 阿曼通讯社 ONA
+      query: "site:omannews.gov.om (economy OR energy OR investment OR Middle East)"
+      priority: 28
+    - label: 中东能源与航运
+      query: "(Middle East OR Gulf OR Red Sea) (oil OR LNG OR shipping OR ports OR trade OR sanctions)"
+      priority: 24
+    - label: 中东区域金融市场
+      query: "(Saudi Arabia OR UAE OR Qatar OR Israel OR Iran) (market OR bonds OR investment OR currency OR central bank)"
+      priority: 24
     - label: 中东地缘
       query: "Middle East news OR geopolitics OR Gaza OR Iran OR Israel"
       priority: 20
@@ -102,6 +118,15 @@ queries:
     - label: 英文 IR 补充
       query: "(Mitsubishi Corp OR Mitsui & Co OR Itochu OR Sumitomo Corp OR Marubeni OR Denso OR NYK OR Daiwa Securities) (IR OR disclosure OR earnings)"
       priority: 12
+    - label: 日本企业综合财经报道
+      query: "(三菱商事 OR 三井物産 OR 伊藤忠商事 OR 住友商事 OR 丸紅 OR デンソー OR 日本郵船 OR 三菱UFJ OR 三井住友FG OR みずほ OR 野村 OR 大和証券 OR SMBC日興) (決算 OR 投資 OR 融資 OR 株価 OR 事業 OR 規制 OR 訴訟)"
+      priority: 18
+    - label: 日本交易所与 EDINET 披露
+      query: "(site:jpx.co.jp OR site:tdnet.info OR site:disclosure.edinet-fsa.go.jp) (8058 OR 8031 OR 8001 OR 8053 OR 8002 OR 6902 OR 9101 OR 8306 OR 8316 OR 8411 OR 8604 OR 8601)"
+      priority: 27
+    - label: 路透社日本企业报道
+      query: "site:reuters.com (Mitsubishi Corp OR Mitsui OR Itochu OR Sumitomo OR Marubeni OR Denso OR NYK OR MUFG OR SMFG OR Mizuho OR Nomura) Japan"
+      priority: 17
   D:
     - label: 原油 LNG
       query: "oil price OR crude OR LNG market news"
@@ -115,6 +140,24 @@ queries:
     - label: 美元兑日元与外汇
       query: "USD JPY OR ドル円 OR 美元 日元 汇率 (Bank of Japan OR Federal Reserve OR FX market)"
       priority: 20
+    - label: 美国能源署 EIA
+      query: "site:eia.gov (oil OR crude OR petroleum OR natural gas OR inventory OR outlook)"
+      priority: 30
+    - label: 欧佩克 OPEC
+      query: "site:opec.org (oil market OR crude OR production OR monthly report)"
+      priority: 30
+    - label: 国际能源署 IEA
+      query: "site:iea.org (oil market OR gas market OR energy outlook)"
+      priority: 29
+    - label: 美联储官方披露
+      query: "site:federalreserve.gov (FOMC OR monetary policy OR interest rates OR economic outlook)"
+      priority: 30
+    - label: 日本央行官方披露
+      query: "site:boj.or.jp (金融政策 OR 経済・物価情勢 OR 為替 OR monetary policy)"
+      priority: 30
+    - label: 贵金属与全球股市
+      query: "(gold OR silver OR precious metals OR Nikkei OR S&P 500 OR Nasdaq) (price OR market OR stocks OR yields)"
+      priority: 18
 
 # 模块 D 行情核对入口（Yahoo Finance 报价页，只作人工打开，不入库）
 # 铜与美元兑日元用户给了同一地址 JPY=X，铜暂未挂上。

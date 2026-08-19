@@ -324,7 +324,7 @@ def _daily_news_context(
                 ),
             }
         elif not run:
-            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击侧边栏运行流水线。"}
+            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击右上角“刷新”开始采集。"}
         elif (run.status or "").lower() == "failed" or (
             run.notes and "请求失败" in (run.notes or "")
         ):
@@ -347,7 +347,7 @@ def _daily_news_context(
         elif (run.status or "").lower() in ("empty", "completed") and (run.entry_count or 0) == 0:
             module_ui[code] = {"state": "empty", "message": "今日无动态"}
         else:
-            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击侧边栏运行流水线。"}
+            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击右上角“刷新”开始采集。"}
 
     return {
         "request": request,
@@ -373,7 +373,7 @@ def _daily_news_context(
         "window_hours": window_hours,
         "collect_label": meta.get("collect_label") or f"采集近{window_hours}小时资讯",
         "empty_hint": meta.get("empty_hint")
-        or "当前筛选条件下暂无条目。可通过侧边栏运行流水线采集资讯。",
+        or "当前筛选条件下暂无条目。请点击右上角“刷新”采集资讯。",
         "news_subnav": True,
         "day_tabs": day_tabs,
         "tokyo_today": today.isoformat(),

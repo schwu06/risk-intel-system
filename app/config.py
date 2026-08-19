@@ -70,8 +70,8 @@ class Settings(BaseSettings):
     pipeline_mita_min_items: int = 0
     # 主源整类失败（RSS/TDnet 硬故障）时强制跑秘塔补缺
     pipeline_mita_force_on_primary_fail: bool = True
-    # 秘塔空结果后，对模块 C 和日本主体用 DuckDuckGo 新闻补缺。行业分析不走此路径。
-    search_ddg_fallback_enabled: bool = True
+    # 新闻检索保持以秘塔 API 与配置的可核验 RSS/官网来源为主，不切换到第三方搜索补缺。
+    search_ddg_fallback_enabled: bool = False
     search_ddg_region: str = "jp-jp"
     # 新闻检索只使用秘塔 API；关闭后秘塔异常不会改由 Gemini/DeepSeek 搜索。
     search_llm_fallback_enabled: bool = False
@@ -229,6 +229,11 @@ MODULE_C_COMPANIES = [
     ("デンソー", "Denso"),
     ("日本郵船", "NYK Line"),
     ("大和証券", "Daiwa Securities"),
+    ("三菱UFJ", "Mitsubishi UFJ Financial Group"),
+    ("三井住友FG", "Sumitomo Mitsui Financial Group"),
+    ("みずほ", "Mizuho Financial Group"),
+    ("野村", "Nomura Holdings"),
+    ("SMBC日興", "SMBC Nikko Securities"),
 ]
 MODULE_C_TARGETS = [
     name
@@ -247,10 +252,14 @@ MODULE_C_PILLARS = [
 MODULE_D_TOPICS = [
     "原油",
     "LNG",
+    "天然气",
     "贵金属",
+    "黄金白银",
     "股市资本市场异动",
+    "美股 日股",
     "日本央行货币政策",
     "美联储货币政策",
+    "美元日元汇率",
     "重大地缘事件",
 ]
 
@@ -341,20 +350,19 @@ def module_search_queries(
                     }
                 )
     elif module == "B":
-        queries.append(
-            {
-                "module": "B",
-                "query": f"中东 新闻 政策 官方声明 地缘政治 {recency}",
-                "metadata": {"region": "中东"},
-            }
-        )
-        queries.append(
-            {
-                "module": "B",
-                "query": f"Middle East news geopolitics official statement {recency}",
-                "metadata": {"region": "中东"},
-            }
-        )
+        for query in (
+            "中东 新闻 政策 官方声明 地缘政治",
+            "中东 能源 石油 LNG 航运 港口 制裁",
+            "Middle East news geopolitics official statement",
+            "Middle East oil LNG shipping ports sanctions market",
+        ):
+            queries.append(
+                {
+                    "module": "B",
+                    "query": f"{query} {recency}",
+                    "metadata": {"region": "中东"},
+                }
+            )
     elif module == "C":
         # 日语正式社名 + 適時開示/IR，减少中文转载噪音
         for jp_name, en_name in MODULE_C_COMPANIES:
