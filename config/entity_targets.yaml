@@ -1,0 +1,958 @@
+version: 1
+
+# 主体评估的默认监控清单与可追溯公开信源。
+# source_type: official | regulatory | exchange | industry | media
+# relation: direct（主体本身）| contextual（已点名的股东/上下游企业新闻，不触发主体预警）
+# related_parties: 可选。母公司/股东/已知对手方；无名单时不得用行业词代替上下游。
+#   role 仅允许：parent / shareholder / supplier / customer / counterparty。
+# executives: 可选。高管/董事姓名，只用于人事匹配，不要写成 related_parties。
+#
+# briefing_sources: 最新消息直连 RSS/JSON（优先）。每个主体同一套逻辑：
+#   1) 已配置的直连 feed；2) 否则用 official/media 的 query 生成 Google News RSS；
+#   3) 仍没有时，用主体名称生成跨媒体检索。页面打开后后台拉取，有核心事件时用 Gemini 摘要。
+# financial_source_page: 当期报告 PDF 发现页。每个主体同一套财务逻辑：
+#   有 stock_code（株探）时抓通期三表；没有时从本页发现最新一期财务报表 PDF，
+#   把 PDF 放进来源链接，并尽量摘录要点填入三表。
+#   「查看原始整理页」有 stock_code 时指向株探，无株探时指向当期 PDF。
+# financial_pdf_hint: 可选，用于在同一页多份 PDF 中锁定主体（如 yu_bk、fg_fy）
+# financial_source_label / financial_unit: PDF 摘录时的数据来源说明与单位（可选）
+# prefer_financial_pdf: true 时，即使配置了 stock_code，也优先使用官方财报 PDF。
+# financial_sources: 当期 PDF 备用直链（一览页抓取失败时使用）。
+#   statement: income（损益）| balance（负债）| cashflow（流量）
+#   - statement / label / url
+# financial_context_metrics: 非上市主体的可核验替代经营/财务指标。必须说明集团口径，
+#   不得当作主体独立三表；每项可附官方原文链接。
+#
+# category: 侧栏索引分组。未填写时归入「其他」。
+categories:
+  - key: 重点关注
+    jump: 重点
+  - key: 五大商社
+    jump: 商社
+  - key: 三大银行
+    jump: 银行
+  - key: 三大券商
+    jump: 券商
+  - key: 其他
+    jump: 其他
+entities:
+  - key: Godiva
+    display_name: 歌帝梵 Godiva
+    category: 重点关注
+    aliases: [Godiva Chocolatier, GODIVA, 歌帝梵, 歌帝梵（上海）食品商贸有限公司]
+    industry: 消费品 / 巧克力
+    region: 全球
+    executives: [Steve Lesnard, Salman Amin, Murat Ülker, Murat Ulker, Ali Ülker, Ali Ulker]
+    related_parties:
+      - name: Yıldız Holding
+        aliases: [Yildiz Holding, Yıldız, Yildiz, yildizholding, 星辰控股]
+        role: parent
+      - name: pladis
+        aliases: [pladis Foods, pladis Foods Limited]
+        role: parent
+      - name: Ülker Bisküvi
+        aliases: [Ülker, Ulker, ULKER, 优客]
+        role: shareholder
+      - name: MBK Partners
+        aliases: [MBK]
+        role: counterparty
+      - name: Önem Gıda
+        aliases: [Onem, Onem Gıda, Önem, Onem Gida]
+        role: supplier
+      - name: Barry Callebaut
+        aliases: [百乐嘉利宝]
+        role: supplier
+      - name: Fildişi Cocoa Industry
+        aliases: [Fildisi Cocoa, Fildişi Cocoa, Fildisi Cocoa Industry SA]
+        role: supplier
+      - name: 誉焙食品贸易（上海）有限公司
+        aliases: [誉焙]
+        role: counterparty
+    sources:
+      - label: Godiva Media Center
+        url: https://www.godiva.com/blogs/media
+        source_type: official
+        relation: direct
+        priority: 40
+        query: 'site:godiva.com/blogs/media (Godiva OR GODIVA) (press OR recall OR store OR partnership)'
+      - label: Yıldız Holding Newsroom
+        url: https://www.yildizholding.com.tr/en/press-room
+        source_type: official
+        relation: direct
+        priority: 34
+        query: 'site:yildizholding.com.tr (Godiva OR GODIVA) (news OR results OR debt OR strategy)'
+      - label: 美国 FDA 召回与安全警报
+        url: https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts
+        source_type: regulatory
+        relation: direct
+        priority: 38
+        query: 'site:fda.gov (Godiva OR "Godiva Chocolatier") (recall OR warning OR safety)'
+      - label: 国际可可组织 ICCO
+        url: https://www.icco.org/statistics/
+        source_type: industry
+        relation: contextual
+        priority: 24
+        query: 'site:icco.org cocoa (market report OR supply OR price)'
+      - label: 加纳可可局 COCOBOD
+        url: https://cocobod.gh/news/
+        source_type: industry
+        relation: contextual
+        priority: 22
+        query: 'site:cocobod.gh cocoa (supply OR crop OR financing OR disease)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 30
+        query: '(Godiva OR "Godiva Chocolatier" OR 歌帝梵) (earnings OR lawsuit OR recall OR debt OR store OR supply chain)'
+    # Godiva 为非上市品牌，未公开独立损益表、资产负债表或现金流量表，不能用 Kabutan 替代。
+    # 以下均为其母公司 Yıldız Holding 合并口径，只作为可核验的经营及偿债背景。
+    financial_source_page: https://www.medyamerkezi.yildizholding.com.tr/en/press-releases/yildiz-holding-continued-to-grow-through-production-exports-and-investment-in-2025-maintaining-financial-discipline-and-pursuing-its-focused-strategy
+    financial_source_label: "Yıldız Holding 2025 年经营与财务披露（集团口径，非 Godiva 独立财报）"
+    financial_unit: "集团合并口径：土耳其里拉（TRY）"
+    financial_context_notice: "Godiva 为非上市品牌，未见可核验的独立公开三表。以下采用其母公司 Yıldız Holding 的官方合并披露，仅用于判断集团经营与偿债背景，不等同于 Godiva 独立财务数据。"
+    financial_context_metrics:
+      - label: 2025 年合并销售额
+        value: "TRY 657.8 billion"
+        as_of: "截至 2025 年度"
+        note: "Yıldız Holding 集团合并口径"
+        url: https://www.medyamerkezi.yildizholding.com.tr/en/press-releases/yildiz-holding-continued-to-grow-through-production-exports-and-investment-in-2025-maintaining-financial-discipline-and-pursuing-its-focused-strategy
+      - label: 净债务 / EBITDA
+        value: "低于 2.0x"
+        as_of: "2025 年度披露"
+        note: "管理层披露的集团偿债指标"
+        url: https://www.medyamerkezi.yildizholding.com.tr/en/press-releases/yildiz-holding-continued-to-grow-through-production-exports-and-investment-in-2025-maintaining-financial-discipline-and-pursuing-its-focused-strategy
+      - label: 2025 年投资额
+        value: "TRY 12.08 billion"
+        as_of: "截至 2025 年度"
+        note: "Yıldız Holding 集团口径"
+        url: https://www.medyamerkezi.yildizholding.com.tr/en/press-releases/yildiz-holding-continued-to-grow-through-production-exports-and-investment-in-2025-maintaining-financial-discipline-and-pursuing-its-focused-strategy
+
+  - key: 普洛斯
+    display_name: 普洛斯 GLP
+    category: 重点关注
+    aliases: [GLP, GLP Pte. Ltd., Global Logistic Properties, 普洛斯]
+    industry: 物流地产 / 基础设施
+    region: 亚太 / 全球
+    stock_code: '3281'
+    # “最新消息”固定优先抓取这三条一手通道；页面实时刷新后会由 AI 汇总，
+    # 同时把每条可追溯标题和链接显示在下方公开信息事件区。
+    briefing_sources:
+      - label: GLP 全球官网新闻
+        url: https://www.glp.com/global/global_news
+        source_type: official
+        relation: direct
+        priority: 50
+        query: 'site:glp.com/global (GLP OR "GLP Pte" OR "Global Logistic Properties") (press release OR financing OR results OR data center OR logistics)'
+      - label: 普洛斯中国官网新闻
+        url: https://www.glp.com.cn/
+        source_type: official
+        relation: direct
+        priority: 48
+        query: 'site:glp.com.cn 普洛斯 (公告 OR 融资 OR 基金 OR 数据中心 OR 物流园)'
+      - label: 新加坡交易所 GLP 公告
+        url: https://www.sgx.com/securities/company-announcements
+        source_type: exchange
+        relation: direct
+        priority: 46
+        query: 'site:links.sgx.com ("GLP Pte" OR "Global Logistic Properties") (announcement OR notes OR results OR bond)'
+    sources:
+      - label: GLP Global Newsroom
+        url: https://www.glp.com/global/global_news
+        source_type: official
+        relation: direct
+        priority: 40
+        query: 'site:glp.com/global (GLP OR "GLP Pte") (press release OR results OR financing OR logistics)'
+      - label: 普洛斯中国新闻中心
+        url: https://www.glp.com.cn/
+        source_type: official
+        relation: direct
+        priority: 36
+        query: 'site:glp.com.cn 普洛斯 (公告 OR 融资 OR 物流园 OR 数据中心 OR 基金)'
+      - label: 新加坡交易所公司公告
+        url: https://www.sgx.com/securities/company-announcements
+        source_type: exchange
+        relation: direct
+        priority: 34
+        query: 'site:links.sgx.com "GLP Pte" (announcement OR notes OR results)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 30
+        query: '(普洛斯 OR "GLP Pte" OR "Global Logistic Properties") (debt OR refinancing OR bond OR logistics OR data center)'
+      - label: GLP J-REIT 決算资料
+        url: https://www.glpjreit.com/ja/ir/library.html
+        source_type: official
+        relation: direct
+        priority: 46
+        query: 'site:glpjreit.com/ja/ir 有価証券報告書'
+      - label: GLP J-REIT IR Library
+        url: https://www.glpjreit.com/en/ir/library.html
+        source_type: official
+        relation: direct
+        priority: 44
+        query: 'site:glpjreit.com/en/ir (security report OR financial report)'
+      - label: GLP J-REIT 财务报告（英文）
+        url: https://www.glpjreit.com/file/en-ir_library_term-e2a03499aad344e3b82a53d92400645ac5ea9488.pdf
+        source_type: official
+        relation: direct
+        priority: 42
+    financial_source_page: https://www.glpjreit.com/ja/ir/library.html
+    financial_pdf_hint: ir_library_term
+    financial_source_label: "GLP J-REIT 決算资料（整理自公开披露）"
+    financial_unit: "单位: 百万日元 (決算资料)"
+    financial_sources:
+      - statement: income
+        label: 当期财务报告 PDF
+        url: https://www.glpjreit.com/file/ir_library_term-0d9b43551bcd04bd112efdc0b4d169a0e569542f.pdf
+      - statement: balance
+        label: 当期财务报告 PDF
+        url: https://www.glpjreit.com/file/ir_library_term-0d9b43551bcd04bd112efdc0b4d169a0e569542f.pdf
+      - statement: cashflow
+        label: 当期财务报告 PDF
+        url: https://www.glpjreit.com/file/ir_library_term-0d9b43551bcd04bd112efdc0b4d169a0e569542f.pdf
+
+  - key: 三菱商事
+    display_name: 三菱商事 Mitsubishi Corporation
+    category: 五大商社
+    aliases: [Mitsubishi Corporation, 三菱商事株式会社]
+    industry: 综合商社
+    region: 日本 / 全球
+    stock_code: '8058'
+    sources:
+      - label: 三菱商事 News Release
+        url: https://www.mitsubishicorp.com/jp/en/news/release/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:mitsubishicorp.com (三菱商事 OR "Mitsubishi Corporation") (news OR IR OR results OR impairment)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (三菱商事 OR 8058)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(三菱商事 OR "Mitsubishi Corporation") (results OR investment OR loss OR lawsuit OR rating)'
+      - label: 有价证券报告书一览
+        url: https://www.mitsubishicorp.com/jp/ja/ir/library/fstatement/
+        source_type: official
+        relation: direct
+        priority: 46
+        query: 'site:mitsubishicorp.com/jp/ja/ir/library/fstatement 有価証券報告書'
+    financial_source_page: https://www.mitsubishicorp.com/jp/ja/ir/library/fstatement/
+    financial_source_label: "有价证券报告书（整理自公开披露）"
+    financial_unit: "单位: 百万日元 (有价证券报告书)"
+    financial_sources:
+      - statement: income
+        label: 当期有价证券报告书 PDF
+        url: https://www.mitsubishicorp.com/jp/ja/ir/library/fstatement/pdf/2025_04/y2025_04.pdf
+      - statement: balance
+        label: 当期有价证券报告书 PDF
+        url: https://www.mitsubishicorp.com/jp/ja/ir/library/fstatement/pdf/2025_04/y2025_04.pdf
+      - statement: cashflow
+        label: 当期有价证券报告书 PDF
+        url: https://www.mitsubishicorp.com/jp/ja/ir/library/fstatement/pdf/2025_04/y2025_04.pdf
+
+  - key: 三井物産
+    display_name: 三井物产 Mitsui & Co.
+    category: 五大商社
+    aliases: [三井物产, Mitsui & Co., MITSUI & CO.,LTD., 三井物産株式会社]
+    industry: 综合商社
+    region: 日本 / 全球
+    stock_code: '8031'
+    sources:
+      - label: 三井物产 IR News
+        url: https://www.mitsui.com/jp/en/ir/news/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:mitsui.com (三井物産 OR 三井物产 OR "Mitsui & Co") (release OR IR OR results OR impairment)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (三井物産 OR 8031)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(三井物産 OR 三井物产 OR "Mitsui & Co") (results OR investment OR loss OR lawsuit OR rating)'
+      - label: 有价证券报告书一览
+        url: https://www.mitsui.com/jp/ja/ir/library/securities/2026.html
+        source_type: official
+        relation: direct
+        priority: 46
+        query: 'site:mitsui.com/jp/ja/ir/library/securities 有価証券報告書'
+    financial_source_page: https://www.mitsui.com/jp/ja/ir/library/securities/2026.html
+    financial_source_label: "有价证券报告书（整理自公开披露）"
+    financial_unit: "单位: 百万日元 (有价证券报告书)"
+    financial_sources:
+      - statement: income
+        label: 当期有价证券报告书 PDF
+        url: https://www.mitsui.com/jp/ja/ir/library/securities/__icsFiles/afieldfile/2026/08/12/ja_107yuho.pdf
+      - statement: balance
+        label: 当期有价证券报告书 PDF
+        url: https://www.mitsui.com/jp/ja/ir/library/securities/__icsFiles/afieldfile/2026/08/12/ja_107yuho.pdf
+      - statement: cashflow
+        label: 当期有价证券报告书 PDF
+        url: https://www.mitsui.com/jp/ja/ir/library/securities/__icsFiles/afieldfile/2026/08/12/ja_107yuho.pdf
+
+  - key: 伊藤忠商事
+    display_name: 伊藤忠商事 ITOCHU
+    category: 五大商社
+    aliases: [伊藤忠, ITOCHU, ITOCHU Corporation, 伊藤忠商事株式会社]
+    industry: 综合商社
+    region: 日本 / 全球
+    stock_code: '8001'
+    sources:
+      - label: 伊藤忠商事 News
+        url: https://www.itochu.co.jp/en/news/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:itochu.co.jp (伊藤忠 OR ITOCHU) (news OR IR OR results OR impairment)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (伊藤忠 OR 8001)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(伊藤忠 OR ITOCHU) (results OR investment OR loss OR lawsuit OR rating)'
+      - label: 有价证券报告书一览
+        url: https://www.itochu.co.jp/ja/ir/doc/annual_security_report/index.html
+        source_type: official
+        relation: direct
+        priority: 46
+        query: 'site:itochu.co.jp/ja/ir/doc/annual_security_report 有価証券報告書'
+    financial_source_page: https://www.itochu.co.jp/ja/ir/doc/annual_security_report/index.html
+    financial_source_label: "有价证券报告书（整理自公开披露）"
+    financial_unit: "单位: 百万日元 (有价证券报告书)"
+    financial_sources:
+      - statement: income
+        label: 当期有价证券报告书 PDF
+        url: https://www.itochu.co.jp/ja/files/security_102.pdf
+      - statement: balance
+        label: 当期有价证券报告书 PDF
+        url: https://www.itochu.co.jp/ja/files/security_102.pdf
+      - statement: cashflow
+        label: 当期有价证券报告书 PDF
+        url: https://www.itochu.co.jp/ja/files/security_102.pdf
+
+  - key: 住友商事
+    display_name: 住友商事 Sumitomo Corporation
+    category: 五大商社
+    aliases: [Sumitomo Corporation, 住友商事株式会社]
+    industry: 综合商社
+    region: 日本 / 全球
+    stock_code: '8053'
+    sources:
+      - label: 住友商事 News Release
+        url: https://www.sumitomocorp.com/en/jp/news/release
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:sumitomocorp.com (住友商事 OR "Sumitomo Corporation") (release OR IR OR results OR impairment)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (住友商事 OR 8053)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(住友商事 OR "Sumitomo Corporation") (results OR investment OR loss OR lawsuit OR rating)'
+      - label: 有价证券报告书一览
+        url: https://www.sumitomocorp.com/ja/jp/ir/report/yuka/20212025
+        source_type: official
+        relation: direct
+        priority: 46
+        query: 'site:sumitomocorp.com/ja/jp/ir/report/yuka 有価証券報告書'
+    financial_source_page: https://www.sumitomocorp.com/ja/jp/ir/report/yuka/20212025
+    financial_source_label: "有价证券报告书（整理自公开披露）"
+    financial_unit: "单位: 百万日元 (有价证券报告书)"
+    financial_sources:
+      - statement: income
+        label: 当期有价证券报告书 PDF
+        url: https://www.sumitomocorp.com/-/media/Files/hq/ir/report/yuho/2025/202603yuho.pdf?sc_lang=ja
+      - statement: balance
+        label: 当期有价证券报告书 PDF
+        url: https://www.sumitomocorp.com/-/media/Files/hq/ir/report/yuho/2025/202603yuho.pdf?sc_lang=ja
+      - statement: cashflow
+        label: 当期有价证券报告书 PDF
+        url: https://www.sumitomocorp.com/-/media/Files/hq/ir/report/yuho/2025/202603yuho.pdf?sc_lang=ja
+
+  - key: 丸紅
+    display_name: 丸红 Marubeni
+    category: 五大商社
+    aliases: [丸红, Marubeni, Marubeni Corporation, 丸紅株式会社]
+    industry: 综合商社
+    region: 日本 / 全球
+    stock_code: '8002'
+    sources:
+      - label: 丸红 News Release
+        url: https://www.marubeni.com/en/news/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:marubeni.com (丸紅 OR 丸红 OR Marubeni) (news OR IR OR results OR impairment)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (丸紅 OR 8002)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(丸紅 OR 丸红 OR Marubeni) (results OR investment OR loss OR lawsuit OR rating)'
+      - label: 有价证券报告书一览
+        url: https://www.marubeni.com/jp/ir/reports/security_reports/
+        source_type: official
+        relation: direct
+        priority: 46
+        query: 'site:marubeni.com/jp/ir/reports/security_reports 有価証券報告書'
+    financial_source_page: https://www.marubeni.com/jp/ir/reports/security_reports/
+    financial_source_label: "有价证券报告书（整理自公开披露）"
+    financial_unit: "单位: 百万日元 (有价证券报告书)"
+    financial_sources:
+      - statement: income
+        label: 当期有价证券报告书 PDF
+        url: https://ssl4.eir-parts.net/doc/8002/yuho_pdf/S100YAY4/00.pdf
+      - statement: balance
+        label: 当期有价证券报告书 PDF
+        url: https://ssl4.eir-parts.net/doc/8002/yuho_pdf/S100YAY4/00.pdf
+      - statement: cashflow
+        label: 当期有价证券报告书 PDF
+        url: https://ssl4.eir-parts.net/doc/8002/yuho_pdf/S100YAY4/00.pdf
+
+  - key: 三菱UFJ
+    display_name: 三菱UFJ MUFG
+    category: 三大银行
+    aliases: [三菱UFJ银行, 三菱UFJフィナンシャル・グループ, Mitsubishi UFJ, MUFG, MUFG Bank]
+    industry: 银行 / 金融服务
+    region: 日本 / 全球
+    stock_code: '8306'
+    sources:
+      - label: MUFG News
+        url: https://www.mufg.jp/english/pressrelease/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:mufg.jp (三菱UFJ OR MUFG OR "Mitsubishi UFJ") (news OR IR OR results OR capital)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (三菱UFJ OR 8306)'
+      - label: 日本金融厅
+        url: https://www.fsa.go.jp/news/
+        source_type: regulatory
+        relation: direct
+        priority: 38
+        query: 'site:fsa.go.jp (三菱UFJ OR 三菱ＵＦＪ) (処分 OR 行政 OR 検査 OR 業務改善)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(三菱UFJ OR MUFG OR "Mitsubishi UFJ") (results OR capital OR lawsuit OR rating OR loan)'
+      - label: 有价证券报告书一览
+        url: https://www.mufg.jp/ir/report/security_report/2026/index.html
+        source_type: official
+        relation: direct
+        priority: 46
+        query: 'site:mufg.jp/ir/report/security_report 有価証券報告書'
+    financial_source_page: https://www.mufg.jp/ir/report/security_report/2026/index.html
+    financial_pdf_hint: yu_bk
+    financial_source_label: "有价证券报告书（整理自公开披露）"
+    financial_unit: "单位: 百万日元 (有价证券报告书)"
+    financial_sources:
+      - statement: income
+        label: 当期银行有价证券报告书 PDF
+        url: https://www.mufg.jp/dam/ir/report/security_report/pdf/yu_bk26.pdf
+      - statement: balance
+        label: 当期银行有价证券报告书 PDF
+        url: https://www.mufg.jp/dam/ir/report/security_report/pdf/yu_bk26.pdf
+      - statement: cashflow
+        label: 当期银行有价证券报告书 PDF
+        url: https://www.mufg.jp/dam/ir/report/security_report/pdf/yu_bk26.pdf
+
+  - key: 三井住友FG
+    display_name: 三井住友 SMFG
+    category: 三大银行
+    aliases: [三井住友银行, 三井住友フィナンシャルグループ, SMFG, Sumitomo Mitsui Financial Group]
+    industry: 银行 / 金融服务
+    region: 日本 / 全球
+    stock_code: '8316'
+    sources:
+      - label: SMFG News Release
+        url: https://www.smfg.co.jp/news_e/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:smfg.co.jp (三井住友 OR SMFG OR "Sumitomo Mitsui Financial") (news OR IR OR results OR capital)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (三井住友フィナンシャル OR 8316)'
+      - label: 日本金融厅
+        url: https://www.fsa.go.jp/news/
+        source_type: regulatory
+        relation: direct
+        priority: 38
+        query: 'site:fsa.go.jp (三井住友銀行 OR 三井住友フィナンシャル) (処分 OR 行政 OR 検査 OR 業務改善)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(三井住友 OR SMFG OR "Sumitomo Mitsui Financial") (results OR capital OR lawsuit OR rating OR loan)'
+      - label: 有价证券报告书一览
+        url: https://www.smfg.co.jp/investor/financial/yuho.html
+        source_type: official
+        relation: direct
+        priority: 46
+        query: 'site:smfg.co.jp/investor/financial/yuho 有価証券報告書'
+    financial_source_page: https://www.smfg.co.jp/investor/financial/yuho.html
+    financial_pdf_hint: 2026_fy_bc
+    financial_source_label: "有价证券报告书（整理自公开披露）"
+    financial_unit: "单位: 百万日元 (有价证券报告书)"
+    financial_sources:
+      - statement: income
+        label: 当期银行有价证券报告书 PDF
+        url: https://www.smfg.co.jp/investor/financial/yuho/2026_pdf/2026_fy_bc.pdf
+      - statement: balance
+        label: 当期银行有价证券报告书 PDF
+        url: https://www.smfg.co.jp/investor/financial/yuho/2026_pdf/2026_fy_bc.pdf
+      - statement: cashflow
+        label: 当期银行有价证券报告书 PDF
+        url: https://www.smfg.co.jp/investor/financial/yuho/2026_pdf/2026_fy_bc.pdf
+
+  - key: みずほ
+    display_name: 瑞穗 Mizuho
+    category: 三大银行
+    aliases: [瑞穗, 瑞穗银行, みずほフィナンシャルグループ, Mizuho, Mizuho Financial Group]
+    industry: 银行 / 金融服务
+    region: 日本 / 全球
+    stock_code: '8411'
+    sources:
+      - label: Mizuho News
+        url: https://www.mizuhogroup.com/news
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:mizuhogroup.com (みずほ OR Mizuho) (news OR IR OR results OR capital)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (みずほ OR 8411)'
+      - label: 日本金融厅
+        url: https://www.fsa.go.jp/news/
+        source_type: regulatory
+        relation: direct
+        priority: 38
+        query: 'site:fsa.go.jp みずほ (処分 OR 行政 OR 検査 OR 業務改善)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(みずほ OR 瑞穗 OR Mizuho) (results OR capital OR lawsuit OR rating OR loan)'
+      - label: 有价证券报告书一览
+        url: https://www.mizuho-fg.co.jp/investors/financial/report/index.html
+        source_type: official
+        relation: direct
+        priority: 46
+        query: 'site:mizuho-fg.co.jp/investors/financial/report 有価証券報告書'
+    briefing_sources:
+      - label: 瑞穗新闻 RSS
+        url: https://rss2.www.mizuho-fg.co.jp/rss?site=AQ83RXG5&item=1
+        source_type: official
+        relation: direct
+        priority: 48
+        query: 'site:mizuho-fg.co.jp (ニュースリリース OR news)'
+    financial_source_page: https://www.mizuho-fg.co.jp/investors/financial/report/index.html
+    financial_pdf_hint: fg_fy
+    financial_source_label: "有价证券报告书（整理自公开披露）"
+    financial_unit: "单位: 百万日元 (有价证券报告书)"
+    financial_sources:
+      - statement: income
+        label: 当期有价证券报告书 PDF
+        url: https://www.mizuho-fg.co.jp/investors/financial/report/yuho_202603/pdf/fg_fy.pdf
+      - statement: balance
+        label: 当期有价证券报告书 PDF
+        url: https://www.mizuho-fg.co.jp/investors/financial/report/yuho_202603/pdf/fg_fy.pdf
+      - statement: cashflow
+        label: 当期有价证券报告书 PDF
+        url: https://www.mizuho-fg.co.jp/investors/financial/report/yuho_202603/pdf/fg_fy.pdf
+
+  - key: デンソー
+    display_name: 电装 DENSO
+    category: 其他
+    aliases: [电装, DENSO, DENSO CORPORATION, 株式会社デンソー]
+    industry: 汽车零部件
+    region: 日本 / 全球
+    stock_code: '6902'
+    sources:
+      - label: DENSO Newsroom
+        url: https://www.denso.com/global/en/news/newsroom/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:denso.com/global (デンソー OR DENSO) (newsroom OR results OR recall OR quality)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (デンソー OR 6902)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(デンソー OR DENSO OR 电装) (results OR recall OR quality OR lawsuit OR rating)'
+
+  - key: 日本郵船
+    display_name: 日本邮船 NYK Line
+    category: 其他
+    aliases: [日本邮船, NYK, NYK Line, Nippon Yusen, 日本郵船株式会社]
+    industry: 航运 / 物流
+    region: 日本 / 全球
+    stock_code: '9101'
+    sources:
+      - label: NYK Line News
+        url: https://www.nyk.com/english/news/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:nyk.com (日本郵船 OR "NYK Line" OR "Nippon Yusen") (news OR IR OR results OR incident)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (日本郵船 OR 9101)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(日本郵船 OR 日本邮船 OR "NYK Line") (results OR shipping OR incident OR lawsuit OR rating)'
+
+  - key: 野村
+    display_name: 野村证券 Nomura
+    category: 三大券商
+    aliases: [野村证券, 野村ホールディングス, Nomura, Nomura Holdings, Nomura Securities]
+    industry: 证券 / 金融服务
+    region: 日本 / 全球
+    stock_code: '8604'
+    sources:
+      - label: Nomura News
+        url: https://www.nomuraholdings.com/news/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:nomuraholdings.com (野村 OR Nomura) (news OR IR OR results OR compliance)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (野村 OR 8604)'
+      - label: 日本金融厅
+        url: https://www.fsa.go.jp/news/
+        source_type: regulatory
+        relation: direct
+        priority: 38
+        query: 'site:fsa.go.jp 野村 (処分 OR 行政 OR 検査 OR 業務改善)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(野村 OR Nomura) (results OR compliance OR loss OR lawsuit OR rating)'
+      - label: 野村 IR 资料室
+        url: https://www.nomuraholdings.com/jp/investor/library/report.html
+        source_type: official
+        relation: direct
+        priority: 46
+        query: 'site:nomuraholdings.com/jp/investor (野村 OR Nomura) (有価証券報告書 OR IR OR results)'
+    financial_source_page: https://www.nomuraholdings.com/jp/investor/library/report.html
+    financial_source_label: "有价证券报告书（整理自公开披露）"
+    financial_unit: "单位: 百万日元 (有价证券报告书)"
+    financial_sources:
+      - statement: income
+        label: 当期有价证券报告书 PDF
+        url: https://www.nomuraholdings.com/jp/investor/library/report/main/0114/teaserItems5/016/linkList/00/link/122_full_jsec.pdf
+      - statement: balance
+        label: 当期有价证券报告书 PDF
+        url: https://www.nomuraholdings.com/jp/investor/library/report/main/0114/teaserItems5/016/linkList/00/link/122_full_jsec.pdf
+      - statement: cashflow
+        label: 当期有价证券报告书 PDF
+        url: https://www.nomuraholdings.com/jp/investor/library/report/main/0114/teaserItems5/016/linkList/00/link/122_full_jsec.pdf
+
+  - key: 大和証券
+    display_name: 大和证券 Daiwa Securities
+    category: 三大券商
+    aliases: [大和证券, Daiwa Securities, Daiwa Securities Group, 大和証券グループ本社]
+    industry: 证券 / 金融服务
+    region: 日本 / 全球
+    stock_code: '8601'
+    sources:
+      - label: 大和证券集团 News Release
+        url: https://www.daiwa-grp.jp/english/press/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:daiwa-grp.jp (大和証券 OR "Daiwa Securities") (news OR IR OR results OR compliance)'
+      - label: TDnet 适时披露
+        url: https://www.release.tdnet.info/inbs/I_main_00.html
+        source_type: exchange
+        relation: direct
+        priority: 45
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (大和証券 OR 8601)'
+      - label: 日本金融厅
+        url: https://www.fsa.go.jp/news/
+        source_type: regulatory
+        relation: direct
+        priority: 38
+        query: 'site:fsa.go.jp 大和証券 (処分 OR 行政 OR 検査 OR 業務改善)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '(大和証券 OR 大和证券 OR "Daiwa Securities") (results OR compliance OR loss OR lawsuit OR rating)'
+      - label: 有价证券报告书一览
+        url: https://www.daiwa-grp.jp/ir/toolkit/report.html
+        source_type: official
+        relation: direct
+        priority: 46
+        query: 'site:daiwa-grp.jp/ir/toolkit/report 有価証券報告書'
+    financial_source_page: https://www.daiwa-grp.jp/ir/toolkit/report.html
+    financial_source_label: "有价证券报告书（整理自公开披露）"
+    financial_unit: "单位: 百万日元 (有价证券报告书)"
+    financial_sources:
+      - statement: income
+        label: 当期有价证券报告书 PDF
+        url: https://ssl4.eir-parts.net/doc/8601/yuho_pdf/S100YCMP/00.pdf
+      - statement: balance
+        label: 当期有价证券报告书 PDF
+        url: https://ssl4.eir-parts.net/doc/8601/yuho_pdf/S100YCMP/00.pdf
+      - statement: cashflow
+        label: 当期有价证券报告书 PDF
+        url: https://ssl4.eir-parts.net/doc/8601/yuho_pdf/S100YCMP/00.pdf
+
+  - key: SMBC日興
+    display_name: 日兴证券 SMBC Nikko
+    category: 三大券商
+    aliases: [SMBC日兴, SMBC Nikko, SMBC日興証券, ＳＭＢＣ日興証券, 日兴证券, 日興証券]
+    industry: 证券 / 金融服务
+    region: 日本
+    sources:
+      - label: SMBC Nikko Press Release
+        url: https://www.smbcnikko.co.jp/en/news/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:smbcnikko.co.jp (SMBC日興 OR "SMBC Nikko") (news OR press OR results OR compliance)'
+      - label: 日兴证券决算资料
+        url: https://www.smbcnikko.co.jp/company/finance/kessan/bn/
+        source_type: official
+        relation: direct
+        priority: 46
+        query: 'site:smbcnikko.co.jp/company/finance (日興 OR Nikko) (決算 OR 有価証券報告書 OR 財務)'
+      - label: EDINET 法定披露
+        url: https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx
+        source_type: regulatory
+        relation: direct
+        priority: 44
+        query: 'site:disclosure2.edinet-fsa.go.jp (ＳＭＢＣ日興 OR 日興証券)'
+      - label: 日本金融厅
+        url: https://www.fsa.go.jp/news/
+        source_type: regulatory
+        relation: direct
+        priority: 38
+        query: 'site:fsa.go.jp (SMBC日興 OR 日興証券) (処分 OR 行政 OR 検査 OR 業務改善)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 28
+        query: '("SMBC日興" OR "SMBC日兴" OR "SMBC Nikko" OR 日興証券) (results OR compliance OR loss OR lawsuit OR rating)'
+    financial_source_page: https://www.smbcnikko.co.jp/company/finance/kessan/bn/
+    financial_source_label: "决算资料（整理自公开披露）"
+    financial_unit: "单位: 百万日元 (决算资料)"
+    financial_sources:
+      - statement: income
+        label: 当期决算资料 PDF
+        url: https://www.smbcnikko.co.jp/company/indicator/finance/kessan/2026/q4.pdf
+      - statement: balance
+        label: 当期决算资料 PDF
+        url: https://www.smbcnikko.co.jp/company/indicator/finance/kessan/2026/q4.pdf
+      - statement: cashflow
+        label: 当期决算资料 PDF
+        url: https://www.smbcnikko.co.jp/company/indicator/finance/kessan/2026/q4.pdf
+
+  - key: Trafigura
+    display_name: 托克 Trafigura
+    category: 其他
+    aliases: [托克, Trafigura, Trafigura Group, Trafigura Beheer]
+    industry: 大宗商品贸易 / 能源
+    region: 全球
+    sources:
+      - label: Trafigura News & Insights
+        url: https://www.trafigura.com/news-insights/
+        source_type: official
+        relation: direct
+        priority: 40
+        query: 'site:trafigura.com (Trafigura OR 托克) (press OR bond OR loan OR results OR financing)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 30
+        query: '(Trafigura OR 托克) (debt OR refinancing OR bond OR lawsuit OR sanction OR rating OR loss)'
+      - label: Trafigura 年度报告
+        url: https://www.trafigura.com/news-and-insights/publications/financials/2025/2025-trafigura-annual-report/
+        source_type: official
+        relation: direct
+        priority: 46
+        query: 'site:trafigura.com (annual report OR financials OR results)'
+    financial_source_page: https://www.trafigura.com/news-and-insights/publications/financials/2025/2025-trafigura-annual-report/
+    financial_source_label: "年度报告（整理自公开披露）"
+    financial_unit: "单位: 见年度报告原文"
+    financial_sources:
+      - statement: income
+        label: 2025 年度报告
+        url: https://www.trafigura.com/news-and-insights/publications/financials/2025/2025-trafigura-annual-report/
+      - statement: balance
+        label: 2025 年度报告
+        url: https://www.trafigura.com/news-and-insights/publications/financials/2025/2025-trafigura-annual-report/
+      - statement: cashflow
+        label: 2025 年度报告
+        url: https://www.trafigura.com/news-and-insights/publications/financials/2025/2025-trafigura-annual-report/
+
+  - key: Mercuria
+    display_name: 摩科瑞 Mercuria
+    category: 其他
+    aliases: [摩科瑞, Mercuria, Mercuria Energy, Mercuria Energy Group]
+    industry: 大宗商品贸易 / 能源
+    region: 全球
+    sources:
+      - label: Mercuria Media Room
+        url: https://mercuria.com/media-room/
+        source_type: official
+        relation: direct
+        priority: 40
+        query: 'site:mercuria.com (Mercuria OR 摩科瑞) (news OR press OR results OR financing OR acquisition)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 30
+        query: '(Mercuria OR 摩科瑞 OR "Mercuria Energy") (debt OR refinancing OR bond OR lawsuit OR rating OR loss)'
+
+  - key: Vitol
+    display_name: 维多 Vitol
+    category: 其他
+    aliases: [维多, Vitol, Vitol Group]
+    industry: 大宗商品贸易 / 能源
+    region: 全球
+    sources:
+      - label: Vitol Media
+        url: https://www.vitol.com/media/
+        source_type: official
+        relation: direct
+        priority: 40
+        query: 'site:vitol.com (Vitol OR 维多) (news OR press OR results OR financing OR volumes)'
+      - label: 跨媒体主体检索
+        url: https://news.google.com/
+        source_type: media
+        relation: direct
+        priority: 30
+        query: '(Vitol OR 维多) (debt OR refinancing OR bond OR lawsuit OR rating OR loss)'

@@ -1,0 +1,22 @@
+{% for item in latest_news.headlines[:16] %}
+<article class="risk-event-card level-border-低" data-category="{{ item.risk_category }}" data-tab="{{ item.risk_tab }}">
+  <div class="risk-event-top">
+    <span class="risk-level-tag risk-tag-低">待 AI 结构化</span>
+    <span class="risk-category-chip">{{ item.risk_category }}</span>
+    {% if item.published_at %}<time class="risk-event-time">源发布时间 {{ item.published_at }}</time>{% endif %}
+  </div>
+  <h3 class="risk-event-title">{{ item.title }}</h3>
+  {% if item.overview %}
+  <div class="risk-event-detail">
+    <span class="risk-event-detail-label">内容详情</span>
+    <p>{{ item.overview }}</p>
+  </div>
+  {% endif %}
+  {% if item.risk_reasoning and item.risk_reasoning.show %}
+  <p class="risk-tip"><span>风险提示</span>{{ item.risk_reasoning.transmission }}</p>
+  {% endif %}
+  <footer class="risk-event-footer">
+    {% if item.url %}<a class="risk-event-source" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.feed_label or '查看原始来源' }}</a>{% else %}<span class="risk-event-source muted">{{ item.feed_label or '来源未标注' }}</span>{% endif %}
+  </footer>
+</article>
+{% endfor %}

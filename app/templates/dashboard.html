@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} — {{ app_name }}{% endblock %}
+
+{% block brand_sub %}{{ page_subtitle }}{% endblock %}
+
+{% block header_extra %}
+<div class="daily-header-actions">
+  <button type="button" class="daily-refresh" id="btn-run-pipeline">刷新</button>
+  <a class="daily-export" href="/api/v1/export/pdf?report_date={{ report_date }}&module_codes={{ module_codes_csv }}&window_hours={{ window_hours }}">导出</a>
+</div>
+{% endblock %}
+
+{% block page_sidebar %}
+<aside class="sidebar page-rail" data-modules="{{ module_codes_csv }}" data-page-path="{{ page_path }}">
+  <label class="daily-search" aria-label="筛选板块">
+    <input type="search" id="daily-module-search" placeholder="搜索板块" autocomplete="off" />
+    <span aria-hidden="true">⌕</span>
+  </label>
+  <h2 class="daily-index-title">⌄　索引</h2>
+  {% if news_subnav %}
+  <nav class="news-subnav" aria-label="新闻汇总分栏">
+    <a
+      href="/daily-news?report_date={{ tokyo_today or report_date }}"
+      class="news-subnav-link {% if active_page == 'daily_news' %}active{% endif %}"
+    >近24小时</a>
+    <a
+      href="/daily-news-7x24?report_date={{ report_date }}"
+      class="news-subnav-link {% if active_page == 'news_7x24' %}active{% endif %}"
+    >7×24</a>
+  </nav>
+  {% endif %}
+  <ul class="run-list daily-index-list">
+    {% for code, name in modules.items() %}
+    {% set run = run_map.get(code) %}
+    <li>
+      <a class="mod-name mod-jump" href="#module-panel-{{ code }}" data-module="{{ code }}">{{ name }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+  <div class="daily-sidebar-footer">
+    <p class="daily-rail-label">风险等级分布</p>
+    <div class="daily-risk-counts">
+      {% for level, count in stats.items() %}<span class="level level-{{ level }}">{{ level }} <b>{{ count }}</b></span>{% endfor %}
+    </div>
+    <p class="hint" id="pipeline-msg">{{ collect_label }}</p>
+  </div>
+</aside>
+{% endblock %}
+
+{% block content %}
+<main class="layout content-shell" data-modules="{{ module_codes_csv }}" data-page-path="{{ page_path }}">
+  <section class="content">
+    {% if day_tabs %}
+    <nav class="day-tabs" aria-label="近七日日期">
+      {% for tab in day_tabs %}
+      <a
+        href="{{ page_path }}?report_date={{ tab.date }}{% if selected_module %}&module_code={{ selected_module }}{% endif %}"
+        class="day-tab {% if tab.active %}active{% endif %}"
+        {% if tab.active %}aria-current="page"{% endif %}
+      >{{ tab.label }}</a>
+      {% endfor %}
+    </nav>
+    {% endif %}
+    <div class="daily-page-caption">
+      <span>{% if active_page == 'news_7x24' %}7×24 小时资讯时间轴{% else %}{{ page_title }}{% endif %}</span>
+      <small>{% if active_page == 'news_7x24' %}{{ timeline_start }} 至 {{ report_date }}{% else %}{{ report_date }}{% endif %} · {{ overview.total }} 条已收录资讯</small>
+    </div>
+
+    {% if active_page == 'news_7x24' %}
+    <section class="news-timeline" aria-label="近七日新闻时间轴">
+      <nav class="timeline-category-filters" aria-label="资讯分类筛选">
+        <button type="button" class="timeline-category-filter active" data-timeline-module="all">全部</button>
+        {% for code, name in modules.items() %}
+        <button type="button" class="timeline-category-filter" data-timeline-module="{{ code }}">{{ name }}</button>
+        {% endfor %}
+      </nav>
+      {% for e in timeline_entries %}
+      <article class="timeline-item" data-module="{{ e.module_code }}">
+        <time class="timeline-time">{% if e.published_at %}{{ e.published_at }}{% else %}发布时间待核验{% endif %}</time>
+        <div class="timeline-node" aria-hidden="true"></div>
+        <div class="timeline-card">
+          <div class="timeline-card-meta"><span>{{ modules.get(e.module_code, e.module_code) }}</span></div>
+          <h3 class="risk-event-title">{{ e.title }}</h3>
+          {% if e.overview %}
+          <div class="entry-news-detail"><span class="entry-news-detail-label">内容详情</span><p>{{ e.overview }}</p></div>
+          {% endif %}
+          {% if e.risk_reasoning and e.risk_reasoning.show %}
+          <p class="risk-tip"><span>风险提示</span>{{ e.risk_reasoning.transmission }}</p>
+          {% endif %}
+          <footer class="risk-event-footer">
+            {% if e.source_url %}<a class="risk-event-source" href="{{ e.source_url }}" target="_blank" rel="noopener noreferrer">{{ e.source_title or '查看原始来源' }}</a>{% else %}<span class="risk-event-source muted">来源未标注</span>{% endif %}
+          </footer>
+        </div>
+      </article>
+      {% else %}
+      <div class="module-status"><p class="empty-module">{{ empty_hint }}</p></div>
+      {% endfor %}
+    </section>
+    {% else %}
+    {% for code, name in modules.items() %}
+    {% if not selected_module or selected_module == code %}
+    <div class="module-panel" id="module-panel-{{ code }}">
+      <div class="module-header">
+        <h2>{{ name }}</h2>
+      </div>
+
+      {% set mod_entries = grouped_entries.get(code, []) %}
+      {% set ui = module_ui.get(code, {}) %}
+      {% if mod_entries %}
+      <div class="entry-grid risk-event-list">
+        {% for e in mod_entries %}
+        <article class="entry-card risk-event-card">
+          <div class="risk-event-top">
+            <span class="risk-level-tag risk-tag-{{ e.risk_level }}">{{ e.risk_level }}</span>
+            {% if e.category_tag %}
+            <span class="risk-category-chip">{{ e.category_tag }}</span>
+            {% elif e.risk_category %}
+            <span class="risk-category-chip">{{ e.risk_category }}</span>
+            {% else %}
+            <span class="risk-category-chip">{{ name }}</span>
+            {% endif %}
+            {% if code == "C" and e.related_company %}
+            <span class="risk-company-chip">{{ e.related_company }}</span>
+            {% endif %}
+            {% if e.published_at %}
+            <time class="risk-event-time">{{ e.published_at }}</time>
+            {% endif %}
+          </div>
+          <h3 class="risk-event-title">{{ e.title }}</h3>
+          {% if e.overview %}
+          <div class="entry-news-detail">
+            <span class="entry-news-detail-label">内容详情</span>
+            <p>{{ e.overview }}</p>
+          </div>
+          {% endif %}
+          {% if e.risk_reasoning and e.risk_reasoning.show %}
+          <p class="risk-tip"><span>风险提示</span>{{ e.risk_reasoning.transmission }}</p>
+          {% endif %}
+          <footer class="risk-event-footer">
+            {% if e.source_url %}
+            <a class="risk-event-source" href="{{ e.source_url }}" target="_blank" rel="noopener noreferrer">{{ e.source_title or '查看原始来源' }}</a>
+            {% else %}
+            <span class="risk-event-source muted">来源未标注</span>
+            {% endif %}
+          </footer>
+          <div class="chart-host" id="chart-entry-{{ e.id }}"></div>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="module-status status-{{ ui.get('state', 'idle') }}">
+        <p class="empty-module">{{ ui.get('message', '暂无条目。') }}</p>
+        {% if ui.get('state') == 'failed' %}
+        <button type="button" class="btn small secondary btn-reload-module" data-module="{{ code }}">重新加载</button>
+        {% if ui.get('detail') %}<p class="hint status-detail">{{ ui.get('detail') }}</p>{% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+
+    {% if not entries and active_page != 'news_7x24' %}
+    <p class="empty">{{ empty_hint }}</p>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.REPORT_DATE = "{{ report_date }}";
+  window.PIPELINE_MODULES = "{{ module_codes_csv }}".split(",").filter(Boolean);
+  window.NEWS_WINDOW_HOURS = {{ window_hours | int }};
+  window.ENTRY_CHARTS = {{ entry_charts_json | safe }};
+  window.AUTO_BACKFILL = {{ 'true' if auto_backfill else 'false' }};
+  window.ACTIVE_PAGE = "{{ active_page }}";
+  window.TOKYO_TODAY = "{{ tokyo_today or report_date }}";
+</script>
+<script>
+  (function () {
+    var input = document.getElementById("daily-module-search");
+    if (!input) return;
+    input.addEventListener("input", function () {
+      var keyword = input.value.trim().toLowerCase();
+      document.querySelectorAll(".daily-index-list li").forEach(function (item) {
+        item.hidden = Boolean(keyword) && item.textContent.toLowerCase().indexOf(keyword) < 0;
+      });
+    });
+  }());
+</script>
+{% if active_page == 'news_7x24' %}
+<script>
+  (function () {
+    var cards = Array.prototype.slice.call(document.querySelectorAll(".timeline-item"));
+    var buttons = Array.prototype.slice.call(document.querySelectorAll(".timeline-category-filter"));
+    if (!cards.length) return;
+    window.filterNewsTimeline = function (code) {
+      var selected = code || "all";
+      var visible = 0;
+      cards.forEach(function (card) {
+        var show = selected === "all" || card.getAttribute("data-module") === selected;
+        card.hidden = !show;
+        if (show) visible += 1;
+      });
+      buttons.forEach(function (button) {
+        button.classList.toggle("active", button.getAttribute("data-timeline-module") === selected);
+      });
+      var empty = document.getElementById("timeline-category-empty");
+      if (empty) empty.hidden = visible > 0;
+      if (selected !== "all" && history.replaceState) {
+        history.replaceState(null, "", "#module-panel-" + selected);
+      }
+    };
+    buttons.forEach(function (button) {
+      button.addEventListener("click", function () {
+        window.filterNewsTimeline(button.getAttribute("data-timeline-module"));
+      });
+    });
+    var match = (window.location.hash || "").match(/^#module-panel-(.+)$/);
+    if (match) window.filterNewsTimeline(decodeURIComponent(match[1]));
+  }());
+</script>
+{% endif %}
+{% endblock %}

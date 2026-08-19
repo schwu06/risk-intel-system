@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}{{ page_title }} — {{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/dashboard.css?v=20260819-2" />
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  {% block head_extra %}{% endblock %}
+</head>
+<body class="{% if active_page in ('daily_news', 'news_7x24') %}daily-news-ui{% endif %}">
+  <header class="top-bar">
+    <div class="brand">
+      <span class="brand-title">{{ app_name }}</span>
+      <span class="brand-sub">{% block brand_sub %}{{ page_subtitle }}{% endblock %}</span>
+    </div>
+    <nav class="main-nav" aria-label="主导航">
+      <a href="/daily-news" class="nav-link {% if active_page in ('daily_news', 'news_7x24') %}active{% endif %}">新闻汇总</a>
+      <a href="/entity-assessment" class="nav-link {% if active_page == 'entity_assessment' %}active{% endif %}">主体评估</a>
+      <a href="/deep-reports" class="nav-link {% if active_page == 'deep_reports' %}active{% endif %}">行业分析</a>
+      <a href="/intl-ratings" class="nav-link {% if active_page == 'intl_ratings' %}active{% endif %}">国际评级</a>
+    </nav>
+    <div class="header-tools">
+      {% block header_extra %}{% endblock %}
+    </div>
+  </header>
+
+  {# 页面默认两栏；仅深度研报通过 source_panel block 增加右侧数据源栏。 #}
+  <div class="app-shell" id="app-shell">
+    {% block page_sidebar %}{% endblock %}
+    <div class="app-main">
+      {% block content %}{% endblock %}
+    </div>
+    {% block source_panel %}{% endblock %}
+  </div>
+
+  <script src="/static/js/dashboard.js?v=20260819-3"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
