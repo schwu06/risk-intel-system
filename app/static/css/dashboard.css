@@ -1388,19 +1388,29 @@ body.daily-news-ui .entry-card.risk-event-card {
   background: #fff;
 }
 
-body.daily-news-ui .entry-card.risk-event-card::before {
-  content: "";
-  display: block;
-  width: 4px;
-  height: 27px;
-  margin-bottom: 0.75rem;
-  background: #f2ba91;
-}
-
-body.daily-news-ui #module-panel-C .entry-card.risk-event-card::before { background: #a8cee0; }
-body.daily-news-ui #module-panel-D .entry-card.risk-event-card::before { background: #b8c9a5; }
 body.daily-news-ui .risk-event-top { display: none; }
-body.daily-news-ui .risk-event-title { margin: 0 0 0.55rem; color: #202530; font-size: 1.05rem; line-height: 1.5; }
+body.daily-news-ui .risk-event-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  margin: 0 0 0.55rem;
+  color: #202530;
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+body.daily-news-ui .risk-event-title::before {
+  content: "";
+  flex: 0 0 5px;
+  width: 5px;
+  height: 1.7rem;
+  margin-top: 0.05rem;
+  border-radius: 1px;
+  background: #c8cfd8;
+}
+body.daily-news-ui [data-risk-level="低"] .risk-event-title::before { background: #b9c1cb; }
+body.daily-news-ui [data-risk-level="中"] .risk-event-title::before { background: #90b5dc; }
+body.daily-news-ui [data-risk-level="高"] .risk-event-title::before { background: #f2ad7b; }
+body.daily-news-ui [data-risk-level="极高"] .risk-event-title::before { background: #dd7979; }
 body.daily-news-ui .entry-news-detail {
   margin: 0.2rem 0 0.85rem;
   padding: 0.1rem 0 0.05rem;
