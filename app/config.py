@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     # 内容摘要必须基于新闻详情页正文，不以标题/RSS 片段扩写。
     news_fetch_body: bool = True
     news_max_body_items: int = 12
+    # 页面只读取已存资讯；为空时由用户手动刷新，避免每次重新打开页面都触发采集。
+    news_auto_backfill_on_empty: bool = False
     # 外网偶发 DNS/超时：自动重试，提高一次采集成功率
     network_retry_attempts: int = 2
     network_retry_backoff_seconds: float = 1.2

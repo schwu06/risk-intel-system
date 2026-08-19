@@ -157,6 +157,9 @@ NEWS_WINDOW_HOURS=24
 
 # 是否抓取新闻正文；开启后摘要和风险判断更准确，但速度较慢
 NEWS_FETCH_BODY=true
+
+# 页面无已存新闻时不自动重新采集；需要更新时点击“刷新”
+NEWS_AUTO_BACKFILL_ON_EMPTY=false
 ```
 
 ## 信息源与配置文件

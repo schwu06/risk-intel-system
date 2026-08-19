@@ -201,7 +201,7 @@
 
 {% block scripts %}
 {{ super() }}
-<script src="/static/js/news_risk_filters.js?v=20260819-2"></script>
+<script src="/static/js/news_risk_filters.js?v=20260819-3"></script>
 <script>
   window.REPORT_DATE = "{{ report_date }}";
   window.PIPELINE_MODULES = "{{ module_codes_csv }}".split(",").filter(Boolean);
@@ -216,11 +216,19 @@
     var toggle = document.getElementById("news-filter-toggle");
     var panel = document.getElementById("news-filter-panel");
     if (toggle && panel) {
+      var panelKey = "riskintel:news-filter-panel:v1:" + window.location.pathname;
+      try {
+        var savedOpen = window.localStorage.getItem(panelKey) === "open";
+        panel.hidden = !savedOpen;
+        toggle.setAttribute("aria-expanded", String(savedOpen));
+        toggle.classList.toggle("active", savedOpen);
+      } catch (e) { /* ignore */ }
       toggle.addEventListener("click", function () {
         var willOpen = panel.hidden;
         panel.hidden = !willOpen;
         toggle.setAttribute("aria-expanded", String(willOpen));
         toggle.classList.toggle("active", willOpen);
+        try { window.localStorage.setItem(panelKey, willOpen ? "open" : "closed"); } catch (e) { /* ignore */ }
       });
     }
     var input = document.getElementById("daily-module-search");

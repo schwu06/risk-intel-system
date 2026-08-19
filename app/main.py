@@ -417,6 +417,7 @@ def _daily_news_context(
             page_key == "news_7x24"
             and not entries
             and not run_map
+            and settings.news_auto_backfill_on_empty
         ),
     }
 
