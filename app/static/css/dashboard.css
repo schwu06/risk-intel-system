@@ -1224,9 +1224,10 @@ body.daily-news-ui .nav-link.active {
 body.daily-news-ui .app-shell {
   max-width: 1544px;
   width: calc(100% - 5rem);
+  height: calc(100vh - 68px);
   margin: 0 auto;
-  min-height: calc(100vh - 68px);
-  flex: none;
+  min-height: 0;
+  flex: 1 1 auto;
   background: #eef0f3;
 }
 
