@@ -1472,26 +1472,54 @@ body.daily-news-ui .module-status { padding: 1.1rem 1.3rem; border-radius: 12px;
 .timeline-category-filter:hover { color: #3f5067; background: #f4f6f9; }
 .timeline-category-filter.active { border-color: #8796ac; background: #eaf0f6; color: #405b78; font-weight: 700; }
 
-.news-risk-filters {
+.news-filter-panel {
+  display: grid;
+  justify-items: start;
+  gap: 0.8rem;
+  margin: 0 0 1.15rem 0.15rem;
+}
+
+.news-risk-filters,
+.news-level-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem;
-  margin: 0 0 1rem 0.15rem;
+  gap: 0.55rem 0.75rem;
 }
 
-.news-risk-filter {
-  padding: 0.38rem 0.7rem;
-  border: 1px solid #dbe1e8;
-  border-radius: 999px;
-  background: #fff;
-  color: #627287;
+.news-level-filters {
+  justify-content: center;
+  width: min(100%, 34rem);
+}
+
+.news-risk-filter,
+.news-level-filter {
+  min-width: 8rem;
+  padding: 0.48rem 0.9rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: #e9edf2;
+  color: #526272;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.88rem;
+  line-height: 1.2;
   cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
 
-.news-risk-filter:hover { color: #405b78; background: #f4f7fa; }
-.news-risk-filter.active { border-color: #7189a4; background: #eaf1f8; color: #385977; font-weight: 700; }
+.news-risk-filter:hover,
+.news-risk-filter.active { background: #dce7f4; color: #405f82; box-shadow: inset 0 0 0 1px #c3d2e2; font-weight: 700; }
+.news-level-filter { min-width: 6.7rem; }
+.news-level-filter.level-low { background: #edf0f3; }
+.news-level-filter.level-medium { background: #e4eef9; color: #496988; }
+.news-level-filter.level-high { background: #faf0d7; color: #936c1c; }
+.news-level-filter.level-extreme { background: #f7e1e1; color: #a34a4a; }
+.news-level-filter.active { box-shadow: inset 0 0 0 2px currentColor; font-weight: 750; }
+
+@media (max-width: 640px) {
+  .news-risk-filter { min-width: 0; }
+  .news-level-filters { justify-content: flex-start; width: 100%; }
+  .news-level-filter { min-width: 4.6rem; }
+}
 
 .news-timeline::before {
   content: "";
