@@ -6,8 +6,8 @@
 
 {% block page_sidebar %}
 <aside class="sidebar page-rail" data-modules="{{ module_codes_csv }}" data-page-path="{{ page_path }}">
-  <label class="daily-search" aria-label="筛选板块">
-    <input type="search" id="daily-module-search" placeholder="搜索板块" autocomplete="off" />
+  <label class="daily-search" aria-label="搜索新闻">
+    <input type="search" id="daily-module-search" placeholder="搜索新闻、来源或日期" autocomplete="off" />
     <span aria-hidden="true">⌕</span>
   </label>
   <h2 class="daily-index-title">⌄　索引</h2>
@@ -95,7 +95,7 @@
     {% if active_page == 'news_7x24' %}
     <section class="news-timeline" aria-label="近七日新闻时间轴">
       {% for e in timeline_entries %}
-      <article class="timeline-item" data-module="{{ e.module_code }}" data-risk-tags="{{ e.risk_tags|join('|') }}" data-risk-level="{{ e.risk_level }}">
+      <article class="timeline-item" data-module="{{ e.module_code }}" data-risk-tags="{{ e.risk_tags|join('|') }}" data-risk-level="{{ e.risk_level }}" data-news-search="{{ (e.title or '') ~ ' ' ~ (e.overview or '') ~ ' ' ~ (e.source_title or '') ~ ' ' ~ (e.published_at|string) ~ ' ' ~ (e.risk_tags|join(' ')) ~ ' ' ~ modules.get(e.module_code, '') }}">
         <time class="timeline-time">{% if e.published_at %}{{ e.published_at }}{% else %}发布时间待核验{% endif %}</time>
         <div class="timeline-node" aria-hidden="true"></div>
         <div class="timeline-card">
@@ -132,7 +132,7 @@
       {% if mod_entries %}
       <div class="entry-grid risk-event-list">
         {% for e in mod_entries %}
-        <article class="entry-card risk-event-card" data-risk-tags="{{ e.risk_tags|join('|') }}" data-risk-level="{{ e.risk_level }}">
+        <article class="entry-card risk-event-card" data-risk-tags="{{ e.risk_tags|join('|') }}" data-risk-level="{{ e.risk_level }}" data-news-search="{{ (e.title or '') ~ ' ' ~ (e.overview or '') ~ ' ' ~ (e.source_title or '') ~ ' ' ~ (e.published_at|string) ~ ' ' ~ (e.risk_tags|join(' ')) ~ ' ' ~ name }}">
           <div class="risk-event-top">
             <span class="risk-level-tag risk-tag-{{ e.risk_level }}">{{ e.risk_level }}</span>
             {% if e.category_tag %}
@@ -193,13 +193,14 @@
     {% if not entries and active_page != 'news_7x24' %}
     <p class="empty">{{ empty_hint }}</p>
     {% endif %}
+    <p class="news-search-empty" id="news-search-empty" hidden>未找到匹配的新闻，请尝试标题关键词、来源名称或日期（例如 2026-08-19）。</p>
   </section>
 </main>
 {% endblock %}
 
 {% block scripts %}
 {{ super() }}
-<script src="/static/js/news_risk_filters.js?v=20260819-3"></script>
+<script src="/static/js/news_risk_filters.js?v=20260819-4"></script>
 <script>
   window.REPORT_DATE = "{{ report_date }}";
   window.PIPELINE_MODULES = "{{ module_codes_csv }}".split(",").filter(Boolean);
@@ -240,14 +241,6 @@
         try { window.localStorage.setItem(panelKey, willOpen ? "open" : "closed"); } catch (e) { /* ignore */ }
       });
     }
-    var input = document.getElementById("daily-module-search");
-    if (!input) return;
-    input.addEventListener("input", function () {
-      var keyword = input.value.trim().toLowerCase();
-      document.querySelectorAll(".daily-index-list li").forEach(function (item) {
-        item.hidden = Boolean(keyword) && item.textContent.toLowerCase().indexOf(keyword) < 0;
-      });
-    });
   }());
 </script>
 {% if active_page == 'news_7x24' %}

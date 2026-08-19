@@ -1271,6 +1271,15 @@ body.daily-news-ui .app-shell > .page-rail {
 
 .daily-search input::placeholder { color: #9ba2ab; }
 .daily-search span { font-size: 1.25rem; line-height: 0.8; }
+.news-search-empty {
+  margin: 1.5rem 0;
+  padding: 1.15rem;
+  border: 1px dashed #cfd8e3;
+  border-radius: 0.75rem;
+  background: #fff;
+  color: #738195;
+  text-align: center;
+}
 
 body.daily-news-ui .sidebar .daily-index-title {
   margin: 1.5rem 0 0.8rem;
