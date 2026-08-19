@@ -689,7 +689,7 @@ a:hover {
 }
 
 .level-低 { color: var(--level-low); }
-.level-中 { color: var(--level-mid); }
+.level-中 { color: #5e89bc; }
 .level-高 { color: var(--level-high); }
 .level-极高 { color: var(--level-critical); }
 
@@ -1084,7 +1084,7 @@ a:hover {
 }
 
 .level-border-低 { border-left: 3px solid var(--level-low); }
-.level-border-中 { border-left: 3px solid var(--level-mid); }
+.level-border-中 { border-left: 3px solid #8fb4de; }
 .level-border-高 { border-left: 3px solid var(--level-high); }
 .level-border-极高 { border-left: 3px solid var(--level-critical); }
 
@@ -1540,7 +1540,7 @@ body.daily-news-ui .risk-event-title::before {
   background: #c8cfd8;
 }
 body.daily-news-ui [data-risk-level="低"] .risk-event-title::before { background: #b9c1cb; }
-body.daily-news-ui [data-risk-level="中"] .risk-event-title::before { background: #90b5dc; }
+body.daily-news-ui [data-risk-level="中"] .risk-event-title::before { background: #8fb4de; }
 body.daily-news-ui [data-risk-level="高"] .risk-event-title::before { background: #f2ad7b; }
 body.daily-news-ui [data-risk-level="极高"] .risk-event-title::before { background: #dd7979; }
 body.daily-news-ui .entry-news-detail {
