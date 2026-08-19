@@ -25,7 +25,14 @@ from intl_ratings.issuers_store import IssuersStore
 from intl_ratings.llm_client import LlmClient
 from intl_ratings.logging_utils import ErrorIssuerLogger, RawResponseStore
 from intl_ratings.mapper import EntityMapper
-from intl_ratings.models import NEED_REVIEW, NR, IssuerAnalysisResult, IssuerRiskModel
+from intl_ratings.models import (
+    NEED_REVIEW,
+    NR,
+    FinancialSnapshot,
+    IssuerAnalysisResult,
+    IssuerRiskModel,
+    ListingSnapshot,
+)
 from intl_ratings.openfigi import OpenFigiClient
 from intl_ratings.report import export_excel
 
@@ -134,22 +141,26 @@ class IntlRatingsPipeline:
         mapping = self.mapper.map(issuer_name)
 
         # 国内公告/货币网：AkShare（溯源落盘）
-        if self.cfg.sources.akshare:
+        if self.cfg.sources.akshare and not self.cfg.runtime.market_only:
             try:
                 self.ak_cn.fetch_cn_disclosures(mapping)
             except Exception as exc:
                 logger.debug("AkShare 国内披露失败: %s", exc)
 
         # 美股 SEC 财报下载（有 us_ticker/cik 时）
-        if self.sec_edgar is not None:
+        if self.sec_edgar is not None and not self.cfg.runtime.market_only:
             try:
                 self.sec_edgar.download_filings(mapping)
             except Exception as exc:
                 logger.debug("SEC EDGAR 失败: %s", exc)
 
         ratings = self.ratings.fetch(mapping)
-        financials = self.financials.fetch(mapping)
-        listing = self.listing.fetch(mapping)
+        if self.cfg.runtime.market_only:
+            financials = FinancialSnapshot()
+            listing = ListingSnapshot()
+        else:
+            financials = self.financials.fetch(mapping)
+            listing = self.listing.fetch(mapping)
         bond_price = self.bonds.fetch(mapping)
 
         no_reason = ""

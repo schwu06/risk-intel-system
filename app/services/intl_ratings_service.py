@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote
 
 try:
     from intl_ratings.config import get_intl_config
@@ -117,6 +118,18 @@ def _placeholder_row(idx: int, name: str, category: str) -> dict[str, Any]:
         "ratingChanged": "否",
         "rssUrl": "",
     }
+
+
+def _market_source_url(pipeline: Any, issuer_name: str) -> str:
+    """为自动取得股票市场代理的发行体提供可直接复核的公开历史行情链接。"""
+    try:
+        record = pipeline.issuers_store.get(issuer_name)
+        ticker = (record.stock_ticker if record else "") or ""
+        if ticker:
+            return "https://finance.yahoo.com/quote/" + quote(ticker, safe=".") + "/history"
+    except Exception:
+        pass
+    return ""
 
 
 def load_snapshot() -> dict[str, Any]:
@@ -241,11 +254,16 @@ def _run_job(*, job_id: str, limit: int, quick: bool) -> None:
         if limit and limit > 0:
             cfg.runtime.max_issuers = int(limit)
         if quick:
-            # 网页快速刷新：跳过耗时 Playwright / OpenFIGI
+            # 页面手动刷新只更新三大评级与市场信号；跳过不在当前面板展示的
+            # 财务、国内公告、TradingView 与网页自动化探测，避免整页长时间阻塞。
             cfg.sources.playwright_ratings = False
             cfg.sources.openfigi = False
             cfg.sources.sec_edgar = False
+            cfg.sources.akshare = False
+            cfg.sources.tvdatafeed = False
+            cfg.entity_mapper.use_llm = False
             cfg.runtime.sleep_between_issuers = 0.1
+            cfg.runtime.market_only = True
 
         # 分类映射
         input_dir = cfg.resolve(cfg.paths.input_dir)
@@ -254,8 +272,9 @@ def _run_job(*, job_id: str, limit: int, quick: bool) -> None:
             cat_map = {r["name"]: r.get("category") or "" for r in records}
             names = [r["name"] for r in records]
         except Exception:
-            cat_map = {}
-            names = None
+            # 项目未附带 CSV 时仍按界面内置发行体清单执行，避免“手动更新”空跑。
+            cat_map = dict(_CATEGORY_FALLBACK)
+            names = list(_CATEGORY_FALLBACK)
 
         if limit and limit > 0 and names:
             names = names[:limit]
@@ -281,7 +300,7 @@ def _run_job(*, job_id: str, limit: int, quick: bool) -> None:
                     "priceDrop": d.get("债券价格是否大幅下跌（月环比跌幅超过5%）等") or "",
                     "noRatingReason": d.get("皆无评级的話请写明理由") or "",
                     "ratingChanged": d.get("评级是否变化") or "",
-                    "rssUrl": "",
+                    "rssUrl": _market_source_url(pipeline, name),
                 }
             )
 

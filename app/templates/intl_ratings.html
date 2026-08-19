@@ -47,21 +47,21 @@
   <section class="content ir-content">
     <header class="ir-page-header">
       <h1>国际评级监测表</h1>
-      <p class="ir-page-desc">聚合穆迪、标普、惠誉公开评级及经营、市场预警信号；仅用于日常监测与人工复核。</p>
+      <p class="ir-page-desc">聚合穆迪、标普、惠誉主体评级与公开市场信号；仅用于日常监测与人工复核。</p>
     </header>
 
     <section class="ir-overview" aria-label="评级监测概览">
       <article><span>监测发行体</span><strong id="ir-stat-total">—</strong></article>
       <article><span>存在公开评级</span><strong id="ir-stat-rated">—</strong></article>
       <article><span>评级变动信号</span><strong id="ir-stat-changes">—</strong></article>
-      <article><span>经营／市场预警</span><strong id="ir-stat-alerts">—</strong></article>
+      <article><span>市场预警</span><strong id="ir-stat-alerts">—</strong></article>
     </section>
 
     <nav class="ir-filter-bar" aria-label="评级监测筛选">
       <button type="button" class="ir-filter active" data-ir-filter="all">全部</button>
       <button type="button" class="ir-filter" data-ir-filter="rated">有评级</button>
       <button type="button" class="ir-filter" data-ir-filter="changed">评级变动</button>
-      <button type="button" class="ir-filter" data-ir-filter="alert">预警信号</button>
+      <button type="button" class="ir-filter" data-ir-filter="market">市场预警</button>
     </nav>
 
     <div class="ir-table-wrap" id="ir-table-wrap">
@@ -71,9 +71,7 @@
             <th class="col-issuer">发行体</th>
             <th class="col-rating-pack">三大评级</th>
             <th class="col-change">评级变动</th>
-            <th class="col-signal">经营／信用信号</th>
             <th class="col-signal">市场信号</th>
-            <th class="col-reason">评级说明</th>
             <th class="col-rss">来源</th>
           </tr>
         </thead>
@@ -86,5 +84,5 @@
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="/static/js/intl_ratings.js?v=20260819-2"></script>
+<script src="/static/js/intl_ratings.js?v=20260819-3"></script>
 {% endblock %}

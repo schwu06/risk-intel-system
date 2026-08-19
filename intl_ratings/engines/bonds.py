@@ -1,8 +1,9 @@
-"""债券价格异动：yfinance + tvDatafeed + AkShare bond_zh_cov。"""
+"""市场价格信号：债券优先，缺失时使用上市主体股票作为明确标注的代理。"""
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from intl_ratings.config import BondPriceConfig, SourcesConfig
@@ -42,6 +43,7 @@ class BondPriceEngine:
         details: list[dict[str, Any]] = []
         best_change: Optional[float] = None
         checked: list[str] = []
+        market_proxy = "债券"
 
         # 1) tvDatafeed（TradingView 债券行情优先）
         if self.sources.tvdatafeed and self.tv_client is not None:
@@ -63,7 +65,19 @@ class BondPriceEngine:
                 if best_change is None or chg < best_change:
                     best_change = chg
 
-        # 3) AkShare 可转债截面（通常无法算 30 日）
+        # 3) 没有可公开取得的债券行情时，使用上市主体的股票近一个月表现。
+        # 这不是债券价格，故在返回字段中明确标记为“股票市场代理”。
+        if best_change is None and self.sources.yfinance and mapping.financial_ticker:
+            ticker = mapping.financial_ticker
+            chg, meta = self._yf_1mo_change(ticker)
+            meta["market_proxy"] = "equity"
+            details.append(meta)
+            if chg is not None:
+                best_change = chg
+                market_proxy = "股票市场代理"
+                checked.append(ticker)
+
+        # 4) AkShare 可转债截面（通常无法算 30 日）
         if best_change is None and self.sources.akshare:
             chg, meta = self._ak_bond_zh_cov(mapping)
             details.append(meta)
@@ -96,12 +110,15 @@ class BondPriceEngine:
             threshold_pct=self.threshold,
             no_public_label=self.no_public_label,
         )
+        label = f"{market_proxy}近1月 {best_change:+.1f}%"
+        if flag == "是":
+            label += "（跌幅超过5%）"
         return BondPriceSnapshot(
-            price_drop_flag=flag,
+            price_drop_flag=label,
             change_pct=best_change,
             max_drop_pct=(-best_change if best_change < 0 else 0.0),
             tickers_checked=checked,
-            raw_source="tvdatafeed|yfinance|akshare",
+            raw_source=f"{market_proxy}:tvdatafeed|yfinance|akshare",
         )
 
     def _yf_1mo_change(self, ticker: str) -> tuple[Optional[float], dict[str, Any]]:
@@ -109,17 +126,18 @@ class BondPriceEngine:
         try:
             import yfinance as yf  # type: ignore
         except ImportError:
-            meta["error"] = "yfinance_missing"
-            return None, meta
+            # yfinance 是可选依赖。没有安装时直接调用 Yahoo Finance 的公开图表端点，
+            # 使已映射的上市主体仍能生成可复核的市场代理信号。
+            return self._yahoo_chart_1mo_change(ticker, meta)
         try:
             hist = yf.Ticker(ticker).history(period="1mo")
             if hist is None or hist.empty or "Close" not in hist.columns:
                 meta["status"] = "no_data"
-                return None, meta
+                return self._yahoo_chart_1mo_change(ticker, meta)
             closes = hist["Close"].dropna()
             if len(closes) < 2:
                 meta["status"] = "too_short"
-                return None, meta
+                return self._yahoo_chart_1mo_change(ticker, meta)
             price_30d_ago = float(closes.iloc[0])
             price_now = float(closes.iloc[-1])
             change_pct = calc_month_change_pct(price_now, price_30d_ago)
@@ -129,6 +147,48 @@ class BondPriceEngine:
                     "price_now": price_now,
                     "change_pct": change_pct,
                     "n_bars": len(closes),
+                }
+            )
+            return change_pct, meta
+        except Exception as exc:
+            meta["error"] = str(exc)
+            return self._yahoo_chart_1mo_change(ticker, meta)
+
+    @staticmethod
+    def _yahoo_chart_1mo_change(
+        ticker: str, previous_meta: Optional[dict[str, Any]] = None
+    ) -> tuple[Optional[float], dict[str, Any]]:
+        """Yahoo Finance 公开图表端点兜底；只读取近一个月收盘价。"""
+        meta = dict(previous_meta or {})
+        meta["ticker"] = ticker
+        meta["source"] = "Yahoo Finance chart (public)"
+        try:
+            import requests
+
+            response = requests.get(
+                "https://query1.finance.yahoo.com/v8/finance/chart/" + ticker,
+                params={"range": "1mo", "interval": "1d", "events": "history"},
+                timeout=15,
+                headers={"User-Agent": "RiskIntelSystem/1.0 (market-monitoring)"},
+            )
+            response.raise_for_status()
+            result = (response.json().get("chart") or {}).get("result") or []
+            if not result:
+                meta["status"] = "no_data"
+                return None, meta
+            closes = ((result[0].get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+            values = [float(value) for value in closes if value is not None]
+            if len(values) < 2:
+                meta["status"] = "too_short"
+                return None, meta
+            change_pct = calc_month_change_pct(values[-1], values[0])
+            meta.update(
+                {
+                    "price_30d_ago": values[0],
+                    "price_now": values[-1],
+                    "change_pct": change_pct,
+                    "n_bars": len(values),
+                    "fetched_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
             return change_pct, meta

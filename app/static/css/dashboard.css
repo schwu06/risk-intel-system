@@ -3924,6 +3924,7 @@ body.daily-news-ui .module-status { padding: 1.1rem 1.3rem; border-radius: 12px;
 .ir-rating-pill.is-nr b { background: #f0f2f4; color: #8a929e; }
 .ir-signal { display: inline-block; font-size: 0.78rem; line-height: 1.45; }
 .ir-signal.muted { color: #87909d; }
+.ir-signal.review { color: #8b7449; }
 .ir-signal.alert { color: #9b5e39; font-weight: 600; }
 
 .ir-empty-row td {

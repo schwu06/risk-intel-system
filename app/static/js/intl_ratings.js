@@ -60,11 +60,11 @@
   function text(v) { return String(v == null ? "" : v).trim(); }
   function isRated(r) { return [r.moodys, r.sp, r.fitch].some(function (v) { return text(v) && text(v).toUpperCase() !== "NR" && text(v) !== "—"; }); }
   function isChanged(r) { return /是|yes|变动|上调|下调|调整/i.test(text(r.ratingChanged)); }
-  function hasAlert(r) { return /是|yes|亏损|废止|下跌|风险|预警/i.test([r.loss, r.delisted, r.priceDrop].map(text).join(" ")); }
+  function hasMarketAlert(r) { return /是|yes|下跌|跌幅|风险|预警/i.test(text(r.priceDrop)); }
   function matchesFilter(r) {
     if (activeFilter === "rated") return isRated(r);
     if (activeFilter === "changed") return isChanged(r);
-    if (activeFilter === "alert") return hasAlert(r);
+    if (activeFilter === "market") return hasMarketAlert(r);
     return true;
   }
 
@@ -114,21 +114,23 @@
   function signalHtml(value, emptyText) {
     var v = text(value);
     if (!v || v === "否" || v.toLowerCase() === "no" || v === "无") return '<span class="ir-signal muted">' + escapeHtml(emptyText || "无异常") + "</span>";
+    if (/无公开交易数据|暂无公开行情|待接入|需人工复核/i.test(v)) return '<span class="ir-signal review">' + escapeHtml(v) + "</span>";
     return '<span class="ir-signal alert">' + escapeHtml(v) + "</span>";
   }
 
-  function combinedSignal(values, emptyText) {
-    var signals = values.map(text).filter(function (v) {
-      return v && v !== "否" && v.toLowerCase() !== "no" && v !== "无";
-    });
-    return signalHtml(signals.join("；"), emptyText);
+  function marketSignalHtml(value) {
+    var v = text(value);
+    if (!v || v === "否" || v.toLowerCase() === "no" || v === "无") return '<span class="ir-signal muted">未见异常</span>';
+    if (/无公开交易数据|暂无公开行情|待接入|需人工复核/i.test(v)) return '<span class="ir-signal review">' + escapeHtml(v) + "</span>";
+    if (/跌幅超过|风险|预警/i.test(v)) return '<span class="ir-signal alert">' + escapeHtml(v) + "</span>";
+    return '<span class="ir-signal muted">' + escapeHtml(v) + "</span>";
   }
 
   function renderTable(list) {
     if (!els.tbody) return;
     if (!list.length) {
       els.tbody.innerHTML =
-        '<tr class="ir-empty-row"><td colspan="7">暂无匹配数据</td></tr>';
+        '<tr class="ir-empty-row"><td colspan="5">暂无匹配数据</td></tr>';
       return;
     }
     els.tbody.innerHTML = list
@@ -145,9 +147,7 @@
           cellHtml(r.issuer, "col-issuer") +
           ratingPackHtml(r) +
           '<td class="ir-cell col-change">' + signalHtml(r.ratingChanged, "未见变动") + "</td>" +
-          '<td class="ir-cell col-signal">' + combinedSignal([r.loss, r.delisted], "未见异常") + "</td>" +
-          '<td class="ir-cell col-signal">' + signalHtml(r.priceDrop, "未见异常") + "</td>" +
-          cellHtml(r.noRatingReason, "col-reason") +
+          '<td class="ir-cell col-signal">' + marketSignalHtml(r.priceDrop) + "</td>" +
           '<td class="ir-cell col-rss">' +
           (r.rssUrl ? '<button type="button" class="btn small ir-rss-btn" data-issuer-id="' + escapeHtml(r.id) + '">查看来源</button>' : '<span class="ir-signal muted">待接入</span>') +
           "</td>" +
@@ -226,7 +226,7 @@
     var total = rows.length;
     var rated = rows.filter(isRated).length;
     var changed = rows.filter(isChanged).length;
-    var alerts = rows.filter(hasAlert).length;
+    var alerts = rows.filter(hasMarketAlert).length;
     if (els.statTotal) els.statTotal.textContent = total;
     if (els.statRated) els.statRated.textContent = rated;
     if (els.statChanges) els.statChanges.textContent = changed;
@@ -276,12 +276,9 @@
       "穆迪评级",
       "标普评级",
       "惠誉评级",
-      "债务人最近一期決算是否亏损(是/否)",
-      "是否上市（是/否）",
-      "若上市，债务人是否被上市废止(是/否)",
-      "债券价格是否大幅下跌（月环比跌幅超过5%）等",
-      "皆无评级的話请写明理由",
-      "评级是否变化",
+      "评级变动",
+      "市场信号（近 1 个月）",
+      "信息源",
     ];
     var data = [header].concat(
       list.map(function (r) {
@@ -291,12 +288,9 @@
           r.moodys,
           r.sp,
           r.fitch,
-          r.loss,
-          r.listed,
-          r.delisted,
-          r.priceDrop,
-          r.noRatingReason,
           r.ratingChanged,
+          r.priceDrop,
+          r.rssUrl || "",
         ];
       })
     );

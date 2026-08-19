@@ -98,6 +98,7 @@ class RuntimeConfig(BaseModel):
     request_timeout_seconds: int = 60
     max_issuers: int = 0
     sleep_between_issuers: float = 0.4
+    market_only: bool = False
 
 
 class IntlRatingsConfig(BaseModel):
