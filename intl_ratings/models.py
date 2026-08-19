@@ -49,6 +49,7 @@ class EntityMapping(BaseModel):
     # 美股 SEC：sec-edgar-downloader
     us_ticker: str = ""
     cik: str = ""
+    official_rating_url: str = ""
     is_offshore_spv: bool = False
     guarantor_name: str = ""
     mapping_source: str = "unknown"
@@ -73,6 +74,7 @@ class RatingSnapshot(BaseModel):
     fitch: str = NR
     rating_changed: str = NO
     raw_source: str = ""
+    source_urls: list[str] = Field(default_factory=list)
 
     @field_validator("moodys", "sp", "fitch", mode="before")
     @classmethod
@@ -135,6 +137,8 @@ class IssuerRiskModel(BaseModel):
     )
     皆无评级理由: str = Field(default="", alias="皆无评级的話请写明理由")
     评级是否变化: str = NO
+    # 非导出字段：页面“来源”按钮使用，仅保留三大评级机构官方链接。
+    rating_source_urls: list[str] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}
 
@@ -169,5 +173,6 @@ class IssuerAnalysisResult(BaseModel):
                 "债券价格是否大幅下跌（月环比跌幅超过5%）等": self.bond_price.price_drop_flag,
                 "皆无评级的話请写明理由": self.no_rating_reason,
                 "评级是否变化": self.ratings.rating_changed,
+                "rating_source_urls": self.ratings.source_urls,
             }
         )

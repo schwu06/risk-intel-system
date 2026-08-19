@@ -73,6 +73,7 @@
       "bond_tickers": [],
       "isin": "JP3551500006",
       "figi": "",
+      "official_rating_url": "https://www.denso.com/global/en/about-us/investors/stock/bond/",
       "is_offshore_spv": false,
       "notes": ""
     },
@@ -84,6 +85,7 @@
       "bond_tickers": [],
       "isin": "JP3898400001",
       "figi": "",
+      "official_rating_url": "https://www.mitsubishicorp.com/jp/en/ir/finance/bond/",
       "is_offshore_spv": false,
       "notes": ""
     },
@@ -117,6 +119,7 @@
       "bond_tickers": [],
       "isin": "JP3877600001",
       "figi": "",
+      "official_rating_url": "https://www.marubeni.com/en/ir/finance/rating/",
       "is_offshore_spv": false,
       "notes": ""
     },
@@ -139,6 +142,7 @@
       "bond_tickers": [],
       "isin": "JP3200450009",
       "figi": "",
+      "official_rating_url": "https://www.orix.co.jp/grp/en/ir/stock/ratinginfo.html",
       "is_offshore_spv": false,
       "notes": ""
     },

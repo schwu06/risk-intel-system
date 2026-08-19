@@ -142,6 +142,7 @@ class EntityMapper:
             tv_exchange=rec.tv_exchange,
             us_ticker=rec.us_ticker,
             cik=rec.cik,
+            official_rating_url=rec.official_rating_url,
             is_offshore_spv=rec.is_offshore_spv,
             guarantor_name=rec.guarantor_name
             or (rec.parent_name if rec.is_offshore_spv else ""),

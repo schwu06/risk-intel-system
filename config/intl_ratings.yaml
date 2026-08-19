@@ -43,6 +43,10 @@ sources:
   playwright_ratings: true   # 未上市且 API 无评级时 Playwright 兜底
   bond_price_public: true
   rating_change_feed: false
+  # 可选搜索补缺：默认关闭，避免消耗检索额度；优先抓 config/issuers.json 中配置的发行人官网 IR 评级页。
+  official_public_ratings: false
+  official_public_rating_max_results: 8
+  official_public_rating_max_queries_per_run: 20
 
 playwright_ratings:
   headless: true

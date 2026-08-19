@@ -297,7 +297,14 @@ def _run_job(*, job_id: str, limit: int, quick: bool) -> None:
         except Exception:
             # 项目未附带 CSV 时仍按界面内置发行体清单执行，避免“手动更新”空跑。
             cat_map = dict(_CATEGORY_FALLBACK)
-            names = list(_CATEGORY_FALLBACK)
+            # 先处理已有实体映射的主体，提高免费公开检索命中率；其余清单仍保留。
+            mapped_names: list[str] = []
+            try:
+                mappings = json.loads(cfg.resolve(cfg.paths.issuers_json).read_text(encoding="utf-8"))
+                mapped_names = [name for name in (mappings.get("issuers") or {}) if name in cat_map]
+            except Exception:
+                pass
+            names = mapped_names + [name for name in _CATEGORY_FALLBACK if name not in mapped_names]
 
         if limit and limit > 0 and names:
             names = names[:limit]
@@ -322,6 +329,7 @@ def _run_job(*, job_id: str, limit: int, quick: bool) -> None:
                     "priceDrop": d.get("债券价格是否大幅下跌（月环比跌幅超过5%）等") or "",
                     "noRatingReason": d.get("皆无评级的話请写明理由") or "",
                     "ratingChanged": d.get("评级是否变化") or "否",
+                    "ratingSourceUrl": (getattr(row, "rating_source_urls", None) or [""])[0],
                     "rssUrl": _market_source_url(pipeline, name),
                 }
             api_row["ratingChanged"] = _rating_change_label(

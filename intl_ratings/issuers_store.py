@@ -25,6 +25,7 @@ class IssuerRecord(BaseModel):
     tv_exchange: str = ""
     us_ticker: str = ""
     cik: str = ""
+    official_rating_url: str = ""
     is_offshore_spv: bool = False
     notes: str = ""
 

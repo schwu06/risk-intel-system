@@ -149,7 +149,9 @@
           '<td class="ir-cell col-change">' + signalHtml(r.ratingChanged, "未见变动") + "</td>" +
           '<td class="ir-cell col-signal">' + marketSignalHtml(r.priceDrop) + "</td>" +
           '<td class="ir-cell col-rss">' +
-          (r.rssUrl ? '<button type="button" class="btn small ir-rss-btn" data-issuer-id="' + escapeHtml(r.id) + '">查看来源</button>' : '<span class="ir-signal muted">待接入</span>') +
+          (r.ratingSourceUrl ? '<button type="button" class="btn small ir-rating-source-btn" data-url="' + escapeHtml(r.ratingSourceUrl) + '">评级来源</button>' : '') +
+          (r.rssUrl ? '<button type="button" class="btn small ir-rss-btn" data-issuer-id="' + escapeHtml(r.id) + '">市场来源</button>' : '') +
+          (!r.ratingSourceUrl && !r.rssUrl ? '<span class="ir-signal muted">待接入</span>' : '') +
           "</td>" +
           "</tr>"
         );
@@ -433,6 +435,12 @@
     }
     if (els.tbody) {
       els.tbody.addEventListener("click", function (ev) {
+        var ratingBtn = ev.target.closest(".ir-rating-source-btn");
+        if (ratingBtn) {
+          ev.stopPropagation();
+          window.open(ratingBtn.getAttribute("data-url"), "_blank", "noopener,noreferrer");
+          return;
+        }
         var rssBtn = ev.target.closest(".ir-rss-btn");
         if (rssBtn) {
           ev.stopPropagation();

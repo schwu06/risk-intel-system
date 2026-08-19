@@ -86,6 +86,10 @@ class SourcesConfig(BaseModel):
     playwright_ratings: bool = True
     bond_price_public: bool = True
     rating_change_feed: bool = False
+    # 免费模式：通过秘塔检索三大机构的公开页面；只接纳官方域名结果。
+    official_public_ratings: bool = True
+    official_public_rating_max_results: int = 8
+    official_public_rating_max_queries_per_run: int = 20
 
 
 class PlaywrightRatingsConfig(BaseModel):

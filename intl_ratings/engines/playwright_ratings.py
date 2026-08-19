@@ -39,7 +39,7 @@ _MOODYS_LOOSE = re.compile(
     rf"(?:穆迪|Moody's){_SEP}(Aaa|Aa[123]|A[123]|Baa[123]|Ba[123]|B[123]){_END}",
     re.I,
 )
-_SP_LOOSE = re.compile(rf"(?:标普|标准普尔|S&P){_SEP}{_RATING_SP_FITCH}{_END}", re.I)
+_SP_LOOSE = re.compile(rf"(?:标普|标准普尔|S&P|Standard\s*&?\s*Poor'?s){_SEP}{_RATING_SP_FITCH}{_END}", re.I)
 _FITCH_LOOSE = re.compile(rf"(?:惠誉|Fitch){_SEP}{_RATING_SP_FITCH}{_END}", re.I)
 
 

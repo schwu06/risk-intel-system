@@ -3891,6 +3891,7 @@ body.daily-news-ui .module-status { padding: 1.1rem 1.3rem; border-radius: 12px;
   max-width: 130px;
   text-align: center;
 }
+.ir-rating-source-btn + .ir-rss-btn { margin-left: 0.35rem; }
 
 .ir-rss-btn {
   display: inline-block;
