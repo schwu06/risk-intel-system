@@ -10,10 +10,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from intl_ratings.config import get_intl_config
-from intl_ratings.io import load_issuer_records
-from intl_ratings.models import NR
-from intl_ratings.pipeline import IntlRatingsPipeline
+try:
+    from intl_ratings.config import get_intl_config
+    from intl_ratings.io import load_issuer_records
+    from intl_ratings.models import NR
+    from intl_ratings.pipeline import IntlRatingsPipeline
+    _INTL_RATINGS_RUNTIME_ERROR: str | None = None
+except ModuleNotFoundError as exc:
+    # 国际评级的独立源码未随当前项目副本提交时，不阻断新闻和主体评估主站。
+    # 访问该模块仍会显示占位数据，手动刷新任务则记录明确的缺失原因。
+    get_intl_config = None  # type: ignore[assignment]
+    load_issuer_records = None  # type: ignore[assignment]
+    IntlRatingsPipeline = None  # type: ignore[assignment]
+    NR = "NR"
+    _INTL_RATINGS_RUNTIME_ERROR = str(exc)
 
 logger = logging.getLogger(__name__)
 
@@ -124,9 +134,11 @@ def load_snapshot() -> dict[str, Any]:
 
 def _build_skeleton_snapshot() -> dict[str, Any]:
     """尚无流水线结果时，用清单生成占位行，避免前端空白。"""
-    cfg = get_intl_config()
     rows: list[dict[str, Any]] = []
     try:
+        if get_intl_config is None or load_issuer_records is None:
+            raise RuntimeError(_INTL_RATINGS_RUNTIME_ERROR or "国际评级运行组件未安装")
+        cfg = get_intl_config()
         input_dir = cfg.resolve(cfg.paths.input_dir)
         _, records = load_issuer_records(input_dir, cfg.input_files)
         for i, rec in enumerate(records, start=1):
@@ -211,6 +223,15 @@ def start_refresh_job(*, limit: int = 0, quick: bool = False) -> dict[str, Any]:
 def _run_job(*, job_id: str, limit: int, quick: bool) -> None:
     global _RUNNING
     try:
+        if (
+            get_intl_config is None
+            or load_issuer_records is None
+            or IntlRatingsPipeline is None
+        ):
+            raise RuntimeError(
+                "国际评级模块源码缺失，请恢复 intl_ratings/ 目录后再刷新："
+                + (_INTL_RATINGS_RUNTIME_ERROR or "未知原因")
+            )
         with _LOCK:
             JOBS[job_id]["status"] = "running"
             JOBS[job_id]["message"] = "正在抓取与分析…"
