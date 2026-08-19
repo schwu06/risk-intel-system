@@ -1341,11 +1341,46 @@ body.daily-news-ui .daily-index-list .mod-name:focus {
 .daily-risk-counts .level { font-size: 0.75rem; }
 .daily-risk-counts b { color: #323842; }
 body.daily-news-ui #pipeline-msg { margin: 0.9rem 0 0; font-size: 0.72rem; }
-.daily-sidebar-actions { display: grid; gap: 0.55rem; margin-top: 1.35rem; }
+.daily-sidebar-actions { display: grid; gap: 0.65rem; margin-top: 1.15rem; }
 .daily-sidebar-actions .daily-export,
 .daily-sidebar-actions .daily-refresh {
   width: 100%;
   min-width: 0;
+}
+
+/* 悬浮工具栏：导出为主操作，刷新保留轻量次操作，避免两枚深色大按钮抢占注意力。 */
+.daily-sidebar-actions .sidebar-action-primary,
+.daily-sidebar-actions .sidebar-action-secondary {
+  min-height: 3.7rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 1rem;
+  font-size: 1rem;
+  letter-spacing: 0.025em;
+}
+
+.daily-sidebar-actions .sidebar-action-primary {
+  border-color: #506278;
+  background: linear-gradient(135deg, #596d84, #4b5d73);
+  box-shadow: 0 6px 13px rgba(60, 78, 100, 0.2);
+}
+
+.daily-sidebar-actions .sidebar-action-primary:hover {
+  border-color: #405268;
+  background: linear-gradient(135deg, #50667e, #405268);
+  transform: translateY(-1px);
+}
+
+.daily-sidebar-actions .sidebar-action-secondary {
+  border-color: #d4dce5;
+  background: #f9fafc;
+  color: #5d6b7c;
+  box-shadow: none;
+}
+
+.daily-sidebar-actions .sidebar-action-secondary:hover {
+  border-color: #aebdcd;
+  background: #eef3f8;
+  color: #435c77;
 }
 
 /* 左侧操作统一为主／次两级按钮：日报、主体评估、国际评级共用。 */
