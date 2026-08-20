@@ -255,7 +255,7 @@ def pipeline_job_status(job_id: str):
 
 @router.get("/pipeline/running")
 def pipeline_running_job(
-    window_hours: int | None = Query(None, ge=1, le=168),
+    window_hours: int | None = Query(None, ge=1, le=8760),
     entity_id: int | None = Query(None),
     module_codes: str | None = Query(None, description="逗号分隔模块，如 B,C,D"),
 ):
@@ -275,7 +275,7 @@ def pipeline_running_job(
 
 @router.get("/pipeline/last-refresh")
 def pipeline_last_refresh(
-    window_hours: int = Query(NEWS_WINDOW_HOURS_24, ge=1, le=168),
+    window_hours: int = Query(NEWS_WINDOW_HOURS_24, ge=1, le=8760),
     module_codes: str | None = Query("B,C,D", description="逗号分隔模块"),
 ):
     """最近一次新闻采集完成时间（东京），供界面同步刷新文案且不打断操作。"""

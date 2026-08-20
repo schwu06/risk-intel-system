@@ -177,7 +177,7 @@ class PipelineRunRequest(BaseModel):
     # 主体评估页：仅采集/更新指定主体
     entity_id: Optional[int] = None
     # 新闻时效窗：24=近24小时，168=近7×24小时；缺省跟配置 news_window_hours
-    window_hours: Optional[int] = Field(None, ge=1, le=168)
+    window_hours: Optional[int] = Field(None, ge=1, le=8760)
 
 
 class PipelineRunResponse(BaseModel):
