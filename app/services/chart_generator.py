@@ -98,16 +98,16 @@ def to_echarts_option(spec: dict[str, Any]) -> dict[str, Any]:
             }
         )
     return {
-        "title": {"text": spec.get("title", ""), "left": "center", "textStyle": {"color": "#4a5160", "fontSize": 14}},
+        "title": {"text": spec.get("title", ""), "left": "center", "textStyle": {"color": "#4a5160", "fontSize": 14, "fontFamily": "Microsoft YaHei, 微软雅黑, sans-serif", "fontWeight": 400}},
         "tooltip": {"trigger": "axis" if chart_type == "line" else "item"},
-        "legend": {"bottom": 0, "textStyle": {"color": "#7a828e"}},
+        "legend": {"bottom": 0, "textStyle": {"color": "#7a828e", "fontFamily": "Microsoft YaHei, 微软雅黑, sans-serif", "fontWeight": 400}},
         "grid": {"left": "8%", "right": "4%", "bottom": "15%", "containLabel": True},
         "xAxis": {
             "type": "category",
             "data": labels,
-            "axisLabel": {"color": "#7a828e", "rotate": 30 if len(labels) > 6 else 0},
+            "axisLabel": {"color": "#7a828e", "rotate": 30 if len(labels) > 6 else 0, "fontFamily": "Microsoft YaHei, 微软雅黑, sans-serif", "fontWeight": 400},
         },
-        "yAxis": {"type": "value", "axisLabel": {"color": "#7a828e"}},
+        "yAxis": {"type": "value", "axisLabel": {"color": "#7a828e", "fontFamily": "Microsoft YaHei, 微软雅黑, sans-serif", "fontWeight": 400}},
         "series": series,
         "color": CHART_COLORS,
     }

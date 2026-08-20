@@ -2,40 +2,37 @@
 
 {% block title %}国际评级 — {{ app_name }}{% endblock %}
 
-{% block brand_sub %}{{ page_subtitle }}{% endblock %}
-
-{% block header_extra %}
-<span class="ir-header-status" id="ir-header-status">评级快照加载中</span>
-{% endblock %}
-
 {% block page_sidebar %}
 <aside class="sidebar page-rail ir-sidebar" aria-label="发行体索引">
-  <div class="ir-sidebar-top">
-    <h2>发行体筛选</h2>
-    <div class="ir-search-box">
-      <input
-        type="search"
-        id="ir-search-input"
-        class="ir-search-input"
-        placeholder="搜索发行体…"
-        autocomplete="off"
-        aria-label="搜索发行体"
-      />
-      <button type="button" class="ir-search-clear" id="ir-search-clear" title="清空搜索" aria-label="清空搜索" hidden>
-        ×
-      </button>
-    </div>
-  </div>
-
-  <div class="ir-sidebar-body">
+  <label class="daily-search" aria-label="搜索发行体">
+    <input
+      type="search"
+      id="ir-search-input"
+      class="ir-search-input"
+      placeholder="搜索发行体…"
+      autocomplete="off"
+    />
+    <button type="button" class="ir-search-clear" id="ir-search-clear" title="清空搜索" aria-label="清空搜索" hidden>×</button>
+    <span aria-hidden="true">⌕</span>
+  </label>
+  <button
+    type="button"
+    class="daily-index-title"
+    id="ir-index-toggle"
+    aria-expanded="true"
+    aria-controls="ir-index-list"
+  >
+    <span class="daily-index-chevron" aria-hidden="true"></span>
+    索引
+  </button>
+  <div class="daily-index-list ir-sidebar-body" id="ir-index-list">
     <div class="ir-tree" id="ir-tree" role="tree"></div>
     <p class="hint ir-search-empty" id="ir-search-empty" hidden>无匹配发行体</p>
   </div>
-
-  <div class="ir-sidebar-footer">
-    <div class="actions">
-      <button type="button" class="btn sidebar-action-primary" id="btn-ir-refresh">手动更新</button>
-      <button type="button" class="btn secondary sidebar-action-secondary" id="btn-ir-export">导出 Excel</button>
+  <div class="daily-sidebar-footer">
+    <div class="daily-sidebar-actions">
+      <button type="button" class="sidebar-action-primary" id="btn-ir-refresh">手动更新</button>
+      <button type="button" class="sidebar-action-secondary" id="btn-ir-export">导出 Excel</button>
     </div>
     <p class="hint" id="ir-action-msg"></p>
   </div>
@@ -46,8 +43,11 @@
 <main class="layout content-shell ir-main">
   <section class="content ir-content">
     <header class="ir-page-header">
-      <h1>国际评级监测表</h1>
-      <p class="ir-page-desc">聚合穆迪、标普、惠誉主体评级与公开市场信号；仅用于日常监测与人工复核。</p>
+      <div>
+        <h1>国际评级监测表</h1>
+        <p class="ir-page-desc">聚合穆迪、标普、惠誉主体评级与公开市场信号；仅用于日常监测与人工复核。</p>
+      </div>
+      <span class="ir-header-status" id="ir-header-status">评级快照加载中</span>
     </header>
 
     <section class="ir-overview" aria-label="评级监测概览">

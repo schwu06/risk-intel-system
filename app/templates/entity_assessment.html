@@ -2,37 +2,30 @@
 
 {% block title %}主体评估 — {{ app_name }}{% endblock %}
 
-{% block brand_sub %}{{ page_subtitle }}{% endblock %}
-
-{% block header_extra %}
-<form class="filter-form" method="get" action="{{ page_path }}">
-  <label for="report_date">报告日期</label>
-  <input type="date" id="report_date" name="report_date" value="{{ report_date }}" />
-  {% if selected_entity %}
-  <input type="hidden" name="entity_id" value="{{ selected_entity.id }}" />
-  {% endif %}
-  <button type="submit">查询</button>
-</form>
-{% endblock %}
-
 {% block page_sidebar %}
 <aside class="sidebar page-rail entity-sidebar" data-modules="{{ module_codes_csv }}" aria-label="监控主体索引">
-  <div class="entity-sidebar-top">
-    <h2>监控主体</h2>
-    <div class="entity-search-box">
-      <input
-        type="search"
-        id="entity-search-input"
-        class="entity-search-input"
-        placeholder="搜索主体名称…"
-        autocomplete="off"
-        aria-label="搜索监控主体"
-      />
-      <button type="button" class="entity-search-clear" id="entity-search-clear" title="清空搜索" aria-label="清空搜索" hidden>×</button>
-    </div>
-  </div>
-
-  <div class="entity-index" id="entity-index">
+  <label class="daily-search" aria-label="搜索监控主体">
+    <input
+      type="search"
+      id="entity-search-input"
+      class="entity-search-input"
+      placeholder="搜索主体名称…"
+      autocomplete="off"
+    />
+    <button type="button" class="entity-search-clear" id="entity-search-clear" title="清空搜索" aria-label="清空搜索" hidden>×</button>
+    <span aria-hidden="true">⌕</span>
+  </label>
+  <button
+    type="button"
+    class="daily-index-title"
+    id="entity-index-toggle"
+    aria-expanded="true"
+    aria-controls="entity-index-scroll"
+  >
+    <span class="daily-index-chevron" aria-hidden="true"></span>
+    索引
+  </button>
+  <div class="daily-index-list entity-index" id="entity-index">
     <div class="entity-index-scroll" id="entity-index-scroll">
       {% for group in entity_groups %}
       <section
@@ -79,18 +72,17 @@
       <p class="hint entity-search-empty" id="entity-search-empty" hidden>无匹配主体</p>
     </div>
   </div>
-
-  <div class="entity-sidebar-footer">
-    <div class="actions">
+  <div class="daily-sidebar-footer">
+    <div class="daily-sidebar-actions">
       <button
         type="button"
-        class="btn sidebar-action-primary"
+        class="sidebar-action-primary"
         id="btn-export-entity-docx"
         {% if not selected_entity %}disabled{% endif %}
         data-entity-id="{{ selected_entity.id if selected_entity else '' }}"
         data-report-date="{{ report_date }}"
       >导出公开信息简报</button>
-      <button type="button" class="btn secondary sidebar-action-secondary" id="btn-run-pipeline">采集近三个月资讯</button>
+      <button type="button" class="sidebar-action-secondary" id="btn-run-pipeline">采集近三个月资讯</button>
     </div>
     <p class="hint" id="pipeline-msg">异步采集当前主体近三个月公开信源；空结果不会生成演示数据。</p>
     <p class="hint" id="export-msg" hidden></p>
@@ -101,6 +93,14 @@
 {% block content %}
 <main class="layout content-shell" data-modules="{{ module_codes_csv }}">
   <section class="content entity-assessment-view">
+    <form class="filter-form entity-date-filter" method="get" action="{{ page_path }}">
+      <label for="report_date">报告日期</label>
+      <input type="date" id="report_date" name="report_date" value="{{ report_date }}" />
+      {% if selected_entity %}
+      <input type="hidden" name="entity_id" value="{{ selected_entity.id }}" />
+      {% endif %}
+      <button type="submit">查询</button>
+    </form>
     {% if selected_entity %}
     <header class="entity-header">
       <div class="entity-header-main">
