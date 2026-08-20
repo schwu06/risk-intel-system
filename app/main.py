@@ -3,7 +3,7 @@
 from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -181,6 +181,30 @@ def _sort_news(entries: list[NewsArticle]) -> list[NewsArticle]:
 
 
 
+def _dedupe_daily_news(entries: list[NewsArticle]) -> list[NewsArticle]:
+    """合并日报与历史快照，优先保留近 24 小时采集到的同源新闻。"""
+
+    ranked = sorted(
+        entries,
+        key=lambda e: (
+            0 if e.window_hours == NEWS_WINDOW_HOURS_24 else 1,
+            -_published_timestamp(getattr(e, "published_at", None)),
+            -int(getattr(e, "id", 0) or 0),
+        ),
+    )
+    seen: set[str] = set()
+    unique: list[NewsArticle] = []
+    for entry in ranked:
+        source_url = (entry.source_url or "").strip().rstrip("/").lower()
+        title = " ".join((entry.title or "").lower().split())
+        identity = f"url:{source_url}" if source_url else f"title:{title}"
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(entry)
+    return _sort_news(unique)
+
+
 def _news_charts_json(entries: list[NewsArticle]) -> str:
     entry_charts: list[dict] = []
     for e in entries:
@@ -218,35 +242,20 @@ def _daily_news_context(
     today = tokyo_today()
     day_tabs: list[dict] = []
     selected_timeline_day: date | None = None
-    if page_key == "news_7x24":
-        # 7×24 默认连续展示七日；日期导航可将时间轴暂时聚焦到其中某一天。
+    if page_key == "daily_news":
+        # 单一入口：沿用近 24 小时卡片排版，并按日查看最近一周的已保存资讯。
         if rd < today - timedelta(days=6) or rd > today:
             rd = today
-        if timeline_day:
-            candidate = _parse_report_date(timeline_day)
-            if rd - timedelta(days=6) <= candidate <= rd:
-                selected_timeline_day = candidate
         for offset, tab_day in enumerate(tokyo_day_tabs(7)):
-            if tab_day > rd or tab_day < rd - timedelta(days=6):
-                continue
             label = "今日" if offset == 0 else "昨天" if offset == 1 else "前天" if offset == 2 else f"{tab_day.month}/{tab_day.day}"
             day_tabs.append(
                 {
                     "label": label,
                     "date": tab_day.isoformat(),
-                    "href": f"{meta['path']}?report_date={rd.isoformat()}&timeline_day={tab_day.isoformat()}",
-                    "active": selected_timeline_day == tab_day,
+                    "href": f"{meta['path']}?report_date={tab_day.isoformat()}",
+                    "active": rd == tab_day,
                 }
             )
-        day_tabs.insert(
-            0,
-            {
-                "label": "全部",
-                "date": rd.isoformat(),
-                "href": f"{meta['path']}?report_date={rd.isoformat()}",
-                "active": selected_timeline_day is None,
-            },
-        )
 
     selected = (module_code or "").upper() or None
     if selected and selected not in allowed:
@@ -255,9 +264,12 @@ def _daily_news_context(
     q = (
         db.query(NewsArticle)
         .filter(NewsArticle.module_code.in_(allowed_codes))
-        .filter(NewsArticle.window_hours == window_hours)
     )
-    if page_key == "news_7x24":
+    if page_key == "daily_news":
+        q = q.filter(NewsArticle.window_hours.in_((NEWS_WINDOW_HOURS_24, NEWS_WINDOW_HOURS_7X24)))
+        q = q.filter(NewsArticle.report_date == rd)
+    elif page_key == "news_7x24":
+        q = q.filter(NewsArticle.window_hours == window_hours)
         if selected_timeline_day:
             q = q.filter(NewsArticle.report_date == selected_timeline_day)
         else:
@@ -265,28 +277,12 @@ def _daily_news_context(
                 NewsArticle.report_date <= rd
             )
     else:
+        q = q.filter(NewsArticle.window_hours == window_hours)
         q = q.filter(NewsArticle.report_date == rd)
     if selected:
         q = q.filter(NewsArticle.module_code == selected)
-    raw_entries = _sort_news(q.all())
-    # 日本方面内容在近 24 小时没有合格条目时，回显近 7 天已采集的
-    # 可信财经资讯，避免栏目空白；仍不以聚合站或非财经内容补数。
-    japan_seven_day_fallback = False
-    if page_key == "daily_news" and (selected in (None, "C")):
-        has_today_japan = any(e.module_code == "C" for e in raw_entries)
-        if not has_today_japan:
-            recent_japan = (
-                db.query(NewsArticle)
-                .filter(NewsArticle.module_code == "C")
-                .filter(NewsArticle.window_hours == NEWS_WINDOW_HOURS_7X24)
-                .filter(NewsArticle.report_date <= rd)
-                .filter(NewsArticle.report_date >= rd - timedelta(days=6))
-                .order_by(NewsArticle.report_date.desc())
-                .all()
-            )
-            if recent_japan:
-                raw_entries = _sort_news([*raw_entries, *recent_japan])
-                japan_seven_day_fallback = True
+    raw_entries = q.all()
+    raw_entries = _dedupe_daily_news(raw_entries) if page_key == "daily_news" else _sort_news(raw_entries)
     # 展示层再滤一遍，立刻隐藏历史越界旧数据（科普/彩票/非本板块等）
     entries: list[NewsArticle] = []
     for e in raw_entries:
@@ -365,11 +361,7 @@ def _daily_news_context(
         if has_entries:
             module_ui[code] = {
                 "state": "ok",
-                "message": (
-                    "近24小时无新增，当前展示近7日可信财经资讯。"
-                    if code == "C" and japan_seven_day_fallback
-                    else ""
-                ),
+                "message": "",
             }
         elif not run:
             module_ui[code] = {"state": "idle", "message": "尚未采集，请点击右上角“刷新”开始采集。"}
@@ -427,7 +419,7 @@ def _daily_news_context(
         "collect_label": meta.get("collect_label") or f"采集近{window_hours}小时资讯",
         "empty_hint": meta.get("empty_hint")
         or "当前筛选条件下暂无条目。请点击右上角“刷新”采集资讯。",
-        "news_subnav": True,
+        "news_subnav": False,
         "day_tabs": day_tabs,
         "tokyo_today": today.isoformat(),
         # 无条目且无当日跑批记录时才自动补采，避免「今日无动态」反复触发
@@ -803,17 +795,17 @@ def daily_news_7x24_page(
     report_date: str | None = None,
     timeline_day: str | None = None,
     module_code: str | None = None,
-    db: Session = Depends(get_db),
 ):
-    ctx = _daily_news_context(
-        request=request,
-        report_date=report_date,
-        timeline_day=timeline_day,
-        module_code=module_code,
-        db=db,
-        page_key="news_7x24",
-    )
-    return templates.TemplateResponse("dashboard.html", ctx)
+    """兼容旧链接：7×24 内容已合并到按日浏览的新闻汇总页。"""
+
+    selected_date = timeline_day or report_date
+    query: dict[str, str] = {}
+    if selected_date:
+        query["report_date"] = selected_date
+    if module_code:
+        query["module_code"] = module_code
+    suffix = f"?{urlencode(query)}" if query else ""
+    return RedirectResponse(url=f"/daily-news{suffix}", status_code=302)
 
 
 @app.get("/entity-assessment", response_class=HTMLResponse)

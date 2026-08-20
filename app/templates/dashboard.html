@@ -11,18 +11,6 @@
     <span aria-hidden="true">⌕</span>
   </label>
   <h2 class="daily-index-title">⌄　索引</h2>
-  {% if news_subnav %}
-  <nav class="news-subnav" aria-label="新闻汇总分栏">
-    <a
-      href="/daily-news?report_date={{ tokyo_today or report_date }}"
-      class="news-subnav-link {% if active_page == 'daily_news' %}active{% endif %}"
-    >近24小时</a>
-    <a
-      href="/daily-news-7x24?report_date={{ report_date }}"
-      class="news-subnav-link {% if active_page == 'news_7x24' %}active{% endif %}"
-    >7×24</a>
-  </nav>
-  {% endif %}
   <ul class="run-list daily-index-list">
     {% for code, name in modules.items() %}
     {% set run = run_map.get(code) %}
