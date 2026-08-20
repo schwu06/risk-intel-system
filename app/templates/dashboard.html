@@ -2,16 +2,23 @@
 
 {% block title %}{{ page_title }} — {{ app_name }}{% endblock %}
 
-{% block brand_sub %}{{ page_subtitle }}{% endblock %}
-
 {% block page_sidebar %}
 <aside class="sidebar page-rail" data-modules="{{ module_codes_csv }}" data-page-path="{{ page_path }}">
   <label class="daily-search" aria-label="搜索新闻">
     <input type="search" id="daily-module-search" placeholder="搜索新闻、来源或日期" autocomplete="off" />
     <span aria-hidden="true">⌕</span>
   </label>
-  <h2 class="daily-index-title">⌄　索引</h2>
-  <ul class="run-list daily-index-list">
+  <button
+    type="button"
+    class="daily-index-title"
+    id="daily-index-toggle"
+    aria-expanded="true"
+    aria-controls="daily-index-list"
+  >
+    <span class="daily-index-chevron" aria-hidden="true"></span>
+    索引
+  </button>
+  <ul class="run-list daily-index-list" id="daily-index-list">
     {% for code, name in modules.items() %}
     {% set run = run_map.get(code) %}
     <li>
@@ -20,10 +27,6 @@
     {% endfor %}
   </ul>
   <div class="daily-sidebar-footer">
-    <p class="daily-rail-label">风险等级分布</p>
-    <div class="daily-risk-counts">
-      {% for level, count in stats.items() %}<span class="level level-{{ level }}">{{ level }} <b>{{ count }}</b></span>{% endfor %}
-    </div>
     <div class="daily-sidebar-actions">
       <a class="daily-export sidebar-action-primary" href="/api/v1/export/pdf?report_date={{ report_date }}&module_codes={{ module_codes_csv }}&window_hours={{ window_hours }}">导出 PDF</a>
       <button type="button" class="daily-refresh sidebar-action-secondary" id="btn-run-pipeline">刷新资讯</button>
@@ -50,8 +53,12 @@
     <div class="daily-page-caption">
       <span>{% if active_page == 'news_7x24' %}7×24 小时资讯时间轴{% else %}{{ page_title }}{% endif %}</span>
       <div class="daily-page-caption-actions">
-        <small>{% if active_page == 'news_7x24' %}{{ timeline_range_label }}{% else %}{{ report_date }}{% endif %} · {{ overview.total }} 条已收录资讯</small>
-        <button type="button" class="news-filter-toggle" id="news-filter-toggle" aria-expanded="false" aria-controls="news-filter-panel">筛选 <span aria-hidden="true">⌄</span></button>
+        <button type="button" class="news-filter-toggle" id="news-filter-toggle" aria-expanded="false" aria-controls="news-filter-panel">
+          筛选
+          <svg class="news-filter-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path fill="currentColor" d="M1.4 2h13.2L9.6 8.5v4.15L6.4 14.8V8.5z"/>
+          </svg>
+        </button>
       </div>
     </div>
     <div class="news-filter-panel" id="news-filter-panel" hidden>
@@ -200,17 +207,6 @@
 </script>
 <script>
   (function () {
-    function positionDailySidebarFooter() {
-      var rail = document.querySelector("body.daily-news-ui .page-rail");
-      var footer = document.querySelector(".daily-sidebar-footer");
-      if (!rail || !footer || window.innerWidth <= 640) return;
-      var rect = rail.getBoundingClientRect();
-      rail.style.setProperty("--daily-sidebar-footer-left", rect.left + "px");
-      rail.style.setProperty("--daily-sidebar-footer-width", rect.width + "px");
-    }
-    positionDailySidebarFooter();
-    window.addEventListener("resize", positionDailySidebarFooter);
-
     var toggle = document.getElementById("news-filter-toggle");
     var panel = document.getElementById("news-filter-panel");
     if (toggle && panel) {

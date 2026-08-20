@@ -247,7 +247,7 @@ def _daily_news_context(
         if rd < today - timedelta(days=6) or rd > today:
             rd = today
         for offset, tab_day in enumerate(tokyo_day_tabs(7)):
-            label = "今日" if offset == 0 else "昨天" if offset == 1 else "前天" if offset == 2 else f"{tab_day.month}/{tab_day.day}"
+            label = "今日" if offset == 0 else f"{tab_day.month}/{tab_day.day}"
             day_tabs.append(
                 {
                     "label": label,

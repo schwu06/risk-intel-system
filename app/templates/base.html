@@ -4,15 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}{{ page_title }} — {{ app_name }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/css/dashboard.css?v=20260819-2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Abril+Fatface&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/dashboard.css?v=20260820-17" />
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
   {% block head_extra %}{% endblock %}
 </head>
 <body class="{% if active_page in ('daily_news', 'news_7x24') %}daily-news-ui{% endif %}">
   <header class="top-bar">
     <div class="brand">
-      <span class="brand-title">{{ app_name }}</span>
-      <span class="brand-sub">{% block brand_sub %}{{ page_subtitle }}{% endblock %}</span>
+      <span class="brand-title">RiskIntel</span>
+      <span class="brand-tagline">风险预测与情报系统</span>
     </div>
     <nav class="main-nav" aria-label="主导航">
       <a href="/daily-news" class="nav-link {% if active_page in ('daily_news', 'news_7x24') %}active{% endif %}">新闻汇总</a>
@@ -34,7 +37,7 @@
     {% block source_panel %}{% endblock %}
   </div>
 
-  <script src="/static/js/dashboard.js?v=20260819-3"></script>
+  <script src="/static/js/dashboard.js?v=20260820-7"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

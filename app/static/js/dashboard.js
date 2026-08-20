@@ -183,15 +183,19 @@
       };
     });
     return {
-      title: { text: spec.title || "", left: "center", textStyle: { color: "#4a5160", fontSize: 13 } },
+      title: {
+        text: spec.title || "",
+        left: "center",
+        textStyle: { color: "#4a5160", fontSize: 13, fontFamily: "Microsoft YaHei, 微软雅黑, sans-serif", fontWeight: 400 },
+      },
       tooltip: { trigger: chartType === "line" ? "axis" : "item" },
       grid: { left: "8%", right: "4%", bottom: "12%", containLabel: true },
       xAxis: {
         type: "category",
         data: labels,
-        axisLabel: { color: "#7a828e", rotate: labels.length > 6 ? 30 : 0 },
+        axisLabel: { color: "#7a828e", rotate: labels.length > 6 ? 30 : 0, fontFamily: "Microsoft YaHei, 微软雅黑, sans-serif", fontWeight: 400 },
       },
-      yAxis: { type: "value", axisLabel: { color: "#7a828e" } },
+      yAxis: { type: "value", axisLabel: { color: "#7a828e", fontFamily: "Microsoft YaHei, 微软雅黑, sans-serif", fontWeight: 400 } },
       series: series,
       color: COLORS,
     };
@@ -755,7 +759,7 @@
     return document.getElementById("pipeline-msg");
   }
 
-  /** 东京时间（Asia/Tokyo）24 小时制：YYYY-MM-DD HH:mm:ss */
+  /** 东京时间（Asia/Tokyo）24 小时制，精确到分钟：YYYY/M/D HH:mm */
   function formatRefreshTime(isoOrDate) {
     var d;
     if (isoOrDate instanceof Date) {
@@ -775,11 +779,10 @@
     var parts = new Intl.DateTimeFormat("en-GB", {
       timeZone: "Asia/Tokyo",
       year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
+      month: "numeric",
+      day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-      second: "2-digit",
       hourCycle: "h23",
     }).formatToParts(d);
 
@@ -788,8 +791,8 @@
       if (p.type !== "literal") map[p.type] = p.value;
     });
     return (
-      map.year + "-" + map.month + "-" + map.day +
-      " " + map.hour + ":" + map.minute + ":" + map.second
+      map.year + "/" + String(parseInt(map.month, 10)) + "/" + String(parseInt(map.day, 10)) +
+      " " + map.hour + ":" + map.minute
     );
   }
 
@@ -821,7 +824,7 @@
   }
 
   function setRefreshSuccessMsg(msgEl, finishedAt) {
-    setPipelineMsg(msgEl, "最近刷新时间（" + formatRefreshTime(finishedAt) + "）");
+    setPipelineMsg(msgEl, "上次刷新时间 " + formatRefreshTime(finishedAt));
     persistRefreshAt(finishedAt);
   }
 
@@ -851,11 +854,21 @@
         }
         var saved = sessionStorage.getItem(refreshMsgKey());
         if (!saved) return;
-        saved = saved.replace("最近更新时间", "最近刷新时间");
-        // 旧版文案：把 UTC 墙钟误标为本地时间，恢复时按 UTC 转东京
-        var m = saved.match(/^最近刷新时间[（(](\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})[）)]$/);
-        if (m) {
-          setRefreshSuccessMsg(msg, m[1].replace(" ", "T") + "Z");
+        saved = saved.replace("最近更新时间", "最近刷新时间").replace("最近刷新时间", "上次刷新时间");
+        var oldWrapped = saved.match(/^上次刷新时间[（(](\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?)[）)]$/);
+        if (oldWrapped) {
+          setRefreshSuccessMsg(msg, oldWrapped[1].replace(" ", "T") + "Z");
+          return;
+        }
+        var slashForm = saved.match(/^上次刷新时间\s+(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})$/);
+        if (slashForm) {
+          var iso =
+            slashForm[1] + "-" +
+            String(slashForm[2]).padStart(2, "0") + "-" +
+            String(slashForm[3]).padStart(2, "0") + "T" +
+            String(slashForm[4]).padStart(2, "0") + ":" +
+            slashForm[5] + ":00+09:00";
+          setRefreshSuccessMsg(msg, iso);
           return;
         }
         msg.textContent = saved;
@@ -991,6 +1004,12 @@
     });
   });
 
+  function setActiveModuleJump(code) {
+    document.querySelectorAll("a.mod-jump").forEach(function (link) {
+      link.classList.toggle("active", link.getAttribute("data-module") === code);
+    });
+  }
+
   function scrollToModulePanel(code) {
     if (window.ACTIVE_PAGE === "news_7x24" && typeof window.filterNewsTimeline === "function") {
       window.filterNewsTimeline(code);
@@ -1018,6 +1037,7 @@
       if (!code) return;
       if (scrollToModulePanel(code)) {
         ev.preventDefault();
+        setActiveModuleJump(code);
         if (history.replaceState) {
           history.replaceState(null, "", "#module-panel-" + code);
         }
@@ -1032,10 +1052,16 @@
   (function scrollToHashModulePanel() {
     var hash = window.location.hash || "";
     var match = hash.match(/^#module-panel-(.+)$/);
-    if (!match) return;
-    setTimeout(function () {
-      scrollToModulePanel(decodeURIComponent(match[1]));
-    }, 50);
+    var first = document.querySelector("a.mod-jump");
+    if (match) {
+      var code = decodeURIComponent(match[1]);
+      setActiveModuleJump(code);
+      setTimeout(function () {
+        scrollToModulePanel(code);
+      }, 50);
+      return;
+    }
+    if (first) setActiveModuleJump(first.getAttribute("data-module"));
   })();
 
   // 页面加载时若有本作用域未完成任务，恢复轮询（不阻断侧栏/其它界面）
@@ -1195,4 +1221,26 @@
   });
 
   renderEntryCharts();
+
+  function positionSidebarFooter() {
+    var rail = document.querySelector(".app-shell > .page-rail");
+    var footer = document.querySelector(".daily-sidebar-footer");
+    if (!rail || !footer || window.innerWidth <= 640) return;
+    var rect = rail.getBoundingClientRect();
+    rail.style.setProperty("--daily-sidebar-footer-left", rect.left + "px");
+    rail.style.setProperty("--daily-sidebar-footer-width", rect.width + "px");
+  }
+  positionSidebarFooter();
+  window.addEventListener("resize", positionSidebarFooter);
+
+  document.querySelectorAll(".daily-index-title[aria-controls]").forEach(function (btn) {
+    if (btn.id === "btn-toggle-sectors") return;
+    var list = document.getElementById(btn.getAttribute("aria-controls"));
+    if (!list) return;
+    btn.addEventListener("click", function () {
+      var collapsed = list.classList.toggle("is-collapsed");
+      btn.classList.toggle("is-collapsed", collapsed);
+      btn.setAttribute("aria-expanded", String(!collapsed));
+    });
+  });
 })();

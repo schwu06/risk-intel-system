@@ -152,6 +152,7 @@
   if (generateBtn) {
     generateBtn.addEventListener("click", async function () {
       const reportId = generateBtn.getAttribute("data-report-id");
+      if (!reportId) return;
       const generationMsg = document.getElementById("generation-msg");
       generateBtn.disabled = true;
       setMainStatus("正在生成报告…可能需要数分钟，请勿重复提交。");
@@ -560,6 +561,7 @@
     } catch (e) {}
     function applyCollapsed(collapsed) {
       indexBlock.setAttribute("data-collapsed", collapsed ? "true" : "false");
+      toggleBtn.classList.toggle("is-collapsed", collapsed);
       toggleBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
       try {
         window.localStorage.setItem("industry-index-collapsed", collapsed ? "1" : "0");
@@ -569,6 +571,17 @@
     toggleBtn.addEventListener("click", function () {
       var collapsed = indexBlock.getAttribute("data-collapsed") === "true";
       applyCollapsed(!collapsed);
+    });
+  }
+
+  var industrySearch = document.getElementById("industry-sidebar-search");
+  if (industrySearch) {
+    industrySearch.addEventListener("input", function () {
+      var needle = industrySearch.value.trim().toLowerCase();
+      document.querySelectorAll(".sector-bubble-row[data-search], .report-list-item[data-search]").forEach(function (row) {
+        var hay = (row.getAttribute("data-search") || "").toLowerCase();
+        row.hidden = !!(needle && hay.indexOf(needle) === -1);
+      });
     });
   }
 
@@ -586,10 +599,21 @@
           return { name: s.name, type: item.type || "bar", data: s.data || [] };
         });
         chart.setOption({
-          title: { text: item.title || ("图 " + (idx + 1)), left: "center", textStyle: { fontSize: 13 } },
+          title: {
+            text: item.title || ("图 " + (idx + 1)),
+            left: "center",
+            textStyle: { fontSize: 13, fontFamily: "Microsoft YaHei, 微软雅黑, sans-serif", fontWeight: 400 },
+          },
           tooltip: { trigger: "axis" },
-          xAxis: { type: "category", data: labels },
-          yAxis: { type: "value" },
+          xAxis: {
+            type: "category",
+            data: labels,
+            axisLabel: { fontFamily: "Microsoft YaHei, 微软雅黑, sans-serif", fontWeight: 400 },
+          },
+          yAxis: {
+            type: "value",
+            axisLabel: { fontFamily: "Microsoft YaHei, 微软雅黑, sans-serif", fontWeight: 400 },
+          },
           series: series,
         });
       });

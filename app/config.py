@@ -127,9 +127,9 @@ def resolve_gemini_model(task: str = "fast", settings: Settings | None = None) -
 
 MODULE_CODES = {
     "A": "企业与品牌风险",
-    "B": "中东方面",
-    "C": "日本方面内容",
-    "D": "每日宏观与市场情报",
+    "B": "中东日报",
+    "C": "大型企业",
+    "D": "宏观市场",
     "E": "授信报告与行业分析",
 }
 
