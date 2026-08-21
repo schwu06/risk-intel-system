@@ -726,6 +726,21 @@ def _deep_reports_shell_context(
         "candidate_validation": candidate_validation,
         "candidate_stale": candidate_stale,
         "drawer_sources": industry_sources,
+        "drawer_ai_sources": [
+            source for source in industry_sources
+            if source.source_type == "network_search" or source.source_origin == "network_search"
+        ],
+        "drawer_manual_sources": [
+            source for source in industry_sources
+            if source.source_type != "network_search" and source.source_origin != "network_search"
+        ],
+        "drawer_selected_count": sum(
+            1 for source in industry_sources
+            if source.is_selected and (source.extracted_text or "").strip()
+        ),
+        "drawer_usable_count": sum(
+            1 for source in industry_sources if (source.extracted_text or "").strip()
+        ),
         "drawer_report_id": selected.id if selected else None,
         "drawer_report_status": selected.status if selected else "",
         "generation_config": generation_config,

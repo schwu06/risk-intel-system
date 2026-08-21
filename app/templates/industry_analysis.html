@@ -14,17 +14,10 @@
     <span aria-hidden="true">⌕</span>
   </label>
   <div class="daily-index-header">
-    <button
-      type="button"
-      class="daily-index-title"
-      id="btn-toggle-sectors"
-      aria-expanded="true"
-      aria-controls="sector-nav-list"
-      title="展开或收起行业列表"
-    >
-      <span class="daily-index-chevron" aria-hidden="true"></span>
-      索引
-    </button>
+    <div class="industry-confirm-heading">
+      <span class="industry-nav-step">1</span>
+      <h2 class="daily-index-title">确认行业</h2>
+    </div>
     <button type="button" class="industry-index-add" id="btn-add-sector" aria-label="添加行业" title="添加行业">+</button>
   </div>
   <div class="daily-index-list">
@@ -46,7 +39,7 @@
             data-sector-label="{{ sector.label }}"
             aria-label="重命名行业"
             title="重命名"
-          >✎</button>
+          ><span aria-hidden="true">✎</span><span class="sr-only">重命名</span></button>
           <button
             type="button"
             class="sector-delete-btn"
@@ -54,7 +47,7 @@
             data-sector-label="{{ sector.label }}"
             aria-label="删除行业"
             title="删除"
-          >删除</button>
+          ><span aria-hidden="true">×</span><span class="sr-only">删除</span></button>
         </div>
         {% else %}
         <p class="sector-bubble-empty">暂无行业，点击右上角 + 新建</p>
@@ -92,60 +85,6 @@
       </ul>
     </section>
 
-    <section class="industry-block industry-create-block {% if not sector_selected %}is-disabled{% endif %}">
-      <form id="analysis-form" class="stack-form industry-create-form" {% if not sector_selected %}aria-disabled="true"{% endif %}>
-        <fieldset class="industry-create-fieldset" {% if not sector_selected %}disabled{% endif %}>
-          <label class="industry-create-label" for="report-name-input">报告名称（可选）</label>
-          <input
-            type="text"
-            id="report-name-input"
-            name="report_name"
-            maxlength="256"
-            placeholder="例如：航空运输授信分析"
-            autocomplete="off"
-            {% if not sector_selected %}tabindex="-1"{% endif %}
-          />
-          <label class="checkbox-row">
-            <input
-              type="checkbox"
-              name="supplement_search"
-              {% if mita_configured and industry_generation_mode == 'legacy' %}checked{% else %}disabled{% endif %}
-              {% if not sector_selected %}tabindex="-1"{% endif %}
-            />
-            搜索数据源
-          </label>
-          {% if industry_generation_mode == 'grounded' %}
-          <p class="hint industry-create-search-hint">当前为 grounded 模式，正式生成不会临时搜索。</p>
-          {% elif not mita_configured %}
-          <p class="hint industry-create-search-hint">未配置 MITA_API_KEY，网络搜索暂不可用。</p>
-          {% else %}
-          <p class="hint industry-create-search-hint">勾选后，生成报告时自动检索并写入右侧数据源。</p>
-          {% endif %}
-        </fieldset>
-      </form>
-      {% if not sector_selected %}
-      <p class="industry-create-gate-hint">请先选择或新建行业</p>
-      {% endif %}
-    </section>
-  </div>
-  <div class="daily-sidebar-footer">
-    <div class="daily-sidebar-actions">
-      <button
-        type="submit"
-        form="analysis-form"
-        class="sidebar-action-primary"
-        id="btn-create-report-draft"
-        {% if not sector_selected %}disabled tabindex="-1"{% endif %}
-      >创建报告草稿</button>
-      <button
-        type="button"
-        class="sidebar-action-secondary"
-        id="btn-generate-report"
-        data-report-id="{{ selected_report.id if selected_report else '' }}"
-        {% if not sector_selected or not selected_report or selected_report.status not in ['draft', 'failed'] %}disabled{% endif %}
-      >开始生成</button>
-    </div>
-    <p class="hint" id="generation-msg"></p>
   </div>
 </aside>
 {% endblock %}
@@ -155,7 +94,40 @@
   <section class="industry-content"{% if selected_report %} data-report-id="{{ selected_report.id }}" data-report-status="{{ selected_report.status }}" data-run-id="{{ selected_report.grounded_run_id or '' }}"{% endif %}>
     <div id="industry-main-status" class="industry-main-status" hidden role="status" aria-live="polite"></div>
     {% if not sector_selected and not prefer_client_redirect %}
-    {# 无行业：主区空白 #}
+    <section class="industry-empty-state">
+      <span class="industry-kicker">行业分析</span>
+      <h1>从行业索引开始创建报告</h1>
+      <p>在左侧选择已有行业，或点击“+”新建行业。系统会为该行业建立独立的报告和数据源空间。</p>
+    </section>
+    {% elif sector_selected and not selected_report %}
+    <section class="industry-new-document">
+      <header class="industry-page-heading">
+        <span class="industry-kicker">行业分析 / {{ sector_label }}</span>
+        <h1>新建授信分析文档</h1>
+        <p>确认行业后，为本次分析命名。创建文档不会立即调用 AI，您可以先选择需要引用的数据源。</p>
+      </header>
+      <div class="industry-stepper industry-stepper-after-sector" aria-label="报告创建进度">
+        <span class="is-current"><b>2</b>新建文档</span>
+        <span><b>3</b>选择数据源</span>
+        <span><b>4</b>AI 生成</span>
+      </div>
+      <form id="analysis-form" class="new-document-form">
+        <label for="report-name-input">文档名称</label>
+        <input
+          type="text"
+          id="report-name-input"
+          name="report_name"
+          maxlength="256"
+          value="{{ sector_default_industry_name }}授信分析"
+          autocomplete="off"
+          required
+        />
+        <p class="hint">默认按“行业名称 + 授信分析”命名，可按具体项目或客户自行修改。</p>
+        <div class="new-document-actions">
+          <button type="submit" class="btn" id="btn-create-report-draft">创建文档，进入数据源选择</button>
+        </div>
+      </form>
+    </section>
     {% elif selected_report and selected_report.status == 'completed' %}
     <div class="report-toolbar">
       <a class="btn" href="/api/v1/industry/export/docx/{{ selected_report.id }}?sector={{ sector_key }}">导出 Word</a>
@@ -211,15 +183,36 @@
       <p class="hint" id="promotion-msg" role="status"></p>
     </div>
     {% elif selected_report and selected_report.status in ['draft', 'failed'] %}
-    <div class="report-preview report-generate-panel">
+    <section class="industry-document-workspace">
+      <header class="industry-page-heading document-heading">
+        <span class="industry-kicker">{{ sector_label }} / 文档准备</span>
+        <h1>{{ selected_report.report_name or selected_report.industry_name }}</h1>
+        <p>版本 v{{ selected_report.version }}</p>
+      </header>
+      <div class="industry-stepper industry-stepper-after-sector" aria-label="报告创建进度">
+        <span class="is-done"><b>2</b>新建文档</span>
+        <span class="is-current"><b>3</b>选择数据源</span>
+        <span><b>4</b>AI 生成</span>
+      </div>
+      <div class="industry-generate-bar">
+        <span>步骤 4</span>
+        <strong>AI 生成报告</strong>
+        <div>
+          <button
+            type="button"
+            class="btn"
+            id="btn-generate-report"
+            data-report-id="{{ selected_report.id }}"
+            {% if drawer_selected_count == 0 %}disabled{% endif %}
+          >基于已选来源生成</button>
+          <p class="hint" id="generation-msg"></p>
+        </div>
+      </div>
       {% if selected_report.status == 'failed' %}
       <p class="empty">上次生成失败：{{ selected_report.error_message }}</p>
-      <p class="hint">可在右侧补充数据源后，在左侧点击「开始生成」，或重新创建报告草稿。</p>
-      {% else %}
-      <p class="empty">当前为报告草稿。</p>
-      <p class="hint">请在右侧确认或补充数据源，然后在左侧点击「开始生成」。新建报告也可直接点击「创建报告草稿」一次完成创建与生成。</p>
+      <p class="hint">请检查数据源正文和勾选范围后，再次生成。</p>
       {% endif %}
-    </div>
+    </section>
     {% elif selected_report and selected_report.status == 'running' %}
     <p class="empty">报告生成中，请稍候或刷新页面…</p>
     {% else %}
@@ -268,7 +261,7 @@
     sectorSelected: {{ 'true' if sector_selected else 'false' }}
   };
 </script>
-<script src="/static/js/industry.js?v=20260820-15"></script>
+<script src="/static/js/industry.js?v=20260821-14"></script>
 {% if selected_report and selected_report.chart_specs %}
 <script>
   window.INDUSTRY_CHARTS = {{ selected_report.chart_specs | safe }};

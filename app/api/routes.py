@@ -36,6 +36,8 @@ from app.schemas import (
     DomainRuleIn,
     EntityRiskOut,
     IndustryAnalysisRequest,
+    IndustryDataSourceSearchIn,
+    IndustryDataSourceSelectionIn,
     IndustryDataSourceUrlIn,
     IndustrySectorCreateIn,
     IndustrySectorRenameIn,
@@ -70,10 +72,14 @@ from app.services.data_source_service import (
     list_module_sources,
     save_industry_file_source,
     save_industry_url_source,
+    set_industry_source_selection,
+    append_industry_network_search_sources,
     save_module_file_source,
     save_module_url_source,
 )
 from app.services.source_registry import source_registry_state
+from app.services.mita_search import MitaSearchClient
+from app.services.api_keys import is_placeholder_key
 from app.services.evidence_cards import (
     EvidenceCardService,
     EvidenceExtractionError,
@@ -987,6 +993,7 @@ def get_industry_data_sources(report_id: int, db: Session = Depends(get_industry
             "original_filename": r.original_filename,
             "text_preview": (r.extracted_text or "")[:200],
             "chars": len(r.extracted_text or ""),
+            "is_selected": r.is_selected,
             "source_origin": r.source_origin,
             "evidence_grade": r.evidence_grade,
             "registry_state": source_registry_state(r),
@@ -997,6 +1004,60 @@ def get_industry_data_sources(report_id: int, db: Session = Depends(get_industry
         }
         for r in rows
     ]
+
+
+@router.patch("/industry/reports/{report_id}/data-sources/selection")
+def update_industry_data_source_selection(
+    report_id: int,
+    body: IndustryDataSourceSelectionIn,
+    db: Session = Depends(get_industry_db_with_query),
+):
+    try:
+        rows = set_industry_source_selection(db, report_id, body.source_ids)
+    except IndustryReportNotEditableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "message": "已更新本次生成的数据源选择",
+        "selected_count": sum(1 for row in rows if row.is_selected),
+        "total_count": len(rows),
+    }
+
+
+@router.post("/industry/reports/{report_id}/data-sources/search")
+def search_industry_data_sources(
+    report_id: int,
+    body: IndustryDataSourceSearchIn,
+    db: Session = Depends(get_industry_db_with_query),
+):
+    """Search candidate sources; candidates stay unselected until the user reviews them."""
+    report = IndustryAnalysisService(db).get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="报告不存在")
+    if report.status not in {"draft", "failed"}:
+        raise HTTPException(status_code=409, detail="只有草稿或生成失败的报告可以搜索数据源")
+    settings = get_settings()
+    if is_placeholder_key(settings.mita_api_key):
+        raise HTTPException(status_code=412, detail="未配置 MITA_API_KEY，暂不能执行 AI 搜索")
+    query = " ".join((body.query or "").split()) or (
+        f"{report.industry_name} 官方报告 监管披露 行业数据 授信风险"
+    )
+    try:
+        response = MitaSearchClient().search(query=query, max_results=8)
+        created = append_industry_network_search_sources(
+            db,
+            report_id,
+            response.items,
+            is_selected=False,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI 搜索信源失败：{exc}") from exc
+    return {
+        "message": f"已找到并加入 {len(created)} 条参考信源，请勾选需要使用的来源",
+        "query": query,
+        "added_count": len(created),
+    }
 
 
 @router.get("/industry/reports/{report_id}/data-sources/{source_id}")

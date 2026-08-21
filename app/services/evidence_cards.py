@@ -25,7 +25,7 @@ from app.services.deepseek_analyzer import (
     EVIDENCE_EXTRACTION_PROMPT_VERSION,
     DeepSeekAnalyzer,
 )
-from app.services.gemini_analyzer import GeminiAnalyzer, gemini_for
+from app.services.gemini_analyzer import GeminiAnalyzer
 
 NEGATIVE_TAGS = {
     "safety_accident", "legal_litigation", "environmental", "financing_debt", "risk_event"
@@ -295,7 +295,7 @@ def evidence_run_to_dict(run: IndustryEvidenceExtractionRun) -> dict:
 class EvidenceCardService:
     def __init__(self, db: Session, analyzer: Optional[DeepSeekAnalyzer] = None) -> None:
         self.db = db
-        self.analyzer = analyzer or gemini_for("evidence")
+        self.analyzer = analyzer or DeepSeekAnalyzer()
 
     def _provider_name(self) -> str:
         return "gemini" if isinstance(self.analyzer, GeminiAnalyzer) else "deepseek"

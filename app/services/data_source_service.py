@@ -229,7 +229,10 @@ def build_industry_authoritative_text(
     db: Session, report_id: int, max_chars: int = 100_000
 ) -> tuple[str, list[dict]]:
     """构建单份报告的输入，并记录每个来源实际进入模型的字符数。"""
-    sources = [s for s in list_industry_sources(db, report_id) if (s.extracted_text or "").strip()]
+    sources = [
+        s for s in list_industry_sources(db, report_id)
+        if s.is_selected and (s.extracted_text or "").strip()
+    ]
     blocks: list[str] = []
     manifest: list[dict] = []
     remaining = max_chars
@@ -277,6 +280,25 @@ def get_industry_authoritative_text(db: Session, report_id: int, max_chars: int 
     return text
 
 
+def set_industry_source_selection(
+    db: Session, report_id: int, source_ids: list[int]
+) -> list[IndustryDataSource]:
+    """Persist the source set intentionally selected for the next report run."""
+    _editable_industry_report(db, report_id)
+    selected_ids = {int(source_id) for source_id in source_ids}
+    rows = list_industry_sources(db, report_id)
+    known_ids = {row.id for row in rows}
+    unknown_ids = selected_ids - known_ids
+    if unknown_ids:
+        raise ValueError("存在不属于当前报告的数据源")
+    for row in rows:
+        row.is_selected = row.id in selected_ids
+    db.commit()
+    for row in rows:
+        db.refresh(row)
+    return rows
+
+
 def _editable_industry_report(db: Session, report_id: int) -> IndustryReport:
     report = (
         db.query(IndustryReport)
@@ -315,6 +337,7 @@ def append_industry_network_search_sources(
     items: list[object],
     translator: Optional[Callable[[str, str], tuple[str, str]]] = None,
     require_translation: bool = False,
+    is_selected: bool = True,
 ) -> list[IndustryDataSource]:
     """把补充网络搜索结果固化为当前报告的专属数据源。
 
@@ -329,8 +352,8 @@ def append_industry_network_search_sources(
     )
     if not report:
         raise ValueError("报告不存在")
-    if report.status != "running":
-        raise ValueError("网络搜索结果只能写入正在生成的报告")
+    if report.status not in {"running", "draft", "failed"}:
+        raise ValueError("当前报告不可添加搜索结果")
 
     existing = list_industry_sources(db, report_id)
     existing_urls = {(src.url or "").strip() for src in existing if src.url}
@@ -399,6 +422,7 @@ def append_industry_network_search_sources(
                 source_type="network_search",
                 url=url or None,
                 extracted_text=parsed.extracted_text,
+                is_selected=is_selected,
                 content_hash=content_hash,
                 char_count=len(parsed.extracted_text),
             )
@@ -540,6 +564,7 @@ def clone_industry_sources(db: Session, source_report_id: int, target_report_id:
             original_filename=src.original_filename,
             url=src.url,
             extracted_text=src.extracted_text,
+            is_selected=src.is_selected,
             content_hash=src.content_hash,
             char_count=src.char_count,
             raw_content_hash=src.raw_content_hash,

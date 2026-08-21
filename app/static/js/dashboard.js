@@ -225,15 +225,20 @@
 
   /* ---------- 数据源面板 / 关于（仅深度研报页存在） ---------- */
   const drawer = document.getElementById("source-drawer");
+  const manualDrawer = document.getElementById("manual-source-drawer");
   const toggleBtn = document.getElementById("btn-toggle-source-drawer");
+  const manualToggleBtn = document.getElementById("btn-toggle-manual-drawer");
   const aboutModal = document.getElementById("about-modal");
   const aboutOpen = document.getElementById("btn-open-about");
   const aboutClose = document.getElementById("btn-close-about");
   const addBox = document.getElementById("sources-add-box");
   const addToggle = document.getElementById("btn-toggle-add-sources");
+  const aiSearchBtn = document.getElementById("btn-ai-search-sources");
   const emptyAdd = document.getElementById("btn-empty-add-source");
   const STORAGE_KEY = "sources_panel_collapsed";
+  const MANUAL_STORAGE_KEY = "manual_sources_panel_collapsed";
   const listWrap = document.getElementById("managed-source-list-wrap");
+  const manualListWrap = document.getElementById("manual-source-list-wrap");
   const fileInput = document.getElementById("global-upload-file");
   const dropzone = document.getElementById("sources-dropzone");
   const uploadNameInput = document.getElementById("global-upload-name");
@@ -259,6 +264,18 @@
     } catch (e) { /* ignore */ }
   }
 
+  function setManualDrawerOpen(open) {
+    if (!manualDrawer) return;
+    document.body.classList.toggle("manual-sources-collapsed", !open);
+    manualDrawer.setAttribute("aria-hidden", open ? "false" : "true");
+    if (manualToggleBtn) {
+      manualToggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      manualToggleBtn.title = open ? "收起补充材料" : "展开补充材料";
+      manualToggleBtn.setAttribute("aria-label", open ? "收起补充材料" : "展开补充材料");
+    }
+    try { localStorage.setItem(MANUAL_STORAGE_KEY, open ? "0" : "1"); } catch (e) { /* ignore */ }
+  }
+
   function setAddBoxOpen(open) {
     if (!addBox) return;
     addBox.hidden = !open;
@@ -273,20 +290,70 @@
   try {
     if (localStorage.getItem(STORAGE_KEY) === "1") setDrawerOpen(false);
     else setDrawerOpen(true);
+    if (localStorage.getItem(MANUAL_STORAGE_KEY) === "1") setManualDrawerOpen(false);
+    else setManualDrawerOpen(true);
   } catch (e) {
     setDrawerOpen(true);
+    setManualDrawerOpen(true);
   }
 
   if (toggleBtn) {
-    toggleBtn.addEventListener("click", function () {
+    toggleBtn.addEventListener("click", function (event) {
+      event.stopPropagation();
       setDrawerOpen(!isDrawerOpen());
+    });
+  }
+  // 收起后整条窄栏都是展开入口，避免只剩图标时难以点击。
+  var sourceCollapsedHeader = drawer.querySelector(".sources-panel-header");
+  if (sourceCollapsedHeader) {
+    sourceCollapsedHeader.addEventListener("click", function () {
+      if (!isDrawerOpen()) setDrawerOpen(true);
+    });
+  }
+  if (manualToggleBtn) {
+    manualToggleBtn.addEventListener("click", function (event) {
+      event.stopPropagation();
+      setManualDrawerOpen(document.body.classList.contains("manual-sources-collapsed"));
+    });
+  }
+  var manualCollapsedHeader = manualDrawer && manualDrawer.querySelector(".manual-sources-panel-header");
+  if (manualCollapsedHeader) {
+    manualCollapsedHeader.addEventListener("click", function () {
+      if (document.body.classList.contains("manual-sources-collapsed")) setManualDrawerOpen(true);
     });
   }
   if (addToggle) addToggle.addEventListener("click", function () {
     setAddBoxOpen(addBox ? addBox.hidden : true);
   });
+  if (aiSearchBtn) aiSearchBtn.addEventListener("click", async function () {
+    if (sourceScope() !== "industry") return;
+    aiSearchBtn.disabled = true;
+    var original = aiSearchBtn.textContent;
+    aiSearchBtn.textContent = "正在搜索…";
+    try {
+      var endpoint = industryRequestUrl(
+        "/api/v1/industry/reports/" + requireReportId() + "/data-sources/search"
+      );
+      var resp = await fetch(endpoint, {
+        method: "POST",
+        headers: industryRequestHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+      var data = await resp.json().catch(function () { return {}; });
+      if (!resp.ok) throw new Error(data.detail || "AI 搜索失败");
+      showSourceToast(data.message || "AI 搜索完成");
+      await refreshSourceList();
+    } catch (err) {
+      showSourceToast("AI 搜索失败：" + err.message);
+    } finally {
+      aiSearchBtn.disabled = false;
+      aiSearchBtn.textContent = original;
+    }
+  });
   if (emptyAdd) emptyAdd.addEventListener("click", function () {
     setDrawerOpen(true);
+    // 文件和网址由“补充材料”栏承载；若用户此前收起该栏，先恢复展开。
+    setManualDrawerOpen(true);
     setAddBoxOpen(true);
   });
   if (aboutOpen) aboutOpen.addEventListener("click", function () { setAboutOpen(true); });
@@ -480,6 +547,83 @@
     });
   }
 
+  function updateSelectionSummary() {
+    var count = document.getElementById("source-selection-count");
+    var boxes = document.querySelectorAll(".source-select-checkbox:not(:disabled)");
+    if (count) {
+      var selected = document.querySelectorAll(".source-select-checkbox:not(:disabled):checked").length;
+      count.textContent = "已选 " + selected + " / " + boxes.length + " 条可用来源";
+    }
+    var workspaceCount = document.getElementById("workspace-selected-count");
+    if (workspaceCount) {
+      workspaceCount.textContent = document.querySelectorAll(".source-select-checkbox:not(:disabled):checked").length;
+    }
+    var generate = document.getElementById("btn-generate-report");
+    if (generate && industrySourcesEditable()) {
+      generate.disabled = boxes.length === 0 || !document.querySelectorAll(".source-select-checkbox:not(:disabled):checked").length;
+    }
+  }
+
+  async function saveIndustrySelection() {
+    if (sourceScope() !== "industry" || !industrySourcesEditable()) return;
+    var reportId = requireReportId();
+    var boxes = Array.prototype.slice.call(document.querySelectorAll(".source-select-checkbox:not(:disabled)"));
+    var sourceIds = boxes.filter(function (box) { return box.checked; }).map(function (box) {
+      return Number(box.getAttribute("data-id"));
+    });
+    boxes.forEach(function (box) { box.disabled = true; });
+    try {
+      var endpoint = industryRequestUrl(
+        "/api/v1/industry/reports/" + reportId + "/data-sources/selection"
+      );
+      var resp = await fetch(endpoint, {
+        method: "PATCH",
+        headers: industryRequestHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ source_ids: sourceIds }),
+      });
+      var data = await resp.json().catch(function () { return {}; });
+      if (!resp.ok) throw new Error(data.detail || "保存选择失败");
+      showSourceToast(data.message || "已保存数据源选择");
+    } catch (err) {
+      showSourceToast("保存选择失败：" + err.message);
+      await refreshSourceList();
+    } finally {
+      boxes.forEach(function (box) { box.disabled = false; });
+      updateSelectionSummary();
+    }
+  }
+
+  function bindSourceSelection(root) {
+    if (sourceScope() !== "industry") return;
+    (root || document).querySelectorAll(".source-select-checkbox").forEach(function (box) {
+      if (box._selectionBound) return;
+      box._selectionBound = true;
+      box.addEventListener("change", function () {
+        updateSelectionSummary();
+        saveIndustrySelection();
+      });
+    });
+    var all = document.getElementById("btn-select-all-sources");
+    if (all && !all._selectionBound) {
+      all._selectionBound = true;
+      all.addEventListener("click", function () {
+        document.querySelectorAll(".source-select-checkbox:not(:disabled)").forEach(function (box) { box.checked = true; });
+        updateSelectionSummary();
+        saveIndustrySelection();
+      });
+    }
+    var none = document.getElementById("btn-select-no-sources");
+    if (none && !none._selectionBound) {
+      none._selectionBound = true;
+      none.addEventListener("click", function () {
+        document.querySelectorAll(".source-select-checkbox:not(:disabled)").forEach(function (box) { box.checked = false; });
+        updateSelectionSummary();
+        saveIndustrySelection();
+      });
+    }
+    updateSelectionSummary();
+  }
+
   function renderSourceList(sources) {
     if (!listWrap) return;
     if (!sources || !sources.length) {
@@ -503,6 +647,13 @@
       return;
     }
     var html = '<ul class="managed-source-list" id="managed-source-list">';
+    if (sourceScope() === "industry" && industrySourcesEditable()) {
+      var usableSources = sources.filter(function (src) { return Number(src.chars || 0) > 0; });
+      var selectedCount = usableSources.filter(function (src) { return src.is_selected !== false; }).length;
+      html = '<div class="source-selection-toolbar"><span id="source-selection-count">已选 ' + selectedCount + ' / ' + usableSources.length + ' 条可用来源</span>' +
+        '<button type="button" class="text-link" id="btn-select-all-sources">全选</button>' +
+        '<button type="button" class="text-link" id="btn-select-no-sources">清空</button></div>' + html;
+    }
     sources.forEach(function (src) {
       var typeLabel = src.source_type === "network_search" ? "网络搜索功能" : (src.source_type || "-");
       var meta = [src.origin_label || typeLabel];
@@ -512,6 +663,9 @@
       else if (src.text_preview) meta.push("有正文");
       html +=
         '<li class="managed-source-item" data-id="' + src.id + '">' +
+        ((sourceScope() === "industry" && industrySourcesEditable())
+          ? '<label class="source-select-control" title="' + (Number(src.chars || 0) > 0 ? '纳入本次 AI 生成' : '该来源尚未提取到正文，不能用于生成') + '"><input type="checkbox" class="source-select-checkbox" data-id="' + src.id + '"' + (src.is_selected !== false && Number(src.chars || 0) > 0 ? ' checked' : '') + (Number(src.chars || 0) > 0 ? '' : ' disabled') + '><span class="sr-only">选择 ' + escapeHtml(src.name) + '</span></label>'
+          : '') +
         '<button type="button" class="managed-source-main view-source" data-id="' + src.id + '" title="点击查看">' +
         '<span class="source-name">' + escapeHtml(src.name) + "</span>" +
         '<span class="source-meta">' + escapeHtml(meta.join(" · ")) + "</span>" +
@@ -522,9 +676,16 @@
     html += "</ul>";
     listWrap.innerHTML = html;
     bindSourceItemActions(listWrap);
+    bindSourceSelection(listWrap);
   }
 
   async function refreshSourceList() {
+    // 行业页按 AI/手动来源分栏渲染。变更后刷新整页，保持两个边栏的
+    // 归属与勾选状态一致，避免把手动材料重新插入 AI 候选栏。
+    if (sourceScope() === "industry") {
+      window.location.reload();
+      return;
+    }
     try {
       const url = dataSourcesUrl();
       if (!url) {
@@ -539,6 +700,8 @@
       showSourceToast("列表刷新失败: " + e.message);
     }
   }
+
+  bindSourceSelection(document);
 
   async function handleSourceMutation(promiseFactory) {
     try {
