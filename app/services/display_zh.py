@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+from difflib import SequenceMatcher
+from html import unescape
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -23,6 +25,11 @@ logger = logging.getLogger(__name__)
 _KANA_RE = re.compile(r"[\u3040-\u30ff]")
 _HAN_RE = re.compile(r"[\u4e00-\u9fff]")
 _DEGRADED_ZH = "结构化分析暂不可用"
+_EMPTY_DETAIL_RE = re.compile(
+    r"^(?:google news|谷歌新闻|正文未取得|暂无正文|暂无内容|"
+    r"content unavailable|access denied|sign in|log in)[\s.!。]*$",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -79,8 +86,8 @@ def format_news_overview(
     subject: str | None = None,
 ) -> str:
     """输出抓取并入库的完整详情；仅去除与标题重复的开头。"""
-    headline = " ".join(str(title or "").split()).strip().rstrip("。.")
-    detail = " ".join(str(summary or "").split()).strip().rstrip("。.")
+    headline = " ".join(unescape(str(title or "")).split()).strip().rstrip("。.")
+    detail = " ".join(unescape(str(summary or "")).split()).strip().rstrip("。.")
     if not detail or headline == detail or detail in headline:
         return ""
     # RSS 摘要常以标题开头再接正文；仅删去重复标题，保留其后的事实细节。
@@ -90,6 +97,41 @@ def format_news_overview(
             return ""
     # 详情可完整展示；原始链接仍供用户核验全文。
     return detail.rstrip("。") + "。"
+
+
+def has_publishable_content_detail(title: str | None, summary: str | None) -> bool:
+    """只有取得了有实质的内容详情才允许生成新闻卡片。"""
+    def comparable(value: str | None) -> str:
+        text = unescape(str(value or "")).lower()
+        # Google News 常在标题末尾拼接媒体名；相似度判断时去除该尾缀。
+        text = re.split(r"\s+[\-–—]\s+", text, maxsplit=1)[0]
+        return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", text)
+
+    title_key = comparable(title)
+    summary_key = comparable(summary)
+    if not summary_key:
+        return False
+    if title_key:
+        similarity = SequenceMatcher(None, title_key, summary_key).ratio()
+        shorter = min(len(title_key), len(summary_key))
+        longer = max(len(title_key), len(summary_key))
+        containment = shorter / longer if (
+            title_key in summary_key or summary_key in title_key
+        ) else 0.0
+        if similarity >= 0.72 or containment >= 0.72:
+            return False
+
+    detail = format_news_overview(
+        title=title,
+        summary=summary,
+        source_name=None,
+        source_url=None,
+    ).strip()
+    if not detail or _EMPTY_DETAIL_RE.fullmatch(detail):
+        return False
+    # 媒体名、中转页提示和一句残缺 snippet 不视为文章内容。
+    compact = re.sub(r"\s+", "", detail)
+    return len(compact) >= 40
 
 
 def _translate_batch(items: list[dict[str, str]]) -> dict[str, dict[str, str]]:
@@ -261,6 +303,7 @@ def build_display_cards(
     for e in entries:
         eid = str(e.id)
         tr = translated.get(eid) or {}
+        detail_available = has_publishable_content_detail(e.title, e.summary)
         social = social_resolver(e)
         assessment = assess_news_risk(
             title=tr.get("title") or e.title,
@@ -293,7 +336,7 @@ def build_display_cards(
                 ),
                 overview=format_news_overview(
                     title=tr.get("title") or e.title,
-                    summary=tr.get("summary") or e.summary,
+                    summary=(tr.get("summary") or e.summary) if detail_available else "",
                     source_name=getattr(e, "source_title", None),
                     source_url=e.source_url,
                     published_at=e.published_at,

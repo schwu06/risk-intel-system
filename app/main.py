@@ -39,6 +39,7 @@ from app.services.data_source_service import list_industry_sources
 from app.services.display_zh import (
     build_display_cards,
     format_news_overview,
+    has_publishable_content_detail,
     translate_fields_to_chinese,
 )
 from app.services.domain_rules import seed_default_domains
@@ -527,6 +528,7 @@ def _entity_assessment_context(
         ], db=db, cache_source="entity_risk_display")
         for risk in display_risks:
             translated = translated_risks.get(str(risk.id), {})
+            detail_available = has_publishable_content_detail(risk.title, risk.summary)
             setattr(risk, "display_title", translated.get("title") or risk.title)
             setattr(risk, "display_summary", translated.get("summary") or risk.summary)
             setattr(risk, "display_impact_analysis", translated.get("impact") or risk.impact_analysis)
@@ -535,7 +537,7 @@ def _entity_assessment_context(
                 "display_overview",
                 format_news_overview(
                     title=risk.display_title,
-                    summary=risk.display_summary,
+                    summary=risk.display_summary if detail_available else "",
                     source_name=risk.source_name,
                     source_url=risk.source_url,
                     published_at=risk.published_at,

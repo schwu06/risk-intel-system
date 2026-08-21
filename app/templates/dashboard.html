@@ -8,16 +8,7 @@
     <input type="search" id="daily-module-search" placeholder="搜索新闻、来源或日期" autocomplete="off" />
     <span aria-hidden="true">⌕</span>
   </label>
-  <button
-    type="button"
-    class="daily-index-title"
-    id="daily-index-toggle"
-    aria-expanded="true"
-    aria-controls="daily-index-list"
-  >
-    <span class="daily-index-chevron" aria-hidden="true"></span>
-    索引
-  </button>
+  <h2 class="daily-index-title">索引</h2>
   <ul class="run-list daily-index-list" id="daily-index-list">
     {% for code, name in modules.items() %}
     {% set run = run_map.get(code) %}
@@ -55,6 +46,7 @@
       <div class="daily-page-caption-actions">
         <button type="button" class="news-filter-toggle" id="news-filter-toggle" aria-expanded="false" aria-controls="news-filter-panel">
           筛选
+          <span class="news-filter-count" id="news-filter-count" hidden>0</span>
           <svg class="news-filter-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
             <path fill="currentColor" d="M1.4 2h13.2L9.6 8.5v4.15L6.4 14.8V8.5z"/>
           </svg>
@@ -62,6 +54,15 @@
       </div>
     </div>
     <div class="news-filter-panel" id="news-filter-panel" hidden>
+    <div class="news-filter-panel-head">
+      <div>
+        <strong>筛选新闻</strong>
+        <span>可多选，同一组内满足任一条件</span>
+      </div>
+      <button type="button" class="news-filter-clear" id="news-filter-clear" disabled>清除全部</button>
+    </div>
+    <div class="news-filter-group news-filter-group-risk">
+    <span class="news-filter-label">风险类型</span>
     <nav class="news-risk-filters" aria-label="风险类型筛选">
       <button type="button" class="news-risk-filter" data-news-risk="信贷风险">信贷风险</button>
       <button type="button" class="news-risk-filter" data-news-risk="市场风险">市场风险</button>
@@ -71,12 +72,16 @@
       <button type="button" class="news-risk-filter" data-news-risk="操作与网络安全">操作与网络安全</button>
       <button type="button" class="news-risk-filter" data-news-risk="治理与信息披露">治理与信息披露</button>
     </nav>
+    </div>
+    <div class="news-filter-group news-filter-group-level">
+    <span class="news-filter-label">风险等级</span>
     <nav class="news-level-filters" aria-label="风险等级筛选">
       <button type="button" class="news-level-filter level-low" data-news-level="低">低</button>
       <button type="button" class="news-level-filter level-medium" data-news-level="中">中</button>
       <button type="button" class="news-level-filter level-high" data-news-level="高">高</button>
       <button type="button" class="news-level-filter level-extreme" data-news-level="极高">极高</button>
     </nav>
+    </div>
     {% if active_page == 'news_7x24' %}
     <nav class="timeline-category-filters" aria-label="资讯栏目筛选">
       <button type="button" class="timeline-category-filter active" data-timeline-module="all">全部栏目</button>
