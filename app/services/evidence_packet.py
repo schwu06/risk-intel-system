@@ -66,6 +66,9 @@ def build_evidence_packet(db: Session, report_id: int) -> dict[str, Any]:
     for card in cards:
         source = db.get(IndustryDataSource, card.source_id)
         chunk = db.get(IndustrySourceChunk, card.chunk_id)
+        if not source or not source.is_selected:
+            excluded_counts["not_selected"] += 1
+            continue
         current_grade = getattr(source, "evidence_grade", None) or card.evidence_grade
         current_origin = getattr(source, "source_origin", None) or card.source_origin
         if card.validation_status == "lead_only" or current_grade == "lead_only" or current_origin == "network_search":

@@ -107,6 +107,7 @@ def _migrate_sqlite_columns(target_engine=engine) -> None:
         # NULL report_id and are not reprocessed during startup.
         ("industry_data_sources", "report_id", "INTEGER"),
         ("industry_data_sources", "copied_from_source_id", "INTEGER"),
+        ("industry_data_sources", "is_selected", "BOOLEAN NOT NULL DEFAULT 1"),
         ("industry_data_sources", "content_hash", "VARCHAR(64)"),
         ("industry_data_sources", "char_count", "INTEGER NOT NULL DEFAULT 0"),
         ("industry_data_sources", "raw_content_hash", "VARCHAR(64)"),

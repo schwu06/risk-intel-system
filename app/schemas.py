@@ -278,6 +278,14 @@ class IndustryDataSourceUrlIn(BaseModel):
     url: str = Field(..., min_length=8)
 
 
+class IndustryDataSourceSelectionIn(BaseModel):
+    source_ids: list[int] = Field(default_factory=list)
+
+
+class IndustryDataSourceSearchIn(BaseModel):
+    query: Optional[str] = Field(None, max_length=300)
+
+
 class IndustryReportRenameIn(BaseModel):
     report_name: str = Field(..., min_length=1, max_length=256)
 
