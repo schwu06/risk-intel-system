@@ -76,6 +76,9 @@ class IndustryDataSource(Base):
     original_filename: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     extracted_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # A report is generated only from explicitly selected source snapshots.
+    # Defaulting to True keeps historical reports reproducible after migration.
+    is_selected: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     char_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Source registry metadata. Existing rows intentionally remain nullable and are

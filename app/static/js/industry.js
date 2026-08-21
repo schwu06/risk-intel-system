@@ -105,6 +105,12 @@
         return;
       }
       const reportName = String(fd.get("report_name") || "").trim().replace(/\s+/g, " ");
+      if (!reportName) {
+        setMainStatus("请先为新文档填写名称。", true);
+        var nameInput = document.getElementById("report-name-input");
+        if (nameInput) nameInput.focus();
+        return;
+      }
       if (reportName.length > 256) {
         setMainStatus("报告名称不能超过 256 个字符", true);
         return;
@@ -112,7 +118,9 @@
       const body = {
         industry_name: industryName,
         company_name: industryName,
-        supplement_search: fd.get("supplement_search") === "on",
+        // Generation is deliberately source-led: the user selects sources in
+        // step 3 instead of receiving unreviewed search results automatically.
+        supplement_search: false,
       };
       if (submitBtn) submitBtn.disabled = true;
       setMainStatus("正在创建报告草稿…");
@@ -131,16 +139,8 @@
           const renameData = await readApiJson(renameResp);
           if (!renameResp.ok) throw new Error(apiError(renameData.detail, "设置报告名称失败"));
         }
-        setMainStatus("正在生成报告…可能需要数分钟，请勿重复提交。");
-        const genResp = await industryFetch("/api/v1/industry/reports/" + data.id + "/generate", {
-          method: "POST",
-        });
-        const genData = await readApiJson(genResp);
-        if (!genResp.ok) {
-          window.location.href = sectorBasePath() + "?report_id=" + data.id;
-          return;
-        }
-        window.location.href = sectorBasePath() + "?report_id=" + (genData.id || data.id);
+        setMainStatus("文档已创建。请在右侧添加并勾选数据源，再开始 AI 生成。");
+        window.location.href = sectorBasePath() + "?report_id=" + data.id;
       } catch (e) {
         if (submitBtn) submitBtn.disabled = false;
         setMainStatus("错误：" + e.message, true);
@@ -153,6 +153,13 @@
     generateBtn.addEventListener("click", async function () {
       const reportId = generateBtn.getAttribute("data-report-id");
       if (!reportId) return;
+      const selectedSources = document.querySelectorAll(".source-select-checkbox:checked");
+      const sourceDrawer = document.getElementById("source-drawer");
+      if (sourceDrawer && sourceDrawer.getAttribute("data-report-status") !== "completed" && !selectedSources.length) {
+        setMainStatus("请先在右侧勾选至少一条含正文的数据源。", true);
+        sourceDrawer.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
       const generationMsg = document.getElementById("generation-msg");
       generateBtn.disabled = true;
       setMainStatus("正在生成报告…可能需要数分钟，请勿重复提交。");
@@ -167,6 +174,26 @@
         setMainStatus("错误：" + e.message, true);
         if (generationMsg) generationMsg.textContent = "错误：" + e.message;
       }
+    });
+  }
+
+  const focusSourcesBtn = document.getElementById("btn-focus-data-sources");
+  if (focusSourcesBtn) {
+    focusSourcesBtn.addEventListener("click", function () {
+      const drawer = document.getElementById("source-drawer");
+      if (!drawer) return;
+      document.body.classList.remove("sources-collapsed");
+      // 手动上传与网址添加位于独立的“补充材料”栏中。
+      // 若该栏已收起，复用其开关以同步 aria 状态与本地记忆设置。
+      if (document.body.classList.contains("manual-sources-collapsed")) {
+        const manualToggle = document.getElementById("btn-toggle-manual-drawer");
+        if (manualToggle) manualToggle.click();
+        else document.body.classList.remove("manual-sources-collapsed");
+      }
+      const addBox = document.getElementById("sources-add-box");
+      if (addBox) addBox.hidden = false;
+      const addBtn = document.getElementById("btn-toggle-add-sources");
+      if (addBtn) addBtn.focus();
     });
   }
 

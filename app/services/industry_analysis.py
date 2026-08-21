@@ -26,7 +26,6 @@ from app.services.deepseek_analyzer import (
     DeepSeekAnalyzer,
     LEGACY_INDUSTRY_PROMPT_VERSION,
 )
-from app.services.gemini_analyzer import gemini_for
 from app.services.grounded_readiness import check_grounded_readiness
 from app.services.grounded_report import (
     GroundedPromotionError,
@@ -160,8 +159,8 @@ class IndustryAnalysisService:
         settings: Optional[Settings] = None,
     ) -> None:
         self.db = db
-        # 行业分析默认走 Gemini；测试可注入 FakeAnalyzer / DeepSeekAnalyzer
-        self.deepseek = deepseek or gemini_for("industry")
+        # 行业报告统一使用 DeepSeek；测试仍可注入兼容分析器。
+        self.deepseek = deepseek or DeepSeekAnalyzer()
         self.mita = mita or MitaSearchClient()
         self.settings = settings or get_settings()
 
@@ -303,6 +302,12 @@ class IndustryAnalysisService:
                     logger.warning("行业分析网络补充检索失败: %s", exc)
 
             authority_text, manifest = build_industry_authoritative_text(self.db, row.id)
+            if not manifest:
+                raise IndustryGenerationError(
+                    "no_selected_sources",
+                    "尚未选择含正文的数据源，无法生成报告",
+                    "请在第三步勾选至少一条已成功解析的数据源，或先添加数据源。",
+                )
             network_in_manifest = sum(
                 1 for item in manifest if item.get("source_type") == "network_search"
             )

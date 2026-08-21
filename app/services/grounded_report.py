@@ -20,7 +20,7 @@ from app.services.deepseek_analyzer import (
     GroundedReportOutputError,
 )
 from app.services.evidence_packet import build_evidence_packet
-from app.services.gemini_analyzer import GeminiAnalyzer, gemini_for
+from app.services.gemini_analyzer import GeminiAnalyzer
 
 
 class GroundedReportError(RuntimeError):
@@ -73,7 +73,7 @@ def _analyzer_provider(analyzer: DeepSeekAnalyzer) -> str:
 class GroundedReportService:
     def __init__(self, db: Session, analyzer: Optional[DeepSeekAnalyzer] = None) -> None:
         self.db = db
-        self.analyzer = analyzer or gemini_for("grounded")
+        self.analyzer = analyzer or DeepSeekAnalyzer()
 
     def _report(self, report_id: int) -> IndustryReport:
         report = self.db.get(IndustryReport, report_id)
