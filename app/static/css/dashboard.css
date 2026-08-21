@@ -3956,9 +3956,16 @@ body.daily-news-ui .module-status { padding: 1.1rem 1.3rem; border-radius: 12px;
 .ir-sidebar-body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: visible;
-  padding: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 0 0.2rem 17rem 0;
 }
+
+.ir-sidebar-body::-webkit-scrollbar { width: 6px; }
+.ir-sidebar-body::-webkit-scrollbar-thumb { border-radius: 999px; background: #c7d4e1; }
+.ir-sidebar-body::-webkit-scrollbar-thumb:hover { background: #9eb4c9; }
 
 .ir-search-empty {
   margin: 0.75rem 0.25rem;
@@ -4381,4 +4388,54 @@ body.daily-news-ui .daily-index-list::-webkit-scrollbar-thumb {
 .app-shell > .entity-sidebar.page-rail .entity-index::-webkit-scrollbar-thumb:hover,
 body.daily-news-ui .daily-index-list::-webkit-scrollbar-thumb:hover {
   background: #9eb4c9;
+}
+
+/* 左侧索引字体层级：便于在长名单中快速扫读主体、分组及状态。 */
+.daily-index-title,
+body.daily-news-ui .sidebar .daily-index-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.entity-index-group-head,
+.ir-tree-group-head,
+.ir-tree-group-title {
+  min-height: 34px;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.entity-index-count,
+.ir-tree-count {
+  min-width: 24px;
+  padding: 0.12rem 0.38rem;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.entity-link,
+.ir-tree-item,
+.daily-index-list .mod-name {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.entity-name-en {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.entity-link .credit {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.entity-index-empty,
+.ir-search-empty,
+.entity-search-empty {
+  font-size: 12px;
 }
