@@ -15,7 +15,16 @@
     <button type="button" class="ir-search-clear" id="ir-search-clear" title="清空搜索" aria-label="清空搜索" hidden>×</button>
     <span aria-hidden="true">⌕</span>
   </label>
-  <h2 class="daily-index-title">索引</h2>
+  <button
+    type="button"
+    class="daily-index-title"
+    id="ir-index-toggle"
+    aria-expanded="true"
+    aria-controls="ir-index-list"
+  >
+    <span class="daily-index-chevron" aria-hidden="true"></span>
+    索引
+  </button>
   <div class="daily-index-list ir-sidebar-body" id="ir-index-list">
     <div class="ir-tree" id="ir-tree" role="tree"></div>
     <p class="hint ir-search-empty" id="ir-search-empty" hidden>无匹配发行体</p>

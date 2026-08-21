@@ -1771,52 +1771,33 @@ body.daily-news-ui .module-status { padding: 1.1rem 1.3rem; border-radius: 10px;
 .news-risk-filters,
 .news-level-filters {
   display: flex;
-  flex-wrap: nowrap;
-  gap: 0.35rem;
-}
-.news-risk-filters {
-  min-width: 0;
-  overflow-x: auto;
-  padding: 2px;
-  scrollbar-width: thin;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.75rem;
 }
 
 .news-risk-filter,
 .news-level-filter {
-  min-width: 0;
-  padding: 0.34rem 0.62rem;
-  border: 1px solid transparent;
-  border-radius: 0.48rem;
+  min-width: 8rem;
+  padding: 0.48rem 0.9rem;
+  border: 0;
+  border-radius: 0.6rem;
   background: #e9edf2;
   color: #526272;
   font: inherit;
-  font-size: 0.76rem;
+  font-size: 0.88rem;
   line-height: 1.2;
   cursor: pointer;
   transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
 
-.news-risk-filter:hover { background: #e2e9f1; color: #405f82; }
-.news-risk-filter.active { border-color: #9bb9d9; background: #dce9f7; color: #315b86; box-shadow: 0 0 0 2px rgba(91, 137, 184, 0.1); font-weight: 600; }
-.news-level-filter { min-width: 2.8rem; }
+.news-risk-filter:hover,
+.news-risk-filter.active { background: #dce7f4; color: #405f82; box-shadow: inset 0 0 0 1px #c3d2e2; font-weight: 400; }
+.news-level-filter { min-width: 6.7rem; }
 .news-level-filter.level-low { background: #edf0f3; }
 .news-level-filter.level-medium { background: #e4eef9; color: #496988; }
 .news-level-filter.level-high { background: #faf0d7; color: #936c1c; }
 .news-level-filter.level-extreme { background: #f7e1e1; color: #a34a4a; }
-.news-level-filter.active { border-color: currentColor; box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 14%, transparent); font-weight: 600; }
-.news-filter-count {
-  display: inline-grid;
-  place-items: center;
-  min-width: 1.2rem;
-  height: 1.2rem;
-  padding: 0 0.3rem;
-  border-radius: 99px;
-  background: #52749a;
-  color: #fff;
-  font-size: 0.68rem;
-  line-height: 1;
-}
-.news-filter-count[hidden] { display: none; }
+.news-level-filter.active { box-shadow: inset 0 0 0 2px currentColor; font-weight: 400; }
 
 @media (max-width: 640px) {
   .daily-sidebar-footer { position: static; width: auto; }
@@ -3965,16 +3946,9 @@ body.daily-news-ui .module-status { padding: 1.1rem 1.3rem; border-radius: 10px;
 .ir-sidebar-body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  padding: 0 0.2rem 17rem 0;
+  overflow: visible;
+  padding: 0;
 }
-
-.ir-sidebar-body::-webkit-scrollbar { width: 6px; }
-.ir-sidebar-body::-webkit-scrollbar-thumb { border-radius: 999px; background: #c7d4e1; }
-.ir-sidebar-body::-webkit-scrollbar-thumb:hover { background: #9eb4c9; }
 
 .ir-search-empty {
   margin: 0.75rem 0.25rem;
@@ -4350,88 +4324,6 @@ body.daily-news-ui .module-status { padding: 1.1rem 1.3rem; border-radius: 10px;
   }
 }
 
-/* 左侧索引：标题仅作分区标题；主体清单保持独立滚动，不影响底部操作区。 */
-.daily-index-title,
-body.daily-news-ui .sidebar .daily-index-title {
-  display: block;
-  margin: 1.35rem 0 0.65rem;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #183b60;
-  font-family: inherit;
-  font-size: 0.82rem;
-  font-weight: 750;
-  letter-spacing: 0.06em;
-  line-height: 1.3;
-  cursor: default;
-}
-
-.daily-index-chevron { display: none; }
-
-body.daily-news-ui .daily-index-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-body.daily-news-ui .daily-index-list::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: #c7d4e1;
-}
-
-body.daily-news-ui .daily-index-list::-webkit-scrollbar-thumb:hover {
-  background: #9eb4c9;
-}
-
-/* 左侧索引字体层级：便于在长名单中快速扫读主体、分组及状态。 */
-.daily-index-title,
-body.daily-news-ui .sidebar .daily-index-title {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.entity-index-group-head,
-.ir-tree-group-head,
-.ir-tree-group-title {
-  min-height: 34px;
-  font-size: 14px;
-  font-weight: 650;
-  line-height: 1.35;
-}
-
-.entity-index-count,
-.ir-tree-count {
-  min-width: 24px;
-  padding: 0.12rem 0.38rem;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
-.entity-link,
-.ir-tree-item,
-.daily-index-list .mod-name {
-  font-size: 15px;
-  font-weight: 500;
-  line-height: 1.45;
-}
-
-.entity-name-en {
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.entity-link .credit {
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.entity-index-empty,
-.ir-search-empty,
-.entity-search-empty {
-  font-size: 12px;
-}
-
 /* 主体评估：不依赖 body class，保证卡片左右留白 40px 一定生效 */
 .content.entity-assessment-view {
   max-width: none;
@@ -4464,21 +4356,13 @@ body.daily-news-ui .sidebar .daily-index-title {
   overflow-y: auto;
   min-height: 0;
   padding-bottom: 12rem;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .entity-sidebar .entity-index-scroll::-webkit-scrollbar {
-  width: 6px;
-}
-
-.entity-sidebar .entity-index-scroll::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: #c7d4e1;
-}
-
-.entity-sidebar .entity-index-scroll::-webkit-scrollbar-thumb:hover {
-  background: #9eb4c9;
+  width: 0;
+  height: 0;
 }
 
 .entity-sidebar #pipeline-msg {

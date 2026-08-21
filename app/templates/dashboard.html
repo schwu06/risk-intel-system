@@ -8,7 +8,16 @@
     <input type="search" id="daily-module-search" placeholder="搜索新闻、来源或日期" autocomplete="off" />
     <span aria-hidden="true">⌕</span>
   </label>
-  <h2 class="daily-index-title">索引</h2>
+  <button
+    type="button"
+    class="daily-index-title"
+    id="daily-index-toggle"
+    aria-expanded="true"
+    aria-controls="daily-index-list"
+  >
+    <span class="daily-index-chevron" aria-hidden="true"></span>
+    索引
+  </button>
   <ul class="run-list daily-index-list" id="daily-index-list">
     {% for code, name in modules.items() %}
     {% set run = run_map.get(code) %}
@@ -46,7 +55,6 @@
       <div class="daily-page-caption-actions">
         <button type="button" class="news-filter-toggle" id="news-filter-toggle" aria-expanded="false" aria-controls="news-filter-panel">
           筛选
-          <span class="news-filter-count" id="news-filter-count" hidden>0</span>
           <svg class="news-filter-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
             <path fill="currentColor" d="M1.4 2h13.2L9.6 8.5v4.15L6.4 14.8V8.5z"/>
           </svg>

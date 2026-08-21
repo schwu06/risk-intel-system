@@ -8,8 +8,6 @@
   var riskButtons = Array.prototype.slice.call(document.querySelectorAll(".news-risk-filter"));
   var levelButtons = Array.prototype.slice.call(document.querySelectorAll(".news-level-filter"));
   var searchInput = document.getElementById("daily-module-search");
-  var clearButton = document.getElementById("news-filter-clear");
-  var filterCount = document.getElementById("news-filter-count");
   if (!riskButtons.length && !levelButtons.length && !searchInput) return;
 
   try {
@@ -46,21 +44,11 @@
 
   function syncButtons() {
     riskButtons.forEach(function (button) {
-      var selected = activeRiskTypes.has(button.getAttribute("data-news-risk"));
-      button.classList.toggle("active", selected);
-      button.setAttribute("aria-pressed", String(selected));
+      button.classList.toggle("active", activeRiskTypes.has(button.getAttribute("data-news-risk")));
     });
     levelButtons.forEach(function (button) {
-      var selected = activeLevels.has(button.getAttribute("data-news-level"));
-      button.classList.toggle("active", selected);
-      button.setAttribute("aria-pressed", String(selected));
+      button.classList.toggle("active", activeLevels.has(button.getAttribute("data-news-level")));
     });
-    var count = activeRiskTypes.size + activeLevels.size + (searchTerm ? 1 : 0);
-    if (filterCount) {
-      filterCount.textContent = String(count);
-      filterCount.hidden = count === 0;
-    }
-    if (clearButton) clearButton.disabled = count === 0;
     reorderGroup(riskButtons, function (button) {
       return activeRiskTypes.has(button.getAttribute("data-news-risk"));
     });
@@ -119,18 +107,6 @@
   if (searchInput) {
     searchInput.addEventListener("input", function () {
       searchTerm = searchInput.value.trim().toLowerCase();
-      syncButtons();
-      save();
-      apply();
-    });
-  }
-  if (clearButton) {
-    clearButton.addEventListener("click", function () {
-      activeRiskTypes.clear();
-      activeLevels.clear();
-      searchTerm = "";
-      if (searchInput) searchInput.value = "";
-      syncButtons();
       save();
       apply();
     });
