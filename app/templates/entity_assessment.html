@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% block body_class %}entity-assessment-ui{% endblock %}
+
 {% block title %}主体评估 — {{ app_name }}{% endblock %}
 
 {% block page_sidebar %}
@@ -67,15 +69,15 @@
     <div class="daily-sidebar-actions">
       <button
         type="button"
-        class="sidebar-action-primary"
+        class="sidebar-action-primary daily-export"
         id="btn-export-entity-docx"
         {% if not selected_entity %}disabled{% endif %}
         data-entity-id="{{ selected_entity.id if selected_entity else '' }}"
         data-report-date="{{ report_date }}"
-      >导出公开信息简报</button>
-      <button type="button" class="sidebar-action-secondary" id="btn-run-pipeline">采集近三个月资讯</button>
+      >导出 PDF</button>
+      <button type="button" class="sidebar-action-secondary daily-refresh" id="btn-run-pipeline">刷新资讯</button>
     </div>
-    <p class="hint" id="pipeline-msg">异步采集当前主体近三个月公开信源；空结果不会生成演示数据。</p>
+    <p class="hint" id="pipeline-msg"></p>
     <p class="hint" id="export-msg" hidden></p>
   </div>
 </aside>
@@ -186,7 +188,7 @@
           </svg>
         </div>
         <p class="ea-empty-title">该主体近三个月暂无已核验来源事件</p>
-        <p class="ea-empty-desc">{% if recent_risks_count %}观察期内另有记录未纳入展示（已排除背景信息等）。可调整报告日期，或点击左侧「采集近三个月资讯」补充。{% else %}已配置 {{ entity_sources|length }} 个公开信息源，可点击左侧「采集近三个月资讯」获取真实结果。{% endif %}</p>
+        <p class="ea-empty-desc">{% if recent_risks_count %}观察期内另有记录未纳入展示（已排除背景信息等）。可调整报告日期，或点击左侧「刷新资讯」补充。{% else %}已配置 {{ entity_sources|length }} 个公开信息源，可点击左侧「刷新资讯」获取真实结果。{% endif %}</p>
       </div>
       <div class="risk-event-list" id="risk-event-list" hidden></div>
       {% endif %}
@@ -234,7 +236,7 @@
   window.ENTITY_ID = {% if selected_entity %}{{ selected_entity.id }}{% else %}null{% endif %};
   window.ENTITY_NAME = {% if selected_entity %}{{ (selected_entity.display_name or selected_entity.name)|tojson }}{% else %}null{% endif %};
 </script>
-<script src="/static/js/entity_assessment.js?v=20260813-5"></script>
+<script src="/static/js/entity_assessment.js?v=20260820-6"></script>
 <script>
   (function initRiskTabs() {
     var tabs = document.querySelectorAll(".risk-tabs:not(.fin-tabs) .risk-tab");

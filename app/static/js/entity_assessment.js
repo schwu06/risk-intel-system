@@ -10,7 +10,7 @@
     if (!exportBtn) return;
     exportBtn.disabled = !!on || !window.ENTITY_ID;
     exportBtn.classList.toggle("is-loading", !!on);
-    exportBtn.textContent = on ? "正在生成…" : "导出公开信息简报";
+    exportBtn.textContent = on ? "正在生成…" : "导出 PDF";
   }
 
   function showExportMsg(text, isError) {

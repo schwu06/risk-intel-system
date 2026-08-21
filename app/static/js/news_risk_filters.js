@@ -30,6 +30,20 @@
     } catch (e) { /* ignore */ }
   }
 
+  function reorderGroup(buttons, isActive) {
+    if (!buttons.length) return;
+    var parent = buttons[0].parentNode;
+    var selected = [];
+    var rest = [];
+    buttons.forEach(function (button) {
+      if (isActive(button)) selected.push(button);
+      else rest.push(button);
+    });
+    selected.concat(rest).forEach(function (button) {
+      parent.appendChild(button);
+    });
+  }
+
   function syncButtons() {
     riskButtons.forEach(function (button) {
       var selected = activeRiskTypes.has(button.getAttribute("data-news-risk"));
@@ -47,6 +61,12 @@
       filterCount.hidden = count === 0;
     }
     if (clearButton) clearButton.disabled = count === 0;
+    reorderGroup(riskButtons, function (button) {
+      return activeRiskTypes.has(button.getAttribute("data-news-risk"));
+    });
+    reorderGroup(levelButtons, function (button) {
+      return activeLevels.has(button.getAttribute("data-news-level"));
+    });
   }
 
   function apply() {

@@ -365,7 +365,7 @@ def _daily_news_context(
                 "message": "",
             }
         elif not run:
-            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击右上角“刷新”开始采集。"}
+            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击“刷新”开始采集。"}
         elif (run.status or "").lower() == "failed" or (
             run.notes and "请求失败" in (run.notes or "")
         ):
@@ -388,7 +388,7 @@ def _daily_news_context(
         elif (run.status or "").lower() in ("empty", "completed") and (run.entry_count or 0) == 0:
             module_ui[code] = {"state": "empty", "message": "今日无动态"}
         else:
-            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击右上角“刷新”开始采集。"}
+            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击“刷新”开始采集。"}
 
     return {
         "request": request,
