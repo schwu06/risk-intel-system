@@ -114,26 +114,6 @@ python scripts/run_dev.py
 
 浏览器访问：<http://127.0.0.1:8000>
 
-`0.0.0.0` 是服务监听地址，不能作为浏览器访问地址；请使用 `127.0.0.1` 或 `localhost`。
-
-如果 8000 端口已被占用，可改用 8001：
-
-```bash
-source .venv/bin/activate
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
-```
-
-访问：<http://127.0.0.1:8001>
-
-### 常见启动问题
-
-| 问题 | 处理方式 |
-| --- | --- |
-| `address already in use` | 执行 `lsof -nP -iTCP:8000 -sTCP:LISTEN` 查找端口占用，或改用 8001 |
-| 浏览器访问 `0.0.0.0` 超时 | 改为 `http://127.0.0.1:8000` |
-| `Internal Server Error` | 查看运行终端的完整错误；确认已执行 `python scripts/init_db.py`，并重启服务 |
-| AI 分析不可用 | 检查 `.env` 中对应密钥是否已填入、不是示例占位符，然后重启服务 |
-| 新闻为空 | 在侧边栏手动运行采集；确认网络和 `MITA_API_KEY`，并检查对应数据源配置 |
 
 ## 采集与刷新
 
