@@ -7,11 +7,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Abril+Fatface&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/dashboard.css?v=20260824-12" />
+  <link rel="stylesheet" href="/static/css/dashboard.css?v=20260824-13" />
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
   {% block head_extra %}{% endblock %}
 </head>
-<body class="{% if active_page in ('daily_news', 'news_7x24') %}daily-news-ui{% endif %}">
+<body class="{% block body_class %}{% if active_page in ('daily_news', 'news_7x24') %}daily-news-ui{% elif active_page == 'entity_assessment' %}entity-assessment-ui{% endif %}{% endblock %}">
   <header class="top-bar">
     <div class="brand">
       <span class="brand-title">RiskIntel</span>
@@ -38,7 +38,7 @@
     {% block source_panel %}{% endblock %}
   </div>
 
-  <script src="/static/js/dashboard.js?v=20260824-10"></script>
+  <script src="/static/js/dashboard.js?v=20260824-11"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

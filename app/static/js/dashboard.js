@@ -1517,6 +1517,7 @@
 
   document.querySelectorAll(".daily-index-title[aria-controls]").forEach(function (btn) {
     if (btn.id === "btn-toggle-sectors") return;
+    if (btn.classList.contains("entity-index-group-head")) return;
     var list = document.getElementById(btn.getAttribute("aria-controls"));
     if (!list) return;
     btn.addEventListener("click", function () {

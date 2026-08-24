@@ -8,12 +8,24 @@
     <input type="search" id="daily-module-search" placeholder="搜索新闻、来源或日期" autocomplete="off" />
     <span aria-hidden="true">⌕</span>
   </label>
-  <h2 class="daily-index-title">索引</h2>
+  <button
+    type="button"
+    class="daily-index-title"
+    id="daily-index-toggle"
+    aria-expanded="true"
+    aria-controls="daily-index-list"
+  >
+    <span class="daily-index-chevron" aria-hidden="true"></span>
+    索引
+  </button>
   <ul class="run-list daily-index-list" id="daily-index-list">
     {% for code, name in modules.items() %}
-    {% set run = run_map.get(code) %}
+    {% set count = grouped_entries.get(code, [])|length %}
     <li>
-      <a class="mod-name mod-jump" href="#module-panel-{{ code }}" data-module="{{ code }}">{{ name }}</a>
+      <a class="mod-name mod-jump" href="#module-panel-{{ code }}" data-module="{{ code }}">
+        <span class="mod-name-label">{{ name }}</span>
+        <span class="daily-index-count" data-module-count="{{ code }}" aria-label="{{ count }}条新闻">{{ count }}</span>
+      </a>
     </li>
     {% endfor %}
   </ul>
@@ -51,45 +63,47 @@
             <path fill="currentColor" d="M1.4 2h13.2L9.6 8.5v4.15L6.4 14.8V8.5z"/>
           </svg>
         </button>
+        <div class="news-filter-panel" id="news-filter-panel" hidden>
+          <div class="news-filter-panel-head">
+            <div>
+              <strong>筛选新闻</strong>
+              <span>可多选，同一组内满足任一条件</span>
+            </div>
+            <button type="button" class="news-filter-clear" id="news-filter-clear" disabled>清除全部</button>
+          </div>
+          <div class="news-filter-cols">
+            <section class="news-filter-col">
+              <h3 class="news-filter-col-title">风险类型</h3>
+              <nav class="news-risk-filters" aria-label="风险类型筛选">
+                <button type="button" class="news-risk-filter" data-news-risk="信贷风险">信贷风险</button>
+                <button type="button" class="news-risk-filter" data-news-risk="市场风险">市场风险</button>
+                <button type="button" class="news-risk-filter" data-news-risk="流动性与资产负债">流动性与资产负债</button>
+                <button type="button" class="news-risk-filter" data-news-risk="合规与反洗钱">合规与反洗钱</button>
+                <button type="button" class="news-risk-filter" data-news-risk="国别与地缘">国别与地缘</button>
+                <button type="button" class="news-risk-filter" data-news-risk="操作与网络安全">操作与网络安全</button>
+                <button type="button" class="news-risk-filter" data-news-risk="治理与信息披露">治理与信息披露</button>
+              </nav>
+            </section>
+            <section class="news-filter-col">
+              <h3 class="news-filter-col-title">风险等级</h3>
+              <nav class="news-level-filters" aria-label="风险等级筛选">
+                <button type="button" class="news-level-filter level-low" data-news-level="低">低</button>
+                <button type="button" class="news-level-filter level-medium" data-news-level="中">中</button>
+                <button type="button" class="news-level-filter level-high" data-news-level="高">高</button>
+                <button type="button" class="news-level-filter level-extreme" data-news-level="极高">极高</button>
+              </nav>
+            </section>
+          </div>
+          {% if active_page == 'news_7x24' %}
+          <nav class="timeline-category-filters" aria-label="资讯栏目筛选">
+            <button type="button" class="timeline-category-filter active" data-timeline-module="all">全部栏目</button>
+            {% for code, name in modules.items() %}
+            <button type="button" class="timeline-category-filter" data-timeline-module="{{ code }}">{{ name }}</button>
+            {% endfor %}
+          </nav>
+          {% endif %}
+        </div>
       </div>
-    </div>
-    <div class="news-filter-panel" id="news-filter-panel" hidden>
-    <div class="news-filter-panel-head">
-      <div>
-        <strong>筛选新闻</strong>
-        <span>可多选，同一组内满足任一条件</span>
-      </div>
-      <button type="button" class="news-filter-clear" id="news-filter-clear" disabled>清除全部</button>
-    </div>
-    <div class="news-filter-group news-filter-group-risk">
-    <span class="news-filter-label">风险类型</span>
-    <nav class="news-risk-filters" aria-label="风险类型筛选">
-      <button type="button" class="news-risk-filter" data-news-risk="信贷风险">信贷风险</button>
-      <button type="button" class="news-risk-filter" data-news-risk="市场风险">市场风险</button>
-      <button type="button" class="news-risk-filter" data-news-risk="流动性与资产负债">流动性与资产负债</button>
-      <button type="button" class="news-risk-filter" data-news-risk="合规与反洗钱">合规与反洗钱</button>
-      <button type="button" class="news-risk-filter" data-news-risk="国别与地缘">国别与地缘</button>
-      <button type="button" class="news-risk-filter" data-news-risk="操作与网络安全">操作与网络安全</button>
-      <button type="button" class="news-risk-filter" data-news-risk="治理与信息披露">治理与信息披露</button>
-    </nav>
-    </div>
-    <div class="news-filter-group news-filter-group-level">
-    <span class="news-filter-label">风险等级</span>
-    <nav class="news-level-filters" aria-label="风险等级筛选">
-      <button type="button" class="news-level-filter level-low" data-news-level="低">低</button>
-      <button type="button" class="news-level-filter level-medium" data-news-level="中">中</button>
-      <button type="button" class="news-level-filter level-high" data-news-level="高">高</button>
-      <button type="button" class="news-level-filter level-extreme" data-news-level="极高">极高</button>
-    </nav>
-    </div>
-    {% if active_page == 'news_7x24' %}
-    <nav class="timeline-category-filters" aria-label="资讯栏目筛选">
-      <button type="button" class="timeline-category-filter active" data-timeline-module="all">全部栏目</button>
-      {% for code, name in modules.items() %}
-      <button type="button" class="timeline-category-filter" data-timeline-module="{{ code }}">{{ name }}</button>
-      {% endfor %}
-    </nav>
-    {% endif %}
     </div>
 
     {% if active_page == 'news_7x24' %}
@@ -100,12 +114,14 @@
         <div class="timeline-node" aria-hidden="true"></div>
         <div class="timeline-card">
           <div class="timeline-card-meta"><span>{{ modules.get(e.module_code, e.module_code) }}</span></div>
-          <h3 class="risk-event-title">{{ e.title }}</h3>
+          <h3 class="risk-event-title">
+            <span class="risk-event-title-text">{{ e.title }}</span>
+            {% if e.risk_tags %}
+            {% for tag in e.risk_tags %}<span class="news-risk-tag">{{ tag }}</span>{% endfor %}
+            {% endif %}
+          </h3>
           {% if e.overview %}
           <div class="entry-news-detail"><span class="entry-news-detail-label">内容详情</span><p>{{ e.overview }}</p></div>
-          {% endif %}
-          {% if e.risk_tags %}
-          <div class="news-risk-tags" aria-label="风险类型标签">{% for tag in e.risk_tags %}<span class="news-risk-tag">{{ tag }}</span>{% endfor %}</div>
           {% endif %}
           {% if e.risk_reasoning and e.risk_reasoning.show %}
           <p class="risk-tip"><span>风险提示</span>{{ e.risk_reasoning.transmission }}</p>
@@ -133,7 +149,7 @@
       {% if ui.get('message') %}<p class="module-recent-fallback">{{ ui.get('message') }}（当日暂无新增）</p>{% endif %}
       <div class="entry-grid risk-event-list">
         {% for e in mod_entries %}
-        <article class="entry-card risk-event-card" data-risk-tags="{{ e.risk_tags|join('|') }}" data-risk-level="{{ e.risk_level }}" data-news-search="{{ (e.title or '') ~ ' ' ~ (e.overview or '') ~ ' ' ~ (e.source_title or '') ~ ' ' ~ (e.published_at|string) ~ ' ' ~ (e.risk_tags|join(' ')) ~ ' ' ~ name }}">
+        <article class="entry-card risk-event-card" data-module="{{ code }}" data-risk-tags="{{ e.risk_tags|join('|') }}" data-risk-level="{{ e.risk_level }}" data-news-search="{{ (e.title or '') ~ ' ' ~ (e.overview or '') ~ ' ' ~ (e.source_title or '') ~ ' ' ~ (e.published_at|string) ~ ' ' ~ (e.risk_tags|join(' ')) ~ ' ' ~ name }}">
           <div class="risk-event-top">
             <span class="risk-level-tag risk-tag-{{ e.risk_level }}">{{ e.risk_level }}</span>
             {% if e.category_tag %}
@@ -151,16 +167,16 @@
             {% endif %}
           </div>
           <time class="daily-entry-time">{% if e.published_at %}{{ e.published_at|tokyo_time("%m/%d %H:%M") }}{% else %}发布时间待核验{% endif %}</time>
-          <h3 class="risk-event-title">{{ e.title }}</h3>
+          <h3 class="risk-event-title">
+            <span class="risk-event-title-text">{{ e.title }}</span>
+            {% if e.risk_tags %}
+            {% for tag in e.risk_tags %}<span class="news-risk-tag">{{ tag }}</span>{% endfor %}
+            {% endif %}
+          </h3>
           {% if e.overview %}
           <div class="entry-news-detail">
             <span class="entry-news-detail-label">内容详情</span>
             <p>{{ e.overview }}</p>
-          </div>
-          {% endif %}
-          {% if e.risk_tags %}
-          <div class="news-risk-tags" aria-label="风险类型标签">
-            {% for tag in e.risk_tags %}<span class="news-risk-tag">{{ tag }}</span>{% endfor %}
           </div>
           {% endif %}
           {% if e.risk_reasoning and e.risk_reasoning.show %}
@@ -201,7 +217,7 @@
 
 {% block scripts %}
 {{ super() }}
-<script src="/static/js/news_risk_filters.js?v=20260824-1"></script>
+<script src="/static/js/news_risk_filters.js?v=20260824-2"></script>
 <script>
   window.REPORT_DATE = "{{ report_date }}";
   window.PIPELINE_MODULES = "{{ module_codes_csv }}".split(",").filter(Boolean);
@@ -216,19 +232,20 @@
     var toggle = document.getElementById("news-filter-toggle");
     var panel = document.getElementById("news-filter-panel");
     if (toggle && panel) {
-      var panelKey = "riskintel:news-filter-panel:v1:" + window.location.pathname;
-      try {
-        var savedOpen = window.localStorage.getItem(panelKey) === "open";
-        panel.hidden = !savedOpen;
-        toggle.setAttribute("aria-expanded", String(savedOpen));
-        toggle.classList.toggle("active", savedOpen);
-      } catch (e) { /* ignore */ }
-      toggle.addEventListener("click", function () {
-        var willOpen = panel.hidden;
-        panel.hidden = !willOpen;
-        toggle.setAttribute("aria-expanded", String(willOpen));
-        toggle.classList.toggle("active", willOpen);
-        try { window.localStorage.setItem(panelKey, willOpen ? "open" : "closed"); } catch (e) { /* ignore */ }
+      function setOpen(open) {
+        panel.hidden = !open;
+        toggle.setAttribute("aria-expanded", String(open));
+        toggle.classList.toggle("active", open);
+      }
+      toggle.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        setOpen(panel.hidden);
+      });
+      panel.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+      });
+      document.addEventListener("click", function () {
+        if (!panel.hidden) setOpen(false);
       });
     }
   }());
