@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS industry_reports (
     company_name VARCHAR(256),
     status VARCHAR(32) NOT NULL DEFAULT 'draft',
     supplement_search BOOLEAN NOT NULL DEFAULT 1,
+    library_saved BOOLEAN NOT NULL DEFAULT 0,
     report_html TEXT,
     report_json TEXT,
     chart_specs TEXT,

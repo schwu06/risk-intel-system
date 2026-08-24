@@ -10,7 +10,7 @@
     if (!exportBtn) return;
     exportBtn.disabled = !!on || !window.ENTITY_ID;
     exportBtn.classList.toggle("is-loading", !!on);
-    exportBtn.textContent = on ? "正在生成…" : "导出 PDF";
+    exportBtn.textContent = on ? "正在生成…" : "导出公开信息简报";
   }
 
   function showExportMsg(text, isError) {
@@ -219,5 +219,6 @@
       });
   }
 
-  refreshLivePanels();
+  // 首屏内容由服务端从 SQLite 缓存渲染。不要在每次打开页面时再次
+  // 请求外部新闻/财报；用户点击“刷新资讯”后由采集流水线更新缓存并刷新页面。
 })();

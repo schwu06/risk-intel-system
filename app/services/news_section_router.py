@@ -20,14 +20,23 @@ NEWS_SECTIONS = (SECTION_B, SECTION_C, SECTION_D)
 
 # 监控企业（含别名；匹配时大小写不敏感）
 MONITOR_COMPANIES: tuple[tuple[str, ...], ...] = (
-    ("三菱商事", "mitsubishi corporation", "mitsubishi corp"),
-    ("三井物产", "三井物産", "mitsui & co", "mitsui & co.", "mitsui and co"),
-    ("伊藤忠商事", "itochu", "伊藤忠"),
-    ("住友商事", "sumitomo corporation", "sumitomo corp"),
-    ("丸红", "丸紅", "marubeni"),
+    # 五大商社
+    ("三菱商事", "三菱商事株式会社", "mitsubishi corporation", "mitsubishi corp"),
+    ("三井物产", "三井物産", "三井物産株式会社", "mitsui & co", "mitsui & co.", "mitsui and co"),
+    ("伊藤忠商事", "伊藤忠商事株式会社", "itochu", "伊藤忠"),
+    ("住友商事", "住友商事株式会社", "sumitomo corporation", "sumitomo corp"),
+    ("丸红", "丸紅", "丸紅株式会社", "marubeni"),
+    # 既有重点企业
     ("デンソー", "denso", "电装"),
     ("日本邮船", "日本郵船", "nyk line", "nyk"),
-    ("大和证券", "大和証券", "daiwa securities", "daiwa"),
+    # 三大银行（金融集团）
+    ("三菱UFJ", "三菱ufj", "mufg", "mitsubishi ufj financial group", "三菱ufjフィナンシャル・グループ", "三菱ufj銀行"),
+    ("三井住友FG", "三井住友fg", "smfg", "sumitomo mitsui financial group", "三井住友フィナンシャルグループ", "三井住友銀行"),
+    ("瑞穗金融", "瑞穂", "みずほ", "mizuho", "mizuho financial group", "みずほフィナンシャルグループ", "みずほ銀行"),
+    # 三大券商
+    ("野村控股", "野村", "nomura", "nomura holdings", "野村ホールディングス", "野村證券", "野村证券"),
+    ("大和证券", "大和証券", "大和証券グループ", "daiwa securities", "daiwa securities group", "daiwa"),
+    ("SMBC日兴证券", "smbc日興", "smbc nikko", "smbc日興証券", "smbc日兴证券"),
 )
 
 MIDDLE_EAST_GEO: tuple[str, ...] = (
@@ -168,8 +177,9 @@ MACRO_MARKET: tuple[str, ...] = (
     "inflation",
 )
 
-# 日报只保留财经/企业经营相关内容。地缘或企业名称本身不足以入选，
-# 必须同时能识别市场、财务、交易、监管、经营或供应链层面的关联。
+# 日报只保留财经/企业经营相关内容。C 板块中的已监控主体采用例外：
+# 来自官网、交易所或可信财经媒体的公告、IR、业务与人事信息也可保留，
+# 以免因标题未出现中文财务关键词而漏掉正式披露。
 FINANCIAL_RELEVANCE: tuple[str, ...] = (
     *COMMODITY_MARKET,
     *MACRO_MARKET,
@@ -441,10 +451,16 @@ def item_in_module_scope(
         return False, "排除：非新闻日报主题（娱乐/体育/科普趣味等）"
     if code not in NEWS_SECTIONS:
         return True, "非新闻三板块，跳过板块校验"
-    if not is_financial_news_item(title=title, content=content):
+    company = _matched_company(_norm(f"{title} {content} {source}"), related_company)
+    if code == SECTION_C:
+        if not company:
+            return False, "排除：未命中大型企业监控名单"
+        if not is_japan_enterprise_trusted_source(source):
+            return False, "排除：大型企业仅保留官网、交易所或可信财经媒体信源"
+        if not is_financial_news_item(title=title, content=content):
+            return True, f"可信信源命中监控企业「{company}」，保留企业公告/业务动态"
+    elif not is_financial_news_item(title=title, content=content):
         return False, "排除：不含财经、企业经营或市场风险实质"
-    if code == SECTION_C and not is_japan_enterprise_trusted_source(source):
-        return False, "排除：日本方面内容仅保留官网、交易所或可信财经媒体信源"
     result = route_news_sections(
         title=title,
         content=content,

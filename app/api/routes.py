@@ -36,6 +36,7 @@ from app.schemas import (
     DomainRuleIn,
     EntityRiskOut,
     IndustryAnalysisRequest,
+    IndustryNetworkSearchAddIn,
     IndustryDataSourceSearchIn,
     IndustryDataSourceSelectionIn,
     IndustryDataSourceUrlIn,
@@ -43,6 +44,7 @@ from app.schemas import (
     IndustrySectorRenameIn,
     IndustrySectorOut,
     EvidenceExtractRequest,
+    IndustryReportRevisionIn,
     IndustryReportRenameIn,
     IndustryReportOut,
     GroundedPromotionRequest,
@@ -261,7 +263,7 @@ def pipeline_job_status(job_id: str):
 
 @router.get("/pipeline/running")
 def pipeline_running_job(
-    window_hours: int | None = Query(None, ge=1, le=8760),
+    window_hours: int | None = Query(None, ge=1, le=168),
     entity_id: int | None = Query(None),
     module_codes: str | None = Query(None, description="逗号分隔模块，如 B,C,D"),
 ):
@@ -281,7 +283,7 @@ def pipeline_running_job(
 
 @router.get("/pipeline/last-refresh")
 def pipeline_last_refresh(
-    window_hours: int = Query(NEWS_WINDOW_HOURS_24, ge=1, le=8760),
+    window_hours: int = Query(NEWS_WINDOW_HOURS_24, ge=1, le=168),
     module_codes: str | None = Query("B,C,D", description="逗号分隔模块"),
 ):
     """最近一次新闻采集完成时间（东京），供界面同步刷新文案且不打断操作。"""
@@ -626,6 +628,22 @@ def fork_industry_report(report_id: int, db: Session = Depends(get_industry_db_w
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.post("/industry/reports/{report_id}/save-library")
+def save_industry_report_to_library(
+    report_id: int, db: Session = Depends(get_industry_db_with_query)
+):
+    try:
+        report = IndustryAnalysisService(db).save_to_industry_library(report_id)
+    except ValueError as exc:
+        status_code = 404 if str(exc) == "报告不存在" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return {
+        "message": f"已保存到「{report.industry_name}」行业资料库，后续新建该行业报告时可复用。",
+        "report_id": report.id,
+        "library_saved": report.library_saved,
+    }
+
+
 @router.post("/industry/reports/{report_id}/generate", response_model=IndustryReportOut)
 def generate_industry_report(report_id: int, db: Session = Depends(get_industry_db_with_query)):
     try:
@@ -639,6 +657,20 @@ def generate_industry_report(report_id: int, db: Session = Depends(get_industry_
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/industry/reports/{report_id}/revise", response_model=IndustryReportOut)
+def revise_industry_report(
+    report_id: int,
+    body: IndustryReportRevisionIn,
+    db: Session = Depends(get_industry_db_with_query),
+):
+    try:
+        return IndustryAnalysisService(db).revise_completed_report(report_id, body.instruction)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"DeepSeek 修改报告失败：{exc}") from exc
 
 
 @router.get("/industry/reports/{report_id}/grounded-readiness")
@@ -1031,7 +1063,7 @@ def search_industry_data_sources(
     body: IndustryDataSourceSearchIn,
     db: Session = Depends(get_industry_db_with_query),
 ):
-    """Search candidate sources; candidates stay unselected until the user reviews them."""
+    """Search candidate sources without writing them into the report."""
     report = IndustryAnalysisService(db).get_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="报告不存在")
@@ -1045,19 +1077,46 @@ def search_industry_data_sources(
     )
     try:
         response = MitaSearchClient().search(query=query, max_results=8)
-        created = append_industry_network_search_sources(
-            db,
-            report_id,
-            response.items,
-            is_selected=False,
-        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"AI 搜索信源失败：{exc}") from exc
     return {
-        "message": f"已找到并加入 {len(created)} 条参考信源，请勾选需要使用的来源",
+        "message": f"找到 {len(response.items)} 条候选来源，请选择后加入报告",
         "query": query,
-        "added_count": len(created),
+        "items": [
+            {
+                "title": str(getattr(item, "title", "") or ""),
+                "url": str(getattr(item, "url", "") or ""),
+                "snippet": str(getattr(item, "snippet", "") or ""),
+                "published_at": str(getattr(item, "published_at", "") or "") or None,
+                "source_domain": str(getattr(item, "source_domain", "") or "") or None,
+            }
+            for item in response.items
+            if str(getattr(item, "url", "") or "").strip()
+        ],
     }
+
+
+@router.post("/industry/reports/{report_id}/data-sources/search/add")
+def add_industry_search_data_sources(
+    report_id: int,
+    body: IndustryNetworkSearchAddIn,
+    db: Session = Depends(get_industry_db_with_query),
+):
+    """Persist only the candidate webpages explicitly chosen in the search dialog."""
+    report = IndustryAnalysisService(db).get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="报告不存在")
+    if report.status not in {"draft", "failed"}:
+        raise HTTPException(status_code=409, detail="只有草稿或生成失败的报告可以添加数据源")
+    if not body.items:
+        raise HTTPException(status_code=400, detail="请至少选择一条来源")
+    try:
+        created = append_industry_network_search_sources(
+            db, report_id, body.items, is_selected=False,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"加入搜索信源失败：{exc}") from exc
+    return {"message": f"已加入 {len(created)} 条来源，请勾选需要用于 AI 分析的资料", "added_count": len(created)}
 
 
 @router.get("/industry/reports/{report_id}/data-sources/{source_id}")

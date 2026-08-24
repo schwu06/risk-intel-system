@@ -148,6 +148,40 @@
     });
   }
 
+  const addReportBtn = document.getElementById("btn-add-report");
+  const reportModal = document.getElementById("report-create-modal");
+  const reportNameInput = document.getElementById("report-name-input");
+  const reportCloseBtn = document.getElementById("btn-close-report-create");
+  const reportCancelBtn = document.getElementById("btn-cancel-report-create");
+
+  function openReportModal() {
+    if (!reportModal) return;
+    reportModal.classList.remove("hidden");
+    reportModal.hidden = false;
+    if (reportNameInput) {
+      window.setTimeout(function () { reportNameInput.focus(); reportNameInput.select(); }, 0);
+    }
+  }
+
+  function closeReportModal() {
+    if (!reportModal) return;
+    reportModal.classList.add("hidden");
+    reportModal.hidden = true;
+  }
+
+  if (addReportBtn) addReportBtn.addEventListener("click", openReportModal);
+  document.querySelectorAll("[data-open-report-modal]").forEach(function (button) {
+    button.addEventListener("click", openReportModal);
+  });
+  if (reportCloseBtn) reportCloseBtn.addEventListener("click", closeReportModal);
+  if (reportCancelBtn) reportCancelBtn.addEventListener("click", closeReportModal);
+  if (reportModal) reportModal.addEventListener("click", function (event) {
+    if (event.target === reportModal) closeReportModal();
+  });
+  if (reportNameInput) reportNameInput.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") closeReportModal();
+  });
+
   const generateBtn = document.getElementById("btn-generate-report");
   if (generateBtn) {
     generateBtn.addEventListener("click", async function () {
@@ -177,21 +211,70 @@
     });
   }
 
+  const revisionForm = document.getElementById("report-revision-form");
+  if (revisionForm) {
+    const revisionChat = document.querySelector(".report-revision-chat");
+    const content = document.querySelector(".industry-content");
+    const mainPanel = document.querySelector(".app-main");
+    function positionRevisionChat() {
+      if (!revisionChat || !mainPanel) return;
+      const bounds = mainPanel.getBoundingClientRect();
+      revisionChat.style.setProperty("--revision-left", Math.max(12, bounds.left + 20) + "px");
+      revisionChat.style.setProperty("--revision-right", Math.max(12, window.innerWidth - bounds.right + 20) + "px");
+    }
+    if (content) content.classList.add("has-floating-revision-chat");
+    positionRevisionChat();
+    window.addEventListener("resize", positionRevisionChat);
+    if (window.ResizeObserver && mainPanel) {
+      new ResizeObserver(positionRevisionChat).observe(mainPanel);
+    }
+    const revisionInput = document.getElementById("report-revision-input");
+    if (revisionInput) revisionInput.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        revisionForm.requestSubmit();
+      }
+    });
+    revisionForm.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      const input = document.getElementById("report-revision-input");
+      const submit = document.getElementById("btn-revise-report");
+      const message = document.getElementById("report-revision-msg");
+      const reportId = revisionForm.getAttribute("data-report-id");
+      const instruction = String(input ? input.value : "").trim();
+      if (instruction.length < 2) {
+        if (message) message.textContent = "请写明需要调整的内容。";
+        if (input) input.focus();
+        return;
+      }
+      if (submit) submit.disabled = true;
+      if (message) message.textContent = "DeepSeek 正在生成修订版本，请稍候…";
+      try {
+        const response = await industryFetch("/api/v1/industry/reports/" + reportId + "/revise", {
+          method: "POST",
+          body: JSON.stringify({ instruction: instruction }),
+        });
+        const data = await readApiJson(response);
+        if (!response.ok) throw new Error(apiError(data.detail, "修改报告失败"));
+        window.location.href = sectorBasePath() + "?report_id=" + data.id;
+      } catch (error) {
+        if (submit) submit.disabled = false;
+        if (message) message.textContent = "修改失败：" + error.message;
+      }
+    });
+  }
+
   const focusSourcesBtn = document.getElementById("btn-focus-data-sources");
   if (focusSourcesBtn) {
     focusSourcesBtn.addEventListener("click", function () {
       const drawer = document.getElementById("source-drawer");
       if (!drawer) return;
       document.body.classList.remove("sources-collapsed");
-      // 手动上传与网址添加位于独立的“补充材料”栏中。
-      // 若该栏已收起，复用其开关以同步 aria 状态与本地记忆设置。
-      if (document.body.classList.contains("manual-sources-collapsed")) {
-        const manualToggle = document.getElementById("btn-toggle-manual-drawer");
-        if (manualToggle) manualToggle.click();
-        else document.body.classList.remove("manual-sources-collapsed");
+      const addModal = document.getElementById("source-add-modal");
+      if (addModal) {
+        addModal.hidden = false;
+        addModal.classList.remove("hidden");
       }
-      const addBox = document.getElementById("sources-add-box");
-      if (addBox) addBox.hidden = false;
       const addBtn = document.getElementById("btn-toggle-add-sources");
       if (addBtn) addBtn.focus();
     });
@@ -236,8 +319,11 @@
   try {
     var openAdd = new URLSearchParams(window.location.search).get("open_add") === "1";
     if (openAdd && !isCompletedIndustryReport()) {
-      var addBox = document.getElementById("sources-add-box");
-      if (addBox) addBox.hidden = false;
+      var addModal = document.getElementById("source-add-modal");
+      if (addModal) {
+        addModal.hidden = false;
+        addModal.classList.remove("hidden");
+      }
       document.body.classList.remove("sources-collapsed");
       var url = new URL(window.location.href);
       url.searchParams.delete("open_add");

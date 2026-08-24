@@ -35,7 +35,6 @@ from app.services.chart_generator import extract_and_build_charts
 from app.services.content_extractor import enrich_items_with_body
 from app.services.dedup import content_fingerprint, dedupe_by_title_similarity, titles_similar
 from app.services.deepseek_analyzer import DeepSeekAnalyzer
-from app.services.gemini_analyzer import GeminiAnalyzer, gemini_for
 from app.services.domain_rules import get_active_blacklist, get_active_whitelist
 from app.services.entity_credit import refresh_entity_credit, resolve_entity
 from app.services.entity_catalog import EntityProfile, configured_entity_catalog
@@ -138,7 +137,6 @@ class RiskPipeline:
         db: Session,
         mita: Optional[MitaSearchClient] = None,
         deepseek: Optional[DeepSeekAnalyzer] = None,
-        gemini: Optional[GeminiAnalyzer] = None,
         rss: Optional[RssNewsCollector] = None,
         job_id: Optional[str] = None,
         authority_text: Optional[str] = None,
@@ -153,7 +151,6 @@ class RiskPipeline:
         self.mita = mita or MitaSearchClient()
         self.ddg = ddg
         self.deepseek = deepseek or DeepSeekAnalyzer()
-        self.gemini = gemini or gemini_for("entity")
         self.settings = get_settings()
         default_hours = int(getattr(self.settings, "news_window_hours", NEWS_WINDOW_HOURS_24) or NEWS_WINDOW_HOURS_24)
         self.window_hours = int(window_hours if window_hours is not None else default_hours)
@@ -483,11 +480,8 @@ class RiskPipeline:
 
             # 演示回填必须显式开启；正常模式为空时保留真实历史结果。
             from app.services.api_keys import is_placeholder_key as _ph
-            llm_key = (
-                getattr(self.settings, "gemini_api_key", None)
-                if module_code in ENTITY_MODULES
-                else getattr(self.settings, "deepseek_api_key", None)
-            )
+            # 所有新闻与主体评估的结构化、摘要、风险分析统一由 DeepSeek 执行。
+            llm_key = getattr(self.settings, "deepseek_api_key", None)
             external_offline = _ph(getattr(self.settings, "mita_api_key", None)) and _ph(llm_key)
             has_external_items = any(
                 (b.get("items") or b.get("source") == "authority") for b in batches
@@ -2007,7 +2001,7 @@ class RiskPipeline:
                     results[idx] = fut.result()
                 except Exception as exc:
                     start, chunk = chunk_specs[idx]
-                    provider = "Gemini" if module_code in ENTITY_MODULES else "DeepSeek"
+                    provider = "DeepSeek"
                     reason = _llm_failure_reason(exc, provider=provider)
                     logger.warning(
                         "LLM 并发批次异常，改用原文兜底 (%s#%s): %s [%s]",
@@ -2088,7 +2082,7 @@ class RiskPipeline:
                 chunk, tagged, metadata, module_code=module_code, funnel=funnel
             )
         except Exception as exc:
-            provider = "Gemini" if module_code in ENTITY_MODULES else "DeepSeek"
+            provider = "DeepSeek"
             reason = _llm_failure_reason(exc, provider=provider)
             logger.warning(
                 "LLM 分析失败，改用原文结构化兜底 (%s#%s): %s [%s]",
@@ -2316,7 +2310,8 @@ class RiskPipeline:
                 funnel["llm_cached"] = int(funnel.get("llm_cached") or 0) + 1
                 funnel["structured"] = int(funnel.get("structured") or 0) + len(cached)
                 return cached
-        analyzer = self.gemini if module_code in ENTITY_MODULES else self.deepseek
+        # 统一使用 DeepSeek 生成新闻摘要、风险标签与主题评估分析。
+        analyzer = self.deepseek
         structured = analyzer.analyze_raw(
             text,
             module_code=module_code,
