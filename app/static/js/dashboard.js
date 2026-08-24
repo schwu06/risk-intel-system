@@ -225,20 +225,14 @@
 
   /* ---------- 数据源面板 / 关于（仅深度研报页存在） ---------- */
   const drawer = document.getElementById("source-drawer");
-  const manualDrawer = document.getElementById("manual-source-drawer");
   const toggleBtn = document.getElementById("btn-toggle-source-drawer");
-  const manualToggleBtn = document.getElementById("btn-toggle-manual-drawer");
-  const aboutModal = document.getElementById("about-modal");
-  const aboutOpen = document.getElementById("btn-open-about");
-  const aboutClose = document.getElementById("btn-close-about");
   const addBox = document.getElementById("sources-add-box");
   const addToggle = document.getElementById("btn-toggle-add-sources");
-  const aiSearchBtn = document.getElementById("btn-ai-search-sources");
+  const searchForm = document.getElementById("sources-search-form");
+  const searchInput = document.getElementById("sources-search-input");
   const emptyAdd = document.getElementById("btn-empty-add-source");
   const STORAGE_KEY = "sources_panel_collapsed";
-  const MANUAL_STORAGE_KEY = "manual_sources_panel_collapsed";
   const listWrap = document.getElementById("managed-source-list-wrap");
-  const manualListWrap = document.getElementById("manual-source-list-wrap");
   const fileInput = document.getElementById("global-upload-file");
   const dropzone = document.getElementById("sources-dropzone");
   const uploadNameInput = document.getElementById("global-upload-name");
@@ -264,37 +258,16 @@
     } catch (e) { /* ignore */ }
   }
 
-  function setManualDrawerOpen(open) {
-    if (!manualDrawer) return;
-    document.body.classList.toggle("manual-sources-collapsed", !open);
-    manualDrawer.setAttribute("aria-hidden", open ? "false" : "true");
-    if (manualToggleBtn) {
-      manualToggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
-      manualToggleBtn.title = open ? "收起补充材料" : "展开补充材料";
-      manualToggleBtn.setAttribute("aria-label", open ? "收起补充材料" : "展开补充材料");
-    }
-    try { localStorage.setItem(MANUAL_STORAGE_KEY, open ? "0" : "1"); } catch (e) { /* ignore */ }
-  }
-
   function setAddBoxOpen(open) {
     if (!addBox) return;
     addBox.hidden = !open;
   }
 
-  function setAboutOpen(open) {
-    if (!aboutModal) return;
-    aboutModal.classList.toggle("hidden", !open);
-    aboutModal.hidden = !open;
-  }
-
   try {
     if (localStorage.getItem(STORAGE_KEY) === "1") setDrawerOpen(false);
     else setDrawerOpen(true);
-    if (localStorage.getItem(MANUAL_STORAGE_KEY) === "1") setManualDrawerOpen(false);
-    else setManualDrawerOpen(true);
   } catch (e) {
     setDrawerOpen(true);
-    setManualDrawerOpen(true);
   }
 
   if (toggleBtn) {
@@ -310,26 +283,15 @@
       if (!isDrawerOpen()) setDrawerOpen(true);
     });
   }
-  if (manualToggleBtn) {
-    manualToggleBtn.addEventListener("click", function (event) {
-      event.stopPropagation();
-      setManualDrawerOpen(document.body.classList.contains("manual-sources-collapsed"));
-    });
-  }
-  var manualCollapsedHeader = manualDrawer && manualDrawer.querySelector(".manual-sources-panel-header");
-  if (manualCollapsedHeader) {
-    manualCollapsedHeader.addEventListener("click", function () {
-      if (document.body.classList.contains("manual-sources-collapsed")) setManualDrawerOpen(true);
-    });
-  }
   if (addToggle) addToggle.addEventListener("click", function () {
     setAddBoxOpen(addBox ? addBox.hidden : true);
   });
-  if (aiSearchBtn) aiSearchBtn.addEventListener("click", async function () {
+  if (searchForm) searchForm.addEventListener("submit", async function (ev) {
+    ev.preventDefault();
     if (sourceScope() !== "industry") return;
-    aiSearchBtn.disabled = true;
-    var original = aiSearchBtn.textContent;
-    aiSearchBtn.textContent = "正在搜索…";
+    if (searchInput && searchInput.disabled) return;
+    var query = searchInput ? String(searchInput.value || "").trim() : "";
+    if (searchInput) searchInput.disabled = true;
     try {
       var endpoint = industryRequestUrl(
         "/api/v1/industry/reports/" + requireReportId() + "/data-sources/search"
@@ -337,30 +299,27 @@
       var resp = await fetch(endpoint, {
         method: "POST",
         headers: industryRequestHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({}),
+        body: JSON.stringify({ query: query }),
       });
       var data = await resp.json().catch(function () { return {}; });
-      if (!resp.ok) throw new Error(data.detail || "AI 搜索失败");
-      showSourceToast(data.message || "AI 搜索完成");
+      if (!resp.ok) throw new Error(data.detail || "搜索失败");
+      showSourceToast(data.message || "搜索完成");
       await refreshSourceList();
     } catch (err) {
-      showSourceToast("AI 搜索失败：" + err.message);
+      showSourceToast("搜索失败：" + err.message);
     } finally {
-      aiSearchBtn.disabled = false;
-      aiSearchBtn.textContent = original;
+      if (searchInput) {
+        searchInput.disabled = false;
+        searchInput.focus();
+      }
     }
   });
   if (emptyAdd) emptyAdd.addEventListener("click", function () {
     setDrawerOpen(true);
-    // 文件和网址由“补充材料”栏承载；若用户此前收起该栏，先恢复展开。
-    setManualDrawerOpen(true);
     setAddBoxOpen(true);
   });
-  if (aboutOpen) aboutOpen.addEventListener("click", function () { setAboutOpen(true); });
-  if (aboutClose) aboutClose.addEventListener("click", function () { setAboutOpen(false); });
   document.addEventListener("keydown", function (ev) {
     if (ev.key === "Escape") {
-      setAboutOpen(false);
       var svm = document.getElementById("source-view-modal");
       if (svm) { svm.classList.add("hidden"); svm.hidden = true; }
     }
@@ -634,6 +593,11 @@
           : '<p class="sources-empty-hint">当前报告不可修改数据源。</p>');
       listWrap.innerHTML =
         '<div class="sources-empty" id="managed-source-list">' +
+        '<div class="sources-empty-icon" aria-hidden="true">' +
+        '<svg width="40" height="40" viewBox="0 0 24 24" fill="none">' +
+        '<path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.4"/>' +
+        '<path d="M14 3v5h5" stroke="currentColor" stroke-width="1.4"/>' +
+        "</svg></div>" +
         '<p class="sources-empty-title">保存的数据源将显示在此处</p>' +
         '<p class="sources-empty-desc">当前报告的数据源组为空。</p>' + emptyAction +
         "</div>";
@@ -644,21 +608,14 @@
           setAddBoxOpen(true);
         });
       }
+      updateSelectionSummary();
       return;
     }
     var html = '<ul class="managed-source-list" id="managed-source-list">';
-    if (sourceScope() === "industry" && industrySourcesEditable()) {
-      var usableSources = sources.filter(function (src) { return Number(src.chars || 0) > 0; });
-      var selectedCount = usableSources.filter(function (src) { return src.is_selected !== false; }).length;
-      html = '<div class="source-selection-toolbar"><span id="source-selection-count">已选 ' + selectedCount + ' / ' + usableSources.length + ' 条可用来源</span>' +
-        '<button type="button" class="text-link" id="btn-select-all-sources">全选</button>' +
-        '<button type="button" class="text-link" id="btn-select-no-sources">清空</button></div>' + html;
-    }
     sources.forEach(function (src) {
-      var typeLabel = src.source_type === "network_search" ? "网络搜索功能" : (src.source_type || "-");
-      var meta = [src.origin_label || typeLabel];
-      if (src.original_filename) meta.push(src.original_filename);
-      if (src.url) meta.push("网址");
+      var isNetwork = src.source_origin === "network_search" || src.source_type === "network_search";
+      var typeLabel = isNetwork ? "网络搜索" : (src.original_filename || (src.url ? "网址" : (src.origin_label || src.source_type || "-")));
+      var meta = [typeLabel];
       if (typeof src.chars === "number") meta.push(src.chars + " 字");
       else if (src.text_preview) meta.push("有正文");
       html +=
@@ -670,7 +627,7 @@
         '<span class="source-name">' + escapeHtml(src.name) + "</span>" +
         '<span class="source-meta">' + escapeHtml(meta.join(" · ")) + "</span>" +
         "</button>" +
-        ((industrySourcesEditable() || src.source_origin === "network_search" || src.source_type === "network_search") ? '<button type="button" class="link-btn delete-source" data-id="' + src.id + '">删除</button>' : '') +
+        ((industrySourcesEditable() || isNetwork) ? '<button type="button" class="link-btn delete-source" data-id="' + src.id + '">删除</button>' : '') +
         "</li>";
     });
     html += "</ul>";
@@ -680,18 +637,9 @@
   }
 
   async function refreshSourceList() {
-    // 行业页按 AI/手动来源分栏渲染。变更后刷新整页，保持两个边栏的
-    // 归属与勾选状态一致，避免把手动材料重新插入 AI 候选栏。
-    if (sourceScope() === "industry") {
-      window.location.reload();
-      return;
-    }
     try {
       const url = dataSourcesUrl();
-      if (!url) {
-        renderSourceList([]);
-        return;
-      }
+      if (!url) return;
       const resp = await fetch(url, { headers: industryRequestHeaders() });
       const data = await resp.json().catch(function () { return {}; });
       if (!resp.ok) throw new Error(data.detail || "刷新失败");
@@ -1398,6 +1346,7 @@
 
   document.querySelectorAll(".daily-index-title[aria-controls]").forEach(function (btn) {
     if (btn.id === "btn-toggle-sectors") return;
+    if (btn.classList.contains("entity-index-group-head")) return;
     var list = document.getElementById(btn.getAttribute("aria-controls"));
     if (!list) return;
     btn.addEventListener("click", function () {

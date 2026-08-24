@@ -1,4 +1,4 @@
-{# 右侧停靠数据源面板：每份报告拥有独立数据源组 #}
+{# 右侧停靠数据源面板：上传、网络搜索与来源列表合并为一栏 #}
 {% set drawer_editable = drawer_report_status in ['draft', 'failed'] %}
 {% set can_add_or_fork = drawer_editable or drawer_report_status == 'completed' %}
 {% set sector_ready = sector_selected if sector_selected is defined else true %}
@@ -13,10 +13,7 @@
   data-sector-selected="{{ '1' if sector_ready else '0' }}"
 >
   <div class="sources-panel-header">
-    <div>
-      <h2 class="sources-panel-title">参考信源</h2>
-      <p class="sources-panel-subtitle">AI 检索与选择</p>
-    </div>
+    <h2 class="sources-panel-title">数据源</h2>
     <button
       type="button"
       class="sources-panel-toggle"
@@ -28,7 +25,7 @@
     >
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.6"/>
-        <path d="M9 4v16" stroke="currentColor" stroke-width="1.6"/>
+        <path d="M15 4v16" stroke="currentColor" stroke-width="1.6"/>
       </svg>
     </button>
   </div>
@@ -38,15 +35,55 @@
     <div class="sources-sector-gate" role="status">请选择行业</div>
     {% endif %}
 
-    <section class="sources-ai-search-section" {% if not sector_ready %}aria-disabled="true"{% endif %}>
-      <div class="source-action-heading">
-        <span>AI 搜索参考信源</span>
-        <small>候选来源</small>
-      </div>
-      <button type="button" class="sources-ai-search-btn" id="btn-ai-search-sources" {% if not drawer_editable or not sector_ready %}disabled{% endif %}>
-        搜索当前行业信源
+    <div class="sources-panel-actions">
+      <button type="button" class="sources-add-btn" id="btn-toggle-add-sources" {% if not can_add_or_fork or not sector_ready %}disabled{% endif %}>
+        <span aria-hidden="true">+</span> 添加数据源
       </button>
-    </section>
+      <form class="sources-search-form" id="sources-search-form" {% if not drawer_editable or not sector_ready %}aria-disabled="true"{% endif %}>
+        <label class="sr-only" for="sources-search-input">从网络搜索新来源</label>
+        <input
+          type="search"
+          class="sources-search-input"
+          id="sources-search-input"
+          name="query"
+          maxlength="300"
+          placeholder="从网络搜索新来源"
+          autocomplete="off"
+          {% if not drawer_editable or not sector_ready %}disabled{% endif %}
+        />
+      </form>
+    </div>
+
+    <div class="sources-add-box" id="sources-add-box" hidden>
+      <p class="sources-add-label">仅归属于当前报告草稿。</p>
+      <div class="sources-dropzone" id="sources-dropzone" role="button" tabindex="0" aria-label="点击或拖拽文件到此处上传">
+        <input type="file" id="global-upload-file" name="file" accept=".txt,.xlsx,.docx,.pptx,.pdf" class="sources-file-input" tabindex="-1" {% if not sector_ready %}disabled{% endif %} />
+        <span class="sources-dropzone-icon" aria-hidden="true">↑</span>
+        <span class="sources-dropzone-title">点击或拖拽文件到此处上传</span>
+        <span class="sources-dropzone-hint">txt / xlsx / docx / pptx / pdf</span>
+      </div>
+      <form class="stack-form" id="global-upload-form">
+        <input type="text" name="name" id="global-upload-name" placeholder="数据源名称（可选）" {% if not sector_ready %}disabled{% endif %} />
+        <button type="submit" class="btn small" id="global-upload-submit" disabled>上传已选文件</button>
+      </form>
+      <form class="stack-form" id="global-url-form">
+        <input type="text" name="name" placeholder="链接名称" required {% if not sector_ready %}disabled{% endif %} />
+        <input type="url" name="url" placeholder="网页或 PDF 链接（https://...）" required {% if not sector_ready %}disabled{% endif %} />
+        <button type="submit" class="btn small secondary" {% if not sector_ready %}disabled{% endif %}>添加网址</button>
+      </form>
+      <div class="sources-add-chips">
+        <button type="button" class="sources-chip" id="chip-pick-file" title="选择本地文件" {% if not sector_ready %}disabled{% endif %}>文件</button>
+        <button type="button" class="sources-chip" id="chip-focus-url" title="添加网址" {% if not sector_ready %}disabled{% endif %}>网址</button>
+      </div>
+    </div>
+
+    {% if drawer_editable %}
+    <div class="source-selection-toolbar">
+      <span id="source-selection-count">已选 {{ drawer_selected_count }} / {{ drawer_usable_count }} 条可用来源</span>
+      <button type="button" class="text-link" id="btn-select-all-sources">全选</button>
+      <button type="button" class="text-link" id="btn-select-no-sources">清空</button>
+    </div>
+    {% endif %}
 
     <div class="sources-panel-body" id="managed-source-list-wrap">
       {% if not sector_ready %}
@@ -55,16 +92,8 @@
         <p class="sources-empty-desc">选择或新建行业后，再创建报告草稿并上传数据源。</p>
       </div>
       {% elif drawer_sources %}
-      {% if drawer_editable %}
-      <div class="source-selection-toolbar">
-        <span id="source-selection-count">已选 {{ drawer_selected_count }} / {{ drawer_usable_count }} 条可用来源</span>
-        <button type="button" class="text-link" id="btn-select-all-sources">全选</button>
-        <button type="button" class="text-link" id="btn-select-no-sources">清空</button>
-      </div>
-      {% endif %}
-      {% if drawer_ai_sources %}
       <ul class="managed-source-list" id="managed-source-list">
-        {% for src in drawer_ai_sources %}
+        {% for src in drawer_sources %}
         <li class="managed-source-item" data-id="{{ src.id }}">
           {% if drawer_editable %}
           <label class="source-select-control" title="纳入本次 AI 生成">
@@ -75,9 +104,10 @@
           <button type="button" class="managed-source-main view-source" data-id="{{ src.id }}" title="点击查看">
             <span class="source-name">{{ src.name }}</span>
             <span class="source-meta">
-              {% if src.source_type == 'network_search' %}网络搜索功能{% else %}{{ src.source_type }}{% endif %}
-              {% if src.original_filename %} · {{ src.original_filename }}{% endif %}
-              {% if src.url %} · 网址{% endif %}
+              {% if src.source_type == 'network_search' or src.source_origin == 'network_search' %}网络搜索
+              {% elif src.original_filename %}{{ src.original_filename }}
+              {% elif src.url %}网址
+              {% else %}{{ src.source_type }}{% endif %}
               · {{ (src.extracted_text or '')|length }} 字
               {% if not (src.extracted_text or '')|trim %} · 等待解析{% endif %}
             </span>
@@ -86,11 +116,6 @@
         </li>
         {% endfor %}
       </ul>
-      {% else %}
-      <div class="sources-empty sources-empty-compact" id="managed-source-list">
-        <p class="sources-empty-desc">AI 搜索到的候选信源将显示在这里。</p>
-      </div>
-      {% endif %}
       {% else %}
       <div class="sources-empty" id="managed-source-list">
         <div class="sources-empty-icon" aria-hidden="true">
@@ -114,101 +139,8 @@
       </div>
       {% endif %}
     </div>
-
-    <div class="sources-panel-footer">
-      <button type="button" class="about-link" id="btn-open-about">关于本系统</button>
-    </div>
   </div>
 </aside>
-
-<aside class="manual-sources-panel {% if not sector_ready %}sources-panel-no-sector{% endif %}" id="manual-source-drawer" aria-label="补充材料：手动添加信源" aria-hidden="false">
-  <div class="manual-sources-panel-header">
-    <div>
-      <h2>补充材料</h2>
-      <p>手动添加信源</p>
-    </div>
-    <button type="button" class="sources-panel-toggle" id="btn-toggle-manual-drawer" title="收起补充材料" aria-label="收起补充材料" aria-expanded="true" aria-controls="manual-source-drawer">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.6"/>
-        <path d="M9 4v16" stroke="currentColor" stroke-width="1.6"/>
-      </svg>
-    </button>
-  </div>
-  <div class="manual-sources-panel-content">
-    <button type="button" class="sources-add-btn" id="btn-toggle-add-sources" {% if not can_add_or_fork or not sector_ready %}disabled{% endif %}>
-      <span aria-hidden="true">+</span> 上传文件或添加网址
-    </button>
-    <div class="sources-add-box" id="sources-add-box" hidden>
-      <p class="sources-add-label">仅归属于当前报告草稿。</p>
-      <div class="sources-dropzone" id="sources-dropzone" role="button" tabindex="0" aria-label="点击或拖拽文件到此处上传">
-        <input type="file" id="global-upload-file" name="file" accept=".txt,.xlsx,.docx,.pptx,.pdf" class="sources-file-input" tabindex="-1" {% if not sector_ready %}disabled{% endif %} />
-        <span class="sources-dropzone-icon" aria-hidden="true">↑</span>
-        <span class="sources-dropzone-title">点击或拖拽文件到此处上传</span>
-        <span class="sources-dropzone-hint">txt / xlsx / docx / pptx / pdf</span>
-      </div>
-      <form class="stack-form" id="global-upload-form">
-        <input type="text" name="name" id="global-upload-name" placeholder="数据源名称（可选）" {% if not sector_ready %}disabled{% endif %} />
-        <button type="submit" class="btn small" id="global-upload-submit" disabled>上传已选文件</button>
-      </form>
-      <form class="stack-form" id="global-url-form">
-        <input type="text" name="name" placeholder="链接名称" required {% if not sector_ready %}disabled{% endif %} />
-        <input type="url" name="url" placeholder="网页或 PDF 链接（https://...）" required {% if not sector_ready %}disabled{% endif %} />
-        <button type="submit" class="btn small secondary" {% if not sector_ready %}disabled{% endif %}>添加网址</button>
-      </form>
-      <div class="sources-add-chips">
-        <button type="button" class="sources-chip" id="chip-pick-file" title="选择本地文件" {% if not sector_ready %}disabled{% endif %}>文件</button>
-        <button type="button" class="sources-chip" id="chip-focus-url" title="添加网址" {% if not sector_ready %}disabled{% endif %}>网址</button>
-      </div>
-    </div>
-    <div class="manual-source-list-wrap" id="manual-source-list-wrap">
-      {% if drawer_manual_sources %}
-      <p class="manual-source-list-title">已添加材料</p>
-      <ul class="managed-source-list">
-        {% for src in drawer_manual_sources %}
-        <li class="managed-source-item" data-id="{{ src.id }}">
-          {% if drawer_editable %}
-          <label class="source-select-control" title="纳入本次 AI 生成">
-            <input type="checkbox" class="source-select-checkbox" data-id="{{ src.id }}" {% if src.is_selected and (src.extracted_text or '')|trim %}checked{% endif %} {% if not (src.extracted_text or '')|trim %}disabled title="该来源尚未提取到正文，不能用于生成"{% endif %} />
-            <span class="sr-only">选择 {{ src.name }}</span>
-          </label>
-          {% endif %}
-          <button type="button" class="managed-source-main view-source" data-id="{{ src.id }}" title="点击查看">
-            <span class="source-name">{{ src.name }}</span>
-            <span class="source-meta">
-              {% if src.original_filename %}{{ src.original_filename }} · {% endif %}{% if src.url %}网址 · {% endif %}{{ (src.extracted_text or '')|length }} 字
-              {% if not (src.extracted_text or '')|trim %} · 等待解析{% endif %}
-            </span>
-          </button>
-          {% if drawer_editable %}<button type="button" class="link-btn delete-source" data-id="{{ src.id }}">删除</button>{% endif %}
-        </li>
-        {% endfor %}
-      </ul>
-      {% endif %}
-    </div>
-  </div>
-</aside>
-
-<div class="about-modal hidden" id="about-modal" hidden role="dialog" aria-modal="true" aria-labelledby="about-title">
-  <div class="about-modal-card">
-    <div class="about-modal-header">
-      <h2 id="about-title">关于本系统</h2>
-      <button type="button" class="drawer-close" id="btn-close-about" aria-label="关闭">×</button>
-    </div>
-    <div class="about-modal-body">
-      <p><strong>做什么</strong>：按模块自动汇总近 24 小时重要资讯，结构化后写入本地库并在页面展示；可选导出 Word。</p>
-      <p><strong>默认怎么取数</strong>（无需上传）：</p>
-      <ul>
-        <li>Google News RSS（按模块关键词检索）</li>
-        <li>精选媒体 RSS：Reuters、BBC、NHK 等</li>
-        <li>秘塔（Metaso）网页搜索作广度补充，结果自动加入当前研报数据源</li>
-        <li>日本企业模块另提供披露门户核对入口（不直接入库）</li>
-      </ul>
-      <p><strong>大模型</strong>：DeepSeek 将检索结果整理为标题、摘要、分类、重要度、影响分析等字段；不编造材料中没有的事实。</p>
-      <p><strong>研报数据源</strong>：右侧面板中的文件和网址仅归属于当前报告；已完成报告保持只读。需要补充材料时，点击「添加数据源」会创建新版草稿并复制现有材料，上传后在工作区确认勾选范围再生成。</p>
-      <p><strong>空结果含义</strong>：「今日无动态」表示采集成功但无可推送条目；失败时会尽量保留上次结果。</p>
-    </div>
-  </div>
-</div>
 
 <div class="about-modal hidden" id="source-view-modal" hidden role="dialog" aria-modal="true" aria-labelledby="source-view-title">
   <div class="about-modal-card source-view-card">

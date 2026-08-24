@@ -216,6 +216,39 @@ def drop_industry_database(sector_key: str) -> None:
             pass
 
 
+def list_sector_reports(sector_key: str, limit: int = 80) -> list[dict]:
+    """列出单个行业下的报告，按创建时间倒序。"""
+    refresh_sectors()
+    sector = INDUSTRY_SECTORS.get(sector_key)
+    if not sector:
+        return []
+    init_industry_database(sector_key)
+    session = get_industry_sessionmaker(sector_key)()
+    try:
+        rows = (
+            session.query(IndustryReport)
+            .order_by(IndustryReport.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": row.id,
+                "sector_key": sector_key,
+                "sector_label": sector.label,
+                "industry_name": row.industry_name,
+                "company_name": row.company_name,
+                "report_name": row.report_name,
+                "version": row.version,
+                "status": row.status,
+                "created_at": row.created_at,
+            }
+            for row in rows
+        ]
+    finally:
+        session.close()
+
+
 def list_all_sector_reports(limit: int = 40) -> list[dict]:
     """跨行业汇总报告列表，按创建时间倒序。"""
     refresh_sectors()

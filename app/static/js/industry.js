@@ -183,13 +183,6 @@
       const drawer = document.getElementById("source-drawer");
       if (!drawer) return;
       document.body.classList.remove("sources-collapsed");
-      // 手动上传与网址添加位于独立的“补充材料”栏中。
-      // 若该栏已收起，复用其开关以同步 aria 状态与本地记忆设置。
-      if (document.body.classList.contains("manual-sources-collapsed")) {
-        const manualToggle = document.getElementById("btn-toggle-manual-drawer");
-        if (manualToggle) manualToggle.click();
-        else document.body.classList.remove("manual-sources-collapsed");
-      }
       const addBox = document.getElementById("sources-add-box");
       if (addBox) addBox.hidden = false;
       const addBtn = document.getElementById("btn-toggle-add-sources");
@@ -485,11 +478,7 @@
         });
         const data = await readApiJson(resp);
         if (!resp.ok) throw new Error(apiError(data.detail, "删除行业失败"));
-        if (data.next_sector_key) {
-          window.location.href = "/deep-reports/" + encodeURIComponent(data.next_sector_key);
-        } else {
-          window.location.href = "/deep-reports";
-        }
+        window.location.href = "/deep-reports";
       } catch (e) {
         button.disabled = false;
         window.alert(e.message);
@@ -575,6 +564,111 @@
         submitNewSector();
       } else if (ev.key === "Escape") {
         closeSectorModal();
+      }
+    });
+  }
+
+  const addReportBtn = document.getElementById("btn-add-report");
+  const reportModal = document.getElementById("report-create-modal");
+  const reportNameInput = document.getElementById("report-create-name");
+  const reportCreateMsg = document.getElementById("report-create-msg");
+  const reportConfirmBtn = document.getElementById("btn-confirm-report-create");
+  const reportCancelBtn = document.getElementById("btn-cancel-report-create");
+  const reportCloseBtn = document.getElementById("btn-close-report-create");
+  const reportCreateHint = "未填写时将使用默认名称「新建报告」。";
+
+  function openReportModal() {
+    if (!reportModal) return;
+    reportModal.classList.remove("hidden");
+    reportModal.hidden = false;
+    if (reportCreateMsg) reportCreateMsg.textContent = reportCreateHint;
+    if (reportConfirmBtn) reportConfirmBtn.disabled = false;
+    if (reportNameInput) {
+      reportNameInput.value = "";
+      setTimeout(function () { reportNameInput.focus(); }, 0);
+    }
+  }
+
+  function closeReportModal() {
+    if (!reportModal) return;
+    reportModal.classList.add("hidden");
+    reportModal.hidden = true;
+    if (reportCreateMsg) reportCreateMsg.textContent = reportCreateHint;
+    if (reportConfirmBtn) reportConfirmBtn.disabled = false;
+    if (addReportBtn) addReportBtn.disabled = false;
+  }
+
+  async function submitNewReport() {
+    if (!sectorSelected()) {
+      if (reportCreateMsg) reportCreateMsg.textContent = "请先选择或新建行业";
+      return;
+    }
+    const rail = document.querySelector(".page-rail[data-default-industry-name]");
+    const industryName = ((rail && rail.getAttribute("data-default-industry-name")) || "").trim();
+    if (!industryName) {
+      if (reportCreateMsg) reportCreateMsg.textContent = "当前行业缺少默认名称，请重新选择行业";
+      return;
+    }
+    var reportName = String((reportNameInput && reportNameInput.value) || "").trim().replace(/\s+/g, " ");
+    if (!reportName) reportName = "新建报告";
+    if (reportName.length > 256) {
+      if (reportCreateMsg) reportCreateMsg.textContent = "报告名称不能超过 256 个字符";
+      return;
+    }
+    if (reportConfirmBtn) reportConfirmBtn.disabled = true;
+    if (addReportBtn) addReportBtn.disabled = true;
+    if (reportCreateMsg) reportCreateMsg.textContent = "正在创建…";
+    try {
+      const resp = await industryFetch("/api/v1/industry/reports/drafts", {
+        method: "POST",
+        body: JSON.stringify({
+          industry_name: industryName,
+          company_name: industryName,
+          supplement_search: false,
+        }),
+      });
+      const data = await readApiJson(resp);
+      if (!resp.ok) throw new Error(apiError(data.detail, "创建草稿失败"));
+      const renameResp = await industryFetch("/api/v1/industry/reports/" + data.id + "/name", {
+        method: "PATCH",
+        body: JSON.stringify({ report_name: reportName }),
+      });
+      const renameData = await readApiJson(renameResp);
+      if (!renameResp.ok) throw new Error(apiError(renameData.detail, "设置报告名称失败"));
+      window.location.href = sectorBasePath() + "?report_id=" + data.id;
+    } catch (e) {
+      if (reportConfirmBtn) reportConfirmBtn.disabled = false;
+      if (addReportBtn) addReportBtn.disabled = false;
+      if (reportCreateMsg) reportCreateMsg.textContent = e.message;
+    }
+  }
+
+  if (addReportBtn) {
+    addReportBtn.addEventListener("click", function () {
+      openReportModal();
+    });
+  }
+  if (reportConfirmBtn) {
+    reportConfirmBtn.addEventListener("click", function () { submitNewReport(); });
+  }
+  if (reportCancelBtn) {
+    reportCancelBtn.addEventListener("click", closeReportModal);
+  }
+  if (reportCloseBtn) {
+    reportCloseBtn.addEventListener("click", closeReportModal);
+  }
+  if (reportModal) {
+    reportModal.addEventListener("click", function (ev) {
+      if (ev.target === reportModal) closeReportModal();
+    });
+  }
+  if (reportNameInput) {
+    reportNameInput.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        submitNewReport();
+      } else if (ev.key === "Escape") {
+        closeReportModal();
       }
     });
   }

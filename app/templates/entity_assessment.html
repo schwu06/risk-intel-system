@@ -28,13 +28,13 @@
       >
         <button
           type="button"
-          class="entity-index-group-head"
+          class="daily-index-title entity-index-group-head"
           aria-expanded="true"
           aria-controls="entity-group-list-{{ group.key }}"
         >
-          <span class="entity-index-chevron" aria-hidden="true"></span>
+          <span class="daily-index-chevron entity-index-chevron" aria-hidden="true"></span>
           <span class="entity-index-group-title">{{ group.label }}</span>
-          <span class="entity-index-count">{{ group.entities|length }}</span>
+          <span class="entity-index-count" data-group-count="{{ group.key }}" aria-label="{{ group.entities|length }}个主体">{{ group.entities|length }}</span>
         </button>
         <ul class="entity-list" id="entity-group-list-{{ group.key }}">
           {% for ent in group.entities %}
@@ -85,31 +85,37 @@
 {% block content %}
 <main class="layout content-shell" data-modules="{{ module_codes_csv }}">
   <section class="content entity-assessment-view">
-    <form class="filter-form entity-date-filter" method="get" action="{{ page_path }}">
-      <label for="report_date">报告日期</label>
-      <input type="date" id="report_date" name="report_date" value="{{ report_date }}" />
-      {% if selected_entity %}
-      <input type="hidden" name="entity_id" value="{{ selected_entity.id }}" />
-      {% endif %}
-      <button type="submit">查询</button>
-    </form>
-    {% if selected_entity %}
-    <header class="entity-header">
-      <div class="entity-header-main">
-        <h1 class="entity-title">{{ selected_entity.display_name or selected_entity.name }}</h1>
-        <div class="entity-header-tags">
-          {% if selected_entity.industry %}
-          <span class="industry-tag">{{ selected_entity.industry }}</span>
+    <div class="entity-page-sticky">
+      <div class="entity-sticky-row">
+        {% if selected_entity %}
+        <header class="entity-header">
+          <div class="entity-header-main">
+            <h1 class="entity-title">{{ selected_entity.display_name or selected_entity.name }}</h1>
+            <div class="entity-header-tags">
+              {% if selected_entity.industry %}
+              <span class="industry-tag">{{ selected_entity.industry }}</span>
+              {% endif %}
+              {% if selected_entity.region %}
+              <span class="region-tag">{{ selected_entity.region }}</span>
+              {% endif %}
+              <span class="credit-status-badge credit-badge-{{ selected_entity.credit_level }}">
+                {{ selected_entity.credit_level }}
+              </span>
+            </div>
+          </div>
+        </header>
+        {% endif %}
+        <form class="filter-form entity-date-filter" method="get" action="{{ page_path }}">
+          <label for="report_date">报告日期</label>
+          <input type="date" id="report_date" name="report_date" value="{{ report_date }}" />
+          {% if selected_entity %}
+          <input type="hidden" name="entity_id" value="{{ selected_entity.id }}" />
           {% endif %}
-          {% if selected_entity.region %}
-          <span class="region-tag">{{ selected_entity.region }}</span>
-          {% endif %}
-          <span class="credit-status-badge credit-badge-{{ selected_entity.credit_level }}">
-            {{ selected_entity.credit_level }}
-          </span>
-        </div>
+          <button type="submit">查询</button>
+        </form>
       </div>
-    </header>
+    </div>
+    {% if selected_entity %}
 
     {# 1. 最新消息：近三个月变动与核心风险分析；具体新闻见公开信息事件 #}
     {% include "entity_assessment_news_panel.html" %}
@@ -235,7 +241,7 @@
   window.ENTITY_ID = {% if selected_entity %}{{ selected_entity.id }}{% else %}null{% endif %};
   window.ENTITY_NAME = {% if selected_entity %}{{ (selected_entity.display_name or selected_entity.name)|tojson }}{% else %}null{% endif %};
 </script>
-<script src="/static/js/entity_assessment.js?v=20260820-6"></script>
+<script src="/static/js/entity_assessment.js?v=20260824-3"></script>
 <script>
   (function initRiskTabs() {
     var tabs = document.querySelectorAll(".risk-tabs:not(.fin-tabs) .risk-tab");

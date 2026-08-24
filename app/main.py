@@ -30,7 +30,7 @@ from app.database.industry_db import (
     find_report_sector,
     industry_session,
     init_all_industry_databases,
-    list_all_sector_reports,
+    list_sector_reports,
 )
 from app.industry_sectors import INDUSTRY_SECTORS, ensure_registry_file, refresh_sectors, require_sector_key
 from app.services.api_keys import is_placeholder_key
@@ -642,7 +642,6 @@ def _deep_reports_shell_context(
 ) -> dict:
     refresh_sectors()
     sectors = list(INDUSTRY_SECTORS.values())
-    history_reports = list_all_sector_reports(limit=40)
     sector = None
     selected = None
     industry_sources: list = []
@@ -653,9 +652,11 @@ def _deep_reports_shell_context(
     candidate_stale = False
     generation_config: dict = {}
     source_list_markup = ""
+    history_reports: list = []
 
     if sector_key:
         sector = require_sector_key(sector_key)
+        history_reports = list_sector_reports(sector_key)
         if db is not None and report_id:
             selected = IndustryAnalysisService(db).get_report(report_id)
         if selected:
@@ -726,14 +727,6 @@ def _deep_reports_shell_context(
         "candidate_validation": candidate_validation,
         "candidate_stale": candidate_stale,
         "drawer_sources": industry_sources,
-        "drawer_ai_sources": [
-            source for source in industry_sources
-            if source.source_type == "network_search" or source.source_origin == "network_search"
-        ],
-        "drawer_manual_sources": [
-            source for source in industry_sources
-            if source.source_type != "network_search" and source.source_origin != "network_search"
-        ],
         "drawer_selected_count": sum(
             1 for source in industry_sources
             if source.is_selected and (source.extracted_text or "").strip()
@@ -760,12 +753,7 @@ def deep_reports_index(request: Request, report_id: int | None = None):
                 url=f"/deep-reports/{sector_key}?report_id={report_id}",
                 status_code=302,
             )
-    sectors = refresh_sectors()
-    if not sectors:
-        ctx = _deep_reports_shell_context(request, prefer_client_redirect=False)
-        return templates.TemplateResponse("industry_analysis.html", ctx)
-    # 有行业时交给前端按「上次打开 / 列表第一项」跳转
-    ctx = _deep_reports_shell_context(request, prefer_client_redirect=True)
+    ctx = _deep_reports_shell_context(request, prefer_client_redirect=False)
     return templates.TemplateResponse("industry_analysis.html", ctx)
 
 

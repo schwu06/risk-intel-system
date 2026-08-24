@@ -9,83 +9,96 @@
   data-sector-selected="{{ '1' if sector_selected else '0' }}"
   data-default-industry-name="{{ sector_default_industry_name }}"
 >
-  <label class="daily-search" aria-label="搜索行业或报告">
-    <input type="search" id="industry-sidebar-search" placeholder="搜索行业或报告" autocomplete="off" />
-    <span aria-hidden="true">⌕</span>
+  <label class="daily-search" aria-label="{% if sector_selected %}搜索报告{% else %}搜索行业{% endif %}">
+    <input type="search" id="industry-sidebar-search" placeholder="{% if sector_selected %}搜索报告{% else %}搜索行业{% endif %}" autocomplete="off" />
+    <span aria-hidden="true">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+        <circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M16 16.5L20.5 21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    </span>
   </label>
+
+  {% if not sector_selected %}
   <div class="daily-index-header">
-    <div class="industry-confirm-heading">
-      <span class="industry-nav-step">1</span>
-      <h2 class="daily-index-title">确认行业</h2>
-    </div>
+    <h2 class="daily-index-title">行业列表</h2>
     <button type="button" class="industry-index-add" id="btn-add-sector" aria-label="添加行业" title="添加行业">+</button>
   </div>
-  <div class="daily-index-list">
-    <section class="industry-block industry-index-block" data-collapsed="false">
-      <nav class="sector-bubble-list" id="sector-nav-list" aria-label="行业分类">
-        {% for sector in sectors %}
-        <div class="sector-bubble-row {% if sector.key == sector_key %}active{% endif %}" data-search="{{ sector.label }}">
-          <a
-            href="/deep-reports/{{ sector.key }}"
-            class="sector-bubble"
-            title="{{ sector.label }}"
-          >
-            <span class="sector-bubble-label">{{ sector.label }}</span>
-          </a>
-          <button
-            type="button"
-            class="sector-rename-btn"
-            data-sector-key="{{ sector.key }}"
-            data-sector-label="{{ sector.label }}"
-            aria-label="重命名行业"
-            title="重命名"
-          ><span aria-hidden="true">✎</span><span class="sr-only">重命名</span></button>
-          <button
-            type="button"
-            class="sector-delete-btn"
-            data-sector-key="{{ sector.key }}"
-            data-sector-label="{{ sector.label }}"
-            aria-label="删除行业"
-            title="删除"
-          ><span aria-hidden="true">×</span><span class="sr-only">删除</span></button>
-        </div>
-        {% else %}
-        <p class="sector-bubble-empty">暂无行业，点击右上角 + 新建</p>
-        {% endfor %}
-      </nav>
-    </section>
-
-    <section class="industry-block industry-history-block">
-      <h2>历史创建记录</h2>
-      <ul class="report-list">
-        {% for r in reports %}
-        <li class="report-list-item" data-search="{{ r.sector_label }} {{ r.report_name or '' }} {{ r.industry_name }}">
-          <a href="/deep-reports/{{ r.sector_key }}?report_id={{ r.id }}" class="report-link {% if selected_report and selected_report.id == r.id and r.sector_key == sector_key %}active{% endif %}">
-            <span class="report-link-main">
-              <span class="report-link-sector">{{ r.sector_label }}</span>
-              <span class="report-link-name">{% if r.report_name %}{{ r.report_name }}{% else %}{{ r.industry_name }}{% endif %} · v{{ r.version }}</span>
-            </span>
-            <time class="report-created-at" datetime="{{ r.created_at|tokyo_time('%Y-%m-%dT%H:%M:%S+09:00') if r.created_at else '' }}">{{ r.created_at|tokyo_time }}</time>
-          </a>
-          <button
-            type="button"
-            class="report-rename-btn"
-            data-report-id="{{ r.id }}"
-            data-sector-key="{{ r.sector_key }}"
-            data-report-name="{{ r.report_name or '' }}"
-            data-default-name="{{ r.report_name or r.industry_name }}"
-            aria-label="重命名报告"
-            title="重命名"
-          >✎</button>
-          <button type="button" class="report-delete-btn" data-report-id="{{ r.id }}" data-sector-key="{{ r.sector_key }}" aria-label="删除报告" title="删除报告">删除</button>
-        </li>
-        {% else %}
-        <li class="empty-source">暂无报告</li>
-        {% endfor %}
-      </ul>
-    </section>
-
+  <div class="daily-index-list" id="industry-index-list">
+    <nav class="sector-bubble-list" id="sector-nav-list" aria-label="行业分类">
+      {% for sector in sectors %}
+      <div class="sector-bubble-row" data-search="{{ sector.label }}">
+        <a href="/deep-reports/{{ sector.key }}" class="sector-bubble" title="{{ sector.label }}">
+          <span class="sector-bubble-label">{{ sector.label }}</span>
+        </a>
+        <button
+          type="button"
+          class="sector-rename-btn"
+          data-sector-key="{{ sector.key }}"
+          data-sector-label="{{ sector.label }}"
+          aria-label="重命名行业"
+          title="重命名"
+        ><span aria-hidden="true">✎</span><span class="sr-only">重命名</span></button>
+        <button
+          type="button"
+          class="sector-delete-btn"
+          data-sector-key="{{ sector.key }}"
+          data-sector-label="{{ sector.label }}"
+          aria-label="删除行业"
+          title="删除"
+        ><span aria-hidden="true">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M5 7h14M10 7V5h4v2M8 7l1 13h6l1-13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span><span class="sr-only">删除</span></button>
+      </div>
+      {% else %}
+      <p class="sector-bubble-empty">暂无行业，点击右上角 + 新建</p>
+      {% endfor %}
+    </nav>
   </div>
+  {% else %}
+  <div class="daily-index-header">
+    <nav class="industry-index-crumb" aria-label="行业导航">
+      <a href="/deep-reports">行业列表</a>
+      <span class="industry-index-crumb-sep" aria-hidden="true">›</span>
+      <span class="industry-index-crumb-current">{{ sector_label }}</span>
+    </nav>
+    <button
+      type="button"
+      class="industry-index-add"
+      id="btn-add-report"
+      aria-label="新建报告"
+      title="新建报告"
+    >+</button>
+  </div>
+  <div class="daily-index-list" id="industry-index-list">
+    <ul class="report-list">
+      {% for r in reports %}
+      <li class="report-list-item {% if selected_report and selected_report.id == r.id %}is-active{% endif %}" data-search="{{ r.report_name or '' }} {{ r.industry_name }}">
+        <a href="/deep-reports/{{ r.sector_key }}?report_id={{ r.id }}" class="report-link">
+          {% if r.report_name %}{{ r.report_name }}{% else %}{{ r.industry_name }}{% endif %}
+        </a>
+        <button
+          type="button"
+          class="report-rename-btn"
+          data-report-id="{{ r.id }}"
+          data-sector-key="{{ r.sector_key }}"
+          data-report-name="{{ r.report_name or '' }}"
+          data-default-name="{{ r.report_name or r.industry_name }}"
+          aria-label="重命名报告"
+          title="重命名"
+        >✎</button>
+        <button type="button" class="report-delete-btn" data-report-id="{{ r.id }}" data-sector-key="{{ r.sector_key }}" aria-label="删除报告" title="删除">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M5 7h14M10 7V5h4v2M8 7l1 13h6l1-13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 </aside>
 {% endblock %}
 
@@ -246,6 +259,24 @@
     </div>
   </div>
 </div>
+
+<div class="about-modal hidden" id="report-create-modal" hidden role="dialog" aria-modal="true" aria-labelledby="report-create-title">
+  <div class="about-modal-card sector-create-card">
+    <div class="about-modal-header">
+      <h2 id="report-create-title">新建报告</h2>
+      <button type="button" class="drawer-close" id="btn-close-report-create" aria-label="关闭">×</button>
+    </div>
+    <div class="about-modal-body">
+      <label class="sector-create-label" for="report-create-name">报告名称</label>
+      <input type="text" id="report-create-name" class="sector-create-input" maxlength="256" placeholder="新建报告" autocomplete="off" />
+      <p class="hint" id="report-create-msg">未填写时将使用默认名称「新建报告」。</p>
+      <div class="sector-create-actions">
+        <button type="button" class="btn secondary" id="btn-cancel-report-create">取消</button>
+        <button type="button" class="btn" id="btn-confirm-report-create">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block source_panel %}
@@ -261,7 +292,7 @@
     sectorSelected: {{ 'true' if sector_selected else 'false' }}
   };
 </script>
-<script src="/static/js/industry.js?v=20260821-14"></script>
+<script src="/static/js/industry.js?v=20260824-3"></script>
 {% if selected_report and selected_report.chart_specs %}
 <script>
   window.INDUSTRY_CHARTS = {{ selected_report.chart_specs | safe }};
