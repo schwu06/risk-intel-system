@@ -11,9 +11,12 @@
   <h2 class="daily-index-title">索引</h2>
   <ul class="run-list daily-index-list" id="daily-index-list">
     {% for code, name in modules.items() %}
-    {% set run = run_map.get(code) %}
+    {% set count = grouped_entries.get(code, [])|length %}
     <li>
-      <a class="mod-name mod-jump" href="#module-panel-{{ code }}" data-module="{{ code }}">{{ name }}</a>
+      <a class="mod-name mod-jump" href="#module-panel-{{ code }}" data-module="{{ code }}">
+        <span class="mod-name-label">{{ name }}</span>
+        <span class="daily-index-count" data-module-count="{{ code }}" aria-label="{{ count }}条新闻">{{ count }}</span>
+      </a>
     </li>
     {% endfor %}
   </ul>
@@ -133,7 +136,7 @@
       {% if ui.get('message') %}<p class="module-recent-fallback">{{ ui.get('message') }}（当日暂无新增）</p>{% endif %}
       <div class="entry-grid risk-event-list">
         {% for e in mod_entries %}
-        <article class="entry-card risk-event-card" data-risk-tags="{{ e.risk_tags|join('|') }}" data-risk-level="{{ e.risk_level }}" data-news-search="{{ (e.title or '') ~ ' ' ~ (e.overview or '') ~ ' ' ~ (e.source_title or '') ~ ' ' ~ (e.published_at|string) ~ ' ' ~ (e.risk_tags|join(' ')) ~ ' ' ~ name }}">
+        <article class="entry-card risk-event-card" data-module="{{ code }}" data-risk-tags="{{ e.risk_tags|join('|') }}" data-risk-level="{{ e.risk_level }}" data-news-search="{{ (e.title or '') ~ ' ' ~ (e.overview or '') ~ ' ' ~ (e.source_title or '') ~ ' ' ~ (e.published_at|string) ~ ' ' ~ (e.risk_tags|join(' ')) ~ ' ' ~ name }}">
           <div class="risk-event-top">
             <span class="risk-level-tag risk-tag-{{ e.risk_level }}">{{ e.risk_level }}</span>
             {% if e.category_tag %}
