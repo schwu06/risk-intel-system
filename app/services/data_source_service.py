@@ -549,67 +549,134 @@ def clone_industry_sources(db: Session, source_report_id: int, target_report_id:
     _editable_industry_report(db, target_report_id)
     count = 0
     for src in list_industry_sources(db, source_report_id):
-        copied_path: str | None = None
-        if src.file_path and Path(src.file_path).is_file():
-            filename = src.original_filename or Path(src.file_path).name
-            dest = _unique_destination(target_report_id, filename)
-            shutil.copy2(src.file_path, dest)
-            copied_path = str(dest)
-        clone = IndustryDataSource(
-            report_id=target_report_id,
-            copied_from_source_id=src.id,
-            name=src.name,
-            source_type=src.source_type,
-            file_path=copied_path,
-            original_filename=src.original_filename,
-            url=src.url,
-            extracted_text=src.extracted_text,
-            is_selected=src.is_selected,
-            content_hash=src.content_hash,
-            char_count=src.char_count,
-            raw_content_hash=src.raw_content_hash,
-            extracted_text_hash=src.extracted_text_hash,
-            mime_type=src.mime_type,
-            file_size=src.file_size,
-            source_origin=src.source_origin,
-            source_publisher=src.source_publisher,
-            published_at=src.published_at,
-            retrieved_at=src.retrieved_at,
-            is_full_text=src.is_full_text,
-            is_truncated=src.is_truncated,
-            parse_status=src.parse_status,
-            parse_warning=src.parse_warning,
-            used_ocr=src.used_ocr,
-            page_count=src.page_count,
-            slide_count=src.slide_count,
-            sheet_count=src.sheet_count,
-            evidence_grade=src.evidence_grade,
-        )
-        db.add(clone)
-        db.flush()
-        for source_chunk in sorted(src.chunks, key=lambda item: item.chunk_index):
-            db.add(
-                IndustrySourceChunk(
-                    report_id=target_report_id,
-                    source_id=clone.id,
-                    chunk_index=source_chunk.chunk_index,
-                    text=source_chunk.text,
-                    locator=source_chunk.locator,
-                    page_number=source_chunk.page_number,
-                    slide_number=source_chunk.slide_number,
-                    sheet_name=source_chunk.sheet_name,
-                    cell_range=source_chunk.cell_range,
-                    row_range=source_chunk.row_range,
-                    paragraph_index=source_chunk.paragraph_index,
-                    table_index=source_chunk.table_index,
-                    table_row_index=source_chunk.table_row_index,
-                    char_start=source_chunk.char_start,
-                    char_end=source_chunk.char_end,
-                    content_hash=source_chunk.content_hash,
-                )
-            )
+        _clone_industry_source(db, src, target_report_id, is_selected=bool(src.is_selected))
         count += 1
     _editable_industry_report(db, target_report_id)
+    db.commit()
+    return count
+
+
+def _clone_industry_source(
+    db: Session,
+    src: IndustryDataSource,
+    target_report_id: int,
+    *,
+    is_selected: bool,
+    source_origin: str | None = None,
+) -> IndustryDataSource:
+    """Copy a source snapshot and its parsed chunks into a new report."""
+    copied_path: str | None = None
+    if src.file_path and Path(src.file_path).is_file():
+        filename = src.original_filename or Path(src.file_path).name
+        dest = _unique_destination(target_report_id, filename)
+        shutil.copy2(src.file_path, dest)
+        copied_path = str(dest)
+    clone = IndustryDataSource(
+        report_id=target_report_id,
+        copied_from_source_id=src.id,
+        name=src.name,
+        source_type=src.source_type,
+        file_path=copied_path,
+        original_filename=src.original_filename,
+        url=src.url,
+        extracted_text=src.extracted_text,
+        is_selected=is_selected,
+        content_hash=src.content_hash,
+        char_count=src.char_count,
+        raw_content_hash=src.raw_content_hash,
+        extracted_text_hash=src.extracted_text_hash,
+        mime_type=src.mime_type,
+        file_size=src.file_size,
+        source_origin=source_origin or src.source_origin,
+        source_publisher=src.source_publisher,
+        published_at=src.published_at,
+        retrieved_at=src.retrieved_at,
+        is_full_text=src.is_full_text,
+        is_truncated=src.is_truncated,
+        parse_status=src.parse_status,
+        parse_warning=src.parse_warning,
+        used_ocr=src.used_ocr,
+        page_count=src.page_count,
+        slide_count=src.slide_count,
+        sheet_count=src.sheet_count,
+        evidence_grade=src.evidence_grade,
+    )
+    db.add(clone)
+    db.flush()
+    for source_chunk in sorted(src.chunks, key=lambda item: item.chunk_index):
+        db.add(
+            IndustrySourceChunk(
+                report_id=target_report_id,
+                source_id=clone.id,
+                chunk_index=source_chunk.chunk_index,
+                text=source_chunk.text,
+                locator=source_chunk.locator,
+                page_number=source_chunk.page_number,
+                slide_number=source_chunk.slide_number,
+                sheet_name=source_chunk.sheet_name,
+                cell_range=source_chunk.cell_range,
+                row_range=source_chunk.row_range,
+                paragraph_index=source_chunk.paragraph_index,
+                table_index=source_chunk.table_index,
+                table_row_index=source_chunk.table_row_index,
+                char_start=source_chunk.char_start,
+                char_end=source_chunk.char_end,
+                content_hash=source_chunk.content_hash,
+            )
+        )
+    return clone
+
+
+def _industry_source_reuse_key(src: IndustryDataSource) -> tuple[str, str]:
+    """Stable key so repeated report versions do not multiply the source library."""
+    if (src.url or "").strip():
+        return ("url", src.url.strip().lower())
+    if (src.raw_content_hash or "").strip():
+        return ("raw", src.raw_content_hash.strip())
+    if (src.content_hash or "").strip():
+        return ("content", src.content_hash.strip())
+    return ("name", f"{src.source_type}:{src.name}".strip().lower())
+
+
+def clone_industry_library_sources(
+    db: Session, industry_name: str, target_report_id: int
+) -> int:
+    """Bring unique historical sources from the same industry into a fresh draft.
+
+    The copied sources remain report-scoped snapshots for auditability, but their
+    parsed text and uploaded file copies are reusable. They start unchecked so a
+    user explicitly controls the evidence set for the new report.
+    """
+    _editable_industry_report(db, target_report_id)
+    normalized_name = " ".join((industry_name or "").split())
+    if not normalized_name:
+        return 0
+    candidates = (
+        db.query(IndustryDataSource)
+        .join(IndustryReport, IndustryDataSource.report_id == IndustryReport.id)
+        .filter(
+            IndustryReport.industry_name == normalized_name,
+            IndustryReport.library_saved.is_(True),
+            IndustryDataSource.report_id != target_report_id,
+        )
+        .order_by(IndustryDataSource.created_at.desc(), IndustryDataSource.id.desc())
+        .all()
+    )
+    seen: set[tuple[str, str]] = set()
+    count = 0
+    for src in candidates:
+        key = _industry_source_reuse_key(src)
+        if key in seen:
+            continue
+        seen.add(key)
+        _clone_industry_source(
+            db,
+            src,
+            target_report_id,
+            is_selected=False,
+            source_origin="industry_library",
+        )
+        count += 1
     db.commit()
     return count
 

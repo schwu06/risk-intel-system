@@ -651,6 +651,8 @@ class IndustryReport(Base):
     company_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="draft", nullable=False)
     supplement_search: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Explicit opt-in for reusing this report's sources in the same industry.
+    library_saved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     report_html: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     report_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     chart_specs: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

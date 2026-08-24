@@ -1,9 +1,10 @@
 """Pydantic 请求/响应模型。"""
 
+import re
 from datetime import date, datetime
 from typing import Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 EvidenceClaimType = Literal["fact", "reported_opinion", "forecast", "inference"]
@@ -177,7 +178,51 @@ class PipelineRunRequest(BaseModel):
     # 主体评估页：仅采集/更新指定主体
     entity_id: Optional[int] = None
     # 新闻时效窗：24=近24小时，168=近7×24小时；缺省跟配置 news_window_hours
-    window_hours: Optional[int] = Field(None, ge=1, le=8760)
+    window_hours: Optional[int] = Field(None, ge=1, le=168)
+
+    @field_validator("report_date", mode="before")
+    @classmethod
+    def normalize_report_date(cls, value):
+        """兼容旧页面可能传来的 ``YYYY/MM/DD`` 日期格式。"""
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                return None
+            return normalized.replace("/", "-").replace(".", "-")
+        return value
+
+    @field_validator("module_codes", mode="before")
+    @classmethod
+    def normalize_module_codes(cls, value):
+        """兼容旧版前端传递的 ``B,C,D``，统一转换为代码数组。"""
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            return [item.strip().upper() for item in value.split(",") if item.strip()]
+        if isinstance(value, (tuple, set)):
+            return [str(item).strip().upper() for item in value if str(item).strip()]
+        if isinstance(value, list):
+            return [str(item).strip().upper() for item in value if str(item).strip()]
+        return value
+
+    @field_validator("window_hours", mode="before")
+    @classmethod
+    def normalize_window_hours(cls, value):
+        """兼容 ``24h``、``24小时`` 与 ``7×24`` 等展示层格式。"""
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            normalized = value.strip().lower().replace(" ", "")
+            if normalized in {"7x24", "7×24", "168h", "168小时"}:
+                return 168
+            matched = re.fullmatch(r"(\d+)(?:h|小时)?", normalized)
+            if matched:
+                return min(int(matched.group(1)), 168)
+        if isinstance(value, (int, float)):
+            # 页面只提供近 24 小时与近 7 天两档。旧缓存传入更长窗口时，
+            # 收敛到近 7 天，而不是让请求在校验阶段失败。
+            return min(int(value), 168)
+        return value
 
 
 class PipelineRunResponse(BaseModel):
@@ -284,6 +329,22 @@ class IndustryDataSourceSelectionIn(BaseModel):
 
 class IndustryDataSourceSearchIn(BaseModel):
     query: Optional[str] = Field(None, max_length=300)
+
+
+class IndustryNetworkSearchCandidateIn(BaseModel):
+    title: str = Field(..., min_length=1, max_length=1000)
+    url: str = Field(..., min_length=8, max_length=4000)
+    snippet: str = Field(default="", max_length=8000)
+    published_at: Optional[str] = Field(default=None, max_length=100)
+    source_domain: Optional[str] = Field(default=None, max_length=512)
+
+
+class IndustryNetworkSearchAddIn(BaseModel):
+    items: list[IndustryNetworkSearchCandidateIn] = Field(default_factory=list, max_length=8)
+
+
+class IndustryReportRevisionIn(BaseModel):
+    instruction: str = Field(..., min_length=2, max_length=2000)
 
 
 class IndustryReportRenameIn(BaseModel):

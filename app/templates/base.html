@@ -7,11 +7,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Abril+Fatface&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/dashboard.css?v=20260824-20" />
+  <link rel="stylesheet" href="/static/css/dashboard.css?v=20260824-12" />
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
   {% block head_extra %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% if active_page in ('daily_news', 'news_7x24') %}daily-news-ui{% elif active_page == 'entity_assessment' %}entity-assessment-ui{% endif %}{% endblock %}">
+<body class="{% if active_page in ('daily_news', 'news_7x24') %}daily-news-ui{% endif %}">
   <header class="top-bar">
     <div class="brand">
       <span class="brand-title">RiskIntel</span>
@@ -28,16 +28,17 @@
     </div>
   </header>
 
-  {# 页面默认两栏；仅深度研报通过 source_panel block 增加右侧数据源栏。 #}
+  {# 页面默认两栏；来源工作台可将来源面板置于主内容前。 #}
   <div class="app-shell" id="app-shell">
     {% block page_sidebar %}{% endblock %}
+    {% block source_panel_before_main %}{% endblock %}
     <div class="app-main">
       {% block content %}{% endblock %}
     </div>
     {% block source_panel %}{% endblock %}
   </div>
 
-  <script src="/static/js/dashboard.js?v=20260824-3"></script>
+  <script src="/static/js/dashboard.js?v=20260824-10"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

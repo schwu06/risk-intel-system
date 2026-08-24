@@ -55,7 +55,9 @@
 
   function currentWindowHours() {
     if (typeof window.NEWS_WINDOW_HOURS === "number" && window.NEWS_WINDOW_HOURS > 0) {
-      return window.NEWS_WINDOW_HOURS;
+      // 产品当前只提供近 24 小时和近 7 天；旧缓存/旧页面传来更大值时
+      // 收敛为 168，避免 FastAPI 在请求校验阶段返回 422。
+      return Math.min(Math.floor(window.NEWS_WINDOW_HOURS), 168);
     }
     return 24;
   }
@@ -226,18 +228,28 @@
   /* ---------- 数据源面板 / 关于（仅深度研报页存在） ---------- */
   const drawer = document.getElementById("source-drawer");
   const toggleBtn = document.getElementById("btn-toggle-source-drawer");
+  const saveIndustryLibraryBtn = document.getElementById("btn-save-industry-library");
+  const sourceAddModal = document.getElementById("source-add-modal");
+  const sourceAddClose = document.getElementById("btn-close-source-add");
   const addBox = document.getElementById("sources-add-box");
   const addToggle = document.getElementById("btn-toggle-add-sources");
-  const searchForm = document.getElementById("sources-search-form");
-  const searchInput = document.getElementById("sources-search-input");
+  const aiSearchBtn = document.getElementById("btn-ai-search-sources");
+  const aiSearchInput = document.getElementById("industry-source-search-query");
+  const searchResultsModal = document.getElementById("search-results-modal");
+  const searchResultsList = document.getElementById("search-results-list");
+  const searchResultsQuery = document.getElementById("search-results-query");
+  const searchResultsCount = document.getElementById("search-results-count");
+  const addSearchResultsBtn = document.getElementById("btn-add-search-results");
+  const closeSearchResultsBtn = document.getElementById("btn-close-search-results");
+  const cancelSearchResultsBtn = document.getElementById("btn-cancel-search-results");
   const emptyAdd = document.getElementById("btn-empty-add-source");
   const STORAGE_KEY = "sources_panel_collapsed";
   const listWrap = document.getElementById("managed-source-list-wrap");
   const fileInput = document.getElementById("global-upload-file");
   const dropzone = document.getElementById("sources-dropzone");
-  const uploadNameInput = document.getElementById("global-upload-name");
   const uploadSubmitBtn = document.getElementById("global-upload-submit");
   const ALLOWED_EXTS = [".txt", ".xlsx", ".docx", ".pptx", ".pdf"];
+  var searchCandidates = [];
 
   if (drawer) {
   function isDrawerOpen() {
@@ -259,8 +271,61 @@
   }
 
   function setAddBoxOpen(open) {
-    if (!addBox) return;
-    addBox.hidden = !open;
+    if (!sourceAddModal || !addBox) return;
+    sourceAddModal.classList.toggle("hidden", !open);
+    sourceAddModal.hidden = !open;
+    if (open) {
+      window.setTimeout(function () {
+        var firstInput = sourceAddModal.querySelector("input:not([type='file'])");
+        if (firstInput) firstInput.focus();
+      }, 0);
+    }
+  }
+
+  function closeSearchResults() {
+    if (!searchResultsModal) return;
+    searchResultsModal.classList.add("hidden");
+    searchResultsModal.hidden = true;
+  }
+
+  function selectedSearchCandidates() {
+    if (!searchResultsList) return [];
+    return Array.from(searchResultsList.querySelectorAll(".search-result-select:checked"))
+      .map(function (input) { return searchCandidates[Number(input.value)]; })
+      .filter(Boolean);
+  }
+
+  function updateSearchResultsCount() {
+    var count = selectedSearchCandidates().length;
+    if (searchResultsCount) searchResultsCount.textContent = "已选 " + count + " 条";
+    if (addSearchResultsBtn) addSearchResultsBtn.disabled = count === 0;
+  }
+
+  function openSearchResults(items, query) {
+    searchCandidates = Array.isArray(items) ? items.filter(function (item) {
+      return item && /^https?:\/\//i.test(String(item.url || "")) && item.title;
+    }) : [];
+    if (!searchResultsModal || !searchResultsList) return;
+    if (searchResultsQuery) searchResultsQuery.textContent = query ? "搜索：" + query : "搜索结果";
+    searchResultsList.innerHTML = searchCandidates.length
+      ? searchCandidates.map(function (item, index) {
+          var domain = item.source_domain || "网页来源";
+          var date = item.published_at ? " · " + item.published_at : "";
+          return '<label class="search-result-item">' +
+            '<input class="search-result-select" type="checkbox" value="' + index + '">' +
+            '<span class="search-result-content"><strong>' + escapeHtml(item.title) + '</strong>' +
+            '<span>' + escapeHtml(item.snippet || "未提供摘要") + '</span>' +
+            '<small>' + escapeHtml(domain + date) + '</small></span>' +
+            '<a href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener" title="打开原网页">↗</a>' +
+          '</label>';
+        }).join("")
+      : '<p class="sources-empty-desc">未找到可加入的网页来源，请调整关键词后重试。</p>';
+    searchResultsList.querySelectorAll(".search-result-select").forEach(function (input) {
+      input.addEventListener("change", updateSearchResultsCount);
+    });
+    updateSearchResultsCount();
+    searchResultsModal.classList.remove("hidden");
+    searchResultsModal.hidden = false;
   }
 
   try {
@@ -284,14 +349,19 @@
     });
   }
   if (addToggle) addToggle.addEventListener("click", function () {
-    setAddBoxOpen(addBox ? addBox.hidden : true);
+    setAddBoxOpen(sourceAddModal ? sourceAddModal.hidden : true);
   });
-  if (searchForm) searchForm.addEventListener("submit", async function (ev) {
-    ev.preventDefault();
+  document.querySelectorAll("[data-open-source-modal]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      setDrawerOpen(true);
+      setAddBoxOpen(true);
+    });
+  });
+  if (aiSearchBtn) aiSearchBtn.addEventListener("click", async function () {
     if (sourceScope() !== "industry") return;
-    if (searchInput && searchInput.disabled) return;
-    var query = searchInput ? String(searchInput.value || "").trim() : "";
-    if (searchInput) searchInput.disabled = true;
+    aiSearchBtn.disabled = true;
+    var original = aiSearchBtn.textContent;
+    aiSearchBtn.textContent = "正在搜索…";
     try {
       var endpoint = industryRequestUrl(
         "/api/v1/industry/reports/" + requireReportId() + "/data-sources/search"
@@ -299,27 +369,89 @@
       var resp = await fetch(endpoint, {
         method: "POST",
         headers: industryRequestHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ query: query }),
+        body: JSON.stringify({ query: aiSearchInput ? aiSearchInput.value.trim() : "" }),
       });
       var data = await resp.json().catch(function () { return {}; });
-      if (!resp.ok) throw new Error(data.detail || "搜索失败");
-      showSourceToast(data.message || "搜索完成");
-      await refreshSourceList();
+      if (!resp.ok) throw new Error(data.detail || "AI 搜索失败");
+      openSearchResults(data.items, data.query || (aiSearchInput ? aiSearchInput.value.trim() : ""));
     } catch (err) {
-      showSourceToast("搜索失败：" + err.message);
+      showSourceToast("AI 搜索失败：" + err.message);
     } finally {
-      if (searchInput) {
-        searchInput.disabled = false;
-        searchInput.focus();
-      }
+      aiSearchBtn.disabled = false;
+      aiSearchBtn.textContent = original;
+    }
+  });
+  if (aiSearchInput) aiSearchInput.addEventListener("keydown", function (event) {
+    if (event.key === "Enter" && aiSearchBtn && !aiSearchBtn.disabled) {
+      event.preventDefault();
+      aiSearchBtn.click();
     }
   });
   if (emptyAdd) emptyAdd.addEventListener("click", function () {
     setDrawerOpen(true);
     setAddBoxOpen(true);
   });
+  if (closeSearchResultsBtn) closeSearchResultsBtn.addEventListener("click", closeSearchResults);
+  if (cancelSearchResultsBtn) cancelSearchResultsBtn.addEventListener("click", closeSearchResults);
+  if (searchResultsModal) searchResultsModal.addEventListener("click", function (event) {
+    if (event.target === searchResultsModal) closeSearchResults();
+  });
+  if (addSearchResultsBtn) addSearchResultsBtn.addEventListener("click", async function () {
+    var selectedItems = selectedSearchCandidates();
+    if (!selectedItems.length || sourceScope() !== "industry") return;
+    addSearchResultsBtn.disabled = true;
+    var original = addSearchResultsBtn.textContent;
+    addSearchResultsBtn.textContent = "正在加入…";
+    try {
+      var endpoint = industryRequestUrl(
+        "/api/v1/industry/reports/" + requireReportId() + "/data-sources/search/add"
+      );
+      var response = await fetch(endpoint, {
+        method: "POST",
+        headers: industryRequestHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ items: selectedItems }),
+      });
+      var result = await response.json().catch(function () { return {}; });
+      if (!response.ok) throw new Error(result.detail || "加入来源失败");
+      closeSearchResults();
+      showSourceToast(result.message || "已加入来源");
+      await refreshSourceList();
+    } catch (error) {
+      showSourceToast("加入来源失败：" + error.message);
+      updateSearchResultsCount();
+    } finally {
+      addSearchResultsBtn.textContent = original;
+    }
+  });
+  if (saveIndustryLibraryBtn) saveIndustryLibraryBtn.addEventListener("click", async function () {
+    if (sourceScope() !== "industry") return;
+    saveIndustryLibraryBtn.disabled = true;
+    const original = saveIndustryLibraryBtn.textContent;
+    saveIndustryLibraryBtn.textContent = "正在保存…";
+    try {
+      const endpoint = industryRequestUrl(
+        "/api/v1/industry/reports/" + requireReportId() + "/save-library"
+      );
+      const resp = await fetch(endpoint, { method: "POST", headers: industryRequestHeaders() });
+      const data = await resp.json().catch(function () { return {}; });
+      if (!resp.ok) throw new Error(data.detail || "保存失败");
+      showSourceToast(data.message || "已保存到行业资料库");
+      saveIndustryLibraryBtn.textContent = "已保存到行业资料库";
+      saveIndustryLibraryBtn.classList.add("is-saved");
+    } catch (err) {
+      saveIndustryLibraryBtn.disabled = false;
+      saveIndustryLibraryBtn.textContent = original;
+      showSourceToast("保存失败：" + (err.message || err));
+    }
+  });
+  if (sourceAddClose) sourceAddClose.addEventListener("click", function () { setAddBoxOpen(false); });
+  if (sourceAddModal) sourceAddModal.addEventListener("click", function (event) {
+    if (event.target === sourceAddModal) setAddBoxOpen(false);
+  });
   document.addEventListener("keydown", function (ev) {
     if (ev.key === "Escape") {
+      setAddBoxOpen(false);
+      closeSearchResults();
       var svm = document.getElementById("source-view-modal");
       if (svm) { svm.classList.add("hidden"); svm.hidden = true; }
     }
@@ -371,7 +503,7 @@
     }
     const fd = new FormData();
     fd.append("file", file);
-    fd.append("name", optionalName || (uploadNameInput && uploadNameInput.value) || file.name);
+    fd.append("name", optionalName || file.name);
     var endpoint = "/api/v1/data-sources/upload";
     var headers = {};
     if (sourceScope() === "industry") {
@@ -427,7 +559,6 @@
         .then(function (data) {
           showSourceToast(data.message || "数据源已上传");
           if (fileInput) fileInput.value = "";
-          if (uploadNameInput) uploadNameInput.value = "";
           syncUploadButton();
           if (dropzone) {
             var title = dropzone.querySelector(".sources-dropzone-title");
@@ -474,22 +605,6 @@
     drawer.addEventListener("drop", function (e) {
       if (!(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length)) return;
       e.preventDefault();
-    });
-  }
-
-  var chipFile = document.getElementById("chip-pick-file");
-  var chipUrl = document.getElementById("chip-focus-url");
-  if (chipFile && fileInput) {
-    chipFile.addEventListener("click", function () {
-      setAddBoxOpen(true);
-      fileInput.click();
-    });
-  }
-  if (chipUrl) {
-    chipUrl.addEventListener("click", function () {
-      setAddBoxOpen(true);
-      var urlInput = document.querySelector("#global-url-form [name='url']");
-      if (urlInput) urlInput.focus();
     });
   }
 
@@ -571,14 +686,10 @@
         saveIndustrySelection();
       });
     }
-    var none = document.getElementById("btn-select-no-sources");
-    if (none && !none._selectionBound) {
-      none._selectionBound = true;
-      none.addEventListener("click", function () {
-        document.querySelectorAll(".source-select-checkbox:not(:disabled)").forEach(function (box) { box.checked = false; });
-        updateSelectionSummary();
-        saveIndustrySelection();
-      });
+    var deleteSelected = document.getElementById("btn-delete-selected-sources");
+    if (deleteSelected && !deleteSelected._selectionBound) {
+      deleteSelected._selectionBound = true;
+      deleteSelected.addEventListener("click", deleteSelectedIndustrySources);
     }
     updateSelectionSummary();
   }
@@ -593,11 +704,6 @@
           : '<p class="sources-empty-hint">当前报告不可修改数据源。</p>');
       listWrap.innerHTML =
         '<div class="sources-empty" id="managed-source-list">' +
-        '<div class="sources-empty-icon" aria-hidden="true">' +
-        '<svg width="40" height="40" viewBox="0 0 24 24" fill="none">' +
-        '<path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.4"/>' +
-        '<path d="M14 3v5h5" stroke="currentColor" stroke-width="1.4"/>' +
-        "</svg></div>" +
         '<p class="sources-empty-title">保存的数据源将显示在此处</p>' +
         '<p class="sources-empty-desc">当前报告的数据源组为空。</p>' + emptyAction +
         "</div>";
@@ -608,14 +714,21 @@
           setAddBoxOpen(true);
         });
       }
-      updateSelectionSummary();
       return;
     }
     var html = '<ul class="managed-source-list" id="managed-source-list">';
+    if (sourceScope() === "industry" && industrySourcesEditable()) {
+      var usableSources = sources.filter(function (src) { return Number(src.chars || 0) > 0; });
+      var selectedCount = usableSources.filter(function (src) { return src.is_selected !== false; }).length;
+      html = '<div class="source-selection-toolbar"><span id="source-selection-count">已选 ' + selectedCount + ' / ' + usableSources.length + ' 条可用来源</span>' +
+        '<button type="button" class="text-link" id="btn-select-all-sources">全选</button>' +
+        '<button type="button" class="text-link danger-link" id="btn-delete-selected-sources">删除所选</button></div>' + html;
+    }
     sources.forEach(function (src) {
-      var isNetwork = src.source_origin === "network_search" || src.source_type === "network_search";
-      var typeLabel = isNetwork ? "网络搜索" : (src.original_filename || (src.url ? "网址" : (src.origin_label || src.source_type || "-")));
-      var meta = [typeLabel];
+      var typeLabel = src.source_type === "network_search" ? "网络搜索功能" : (src.source_type || "-");
+      var meta = [src.origin_label || typeLabel];
+      if (src.original_filename) meta.push(src.original_filename);
+      if (src.url) meta.push("网址");
       if (typeof src.chars === "number") meta.push(src.chars + " 字");
       else if (src.text_preview) meta.push("有正文");
       html +=
@@ -627,7 +740,7 @@
         '<span class="source-name">' + escapeHtml(src.name) + "</span>" +
         '<span class="source-meta">' + escapeHtml(meta.join(" · ")) + "</span>" +
         "</button>" +
-        ((industrySourcesEditable() || isNetwork) ? '<button type="button" class="link-btn delete-source" data-id="' + src.id + '">删除</button>' : '') +
+        ((industrySourcesEditable() || src.source_origin === "network_search" || src.source_type === "network_search") ? '<button type="button" class="link-btn delete-source" data-id="' + src.id + '">删除</button>' : '') +
         "</li>";
     });
     html += "</ul>";
@@ -637,9 +750,18 @@
   }
 
   async function refreshSourceList() {
+    // 行业页按来源类型分组渲染。变更后刷新整页，保持单一来源面板中的
+    // 搜索结果、补充材料和勾选状态一致。
+    if (sourceScope() === "industry") {
+      window.location.reload();
+      return;
+    }
     try {
       const url = dataSourcesUrl();
-      if (!url) return;
+      if (!url) {
+        renderSourceList([]);
+        return;
+      }
       const resp = await fetch(url, { headers: industryRequestHeaders() });
       const data = await resp.json().catch(function () { return {}; });
       if (!resp.ok) throw new Error(data.detail || "刷新失败");
@@ -691,7 +813,6 @@
           return uploadSelectedFile(fileInput.files[0]);
         });
         if (fileInput) fileInput.value = "";
-        if (uploadNameInput) uploadNameInput.value = "";
         if (dropzone) {
           var title = dropzone.querySelector(".sources-dropzone-title");
           if (title) title.textContent = "点击或拖拽文件到此处上传";
@@ -731,8 +852,12 @@
       const submitBtn = globalUrl.querySelector('button[type="submit"]');
       if (submitBtn) submitBtn.disabled = true;
       try {
-        const name = globalUrl.querySelector('[name="name"]').value;
         const url = globalUrl.querySelector('[name="url"]').value;
+        let name = "网页来源";
+        try {
+          const parsed = new URL(url);
+          name = parsed.hostname.replace(/^www\./i, "") || name;
+        } catch (e) { /* URL 字段将由浏览器原生校验；此处保留安全兜底名称。 */ }
         await handleSourceMutation(async function () {
           const body = { name: name, url: url, priority: 0 };
           var endpoint = "/api/v1/data-sources/url";
@@ -777,6 +902,38 @@
       if (!resp.ok) throw new Error(data.detail || "删除失败");
       return data;
     });
+  }
+
+  async function deleteSelectedIndustrySources() {
+    if (sourceScope() !== "industry") return;
+    const ids = Array.from(document.querySelectorAll(".source-select-checkbox:checked"))
+      .map(function (box) { return box.getAttribute("data-id"); })
+      .filter(Boolean);
+    if (!ids.length) {
+      showSourceToast("请先勾选需要删除的来源");
+      return;
+    }
+    if (!confirm("确认删除已勾选的 " + ids.length + " 条来源？此操作不可撤销。")) return;
+    const btn = document.getElementById("btn-delete-selected-sources");
+    if (btn) btn.disabled = true;
+    try {
+      for (const id of ids) {
+        const endpoint = industryRequestUrl(
+          "/api/v1/industry/reports/" + requireReportId() + "/data-sources/" + id
+        );
+        const resp = await fetch(endpoint, {
+          method: "DELETE",
+          headers: industryRequestHeaders(),
+        });
+        const data = await resp.json().catch(function () { return {}; });
+        if (!resp.ok) throw new Error(data.detail || "删除失败");
+      }
+      showSourceToast("已删除 " + ids.length + " 条来源");
+      await refreshSourceList();
+    } catch (err) {
+      showSourceToast("删除失败：" + (err.message || err));
+      if (btn) btn.disabled = false;
+    }
   }
 
   document.querySelectorAll(".delete-source").forEach(function (btn) {
@@ -939,8 +1096,23 @@
     persistRefreshAt(finishedAt);
   }
 
-  function setCollectFailMsg(msgEl) {
-    setPipelineMsg(msgEl, "采集失败，请重新尝试。");
+  function setCollectFailMsg(msgEl, reason) {
+    var detail = String(reason || "").trim();
+    setPipelineMsg(msgEl, detail ? ("采集失败：" + detail) : "采集失败，请重新尝试。");
+  }
+
+  function apiErrorMessage(detail, fallback) {
+    if (typeof detail === "string" && detail.trim()) return detail.trim();
+    if (detail && typeof detail.message === "string" && detail.message.trim()) return detail.message.trim();
+    // FastAPI/Pydantic 的 422 结构：[{loc: [...], msg: "..."}]。
+    // 只展示字段与校验说明，避免再次用笼统错误掩盖真实原因。
+    if (Array.isArray(detail) && detail.length) {
+      return detail.map(function (item) {
+        var location = Array.isArray(item.loc) ? item.loc.filter(function (part) { return part !== "body"; }).join(".") : "";
+        return (location ? location + "：" : "") + (item.msg || "参数格式不正确");
+      }).join("；");
+    }
+    return fallback || "执行失败";
   }
 
   function whenPageGlobalsReady(fn) {
@@ -1031,7 +1203,7 @@
       if (pageLeaving) return null;
       rememberJob(null);
       setCollectBusy(false);
-      setCollectFailMsg(target);
+      setCollectFailMsg(target, e && e.message);
       throw e;
     } finally {
       polling = false;
@@ -1067,8 +1239,7 @@
       throw new Error(detail.message || data.detail || "任务冲突");
     }
     if (!resp.ok) {
-      const detail = typeof data.detail === "string" ? data.detail : (data.detail && data.detail.message) || "执行失败";
-      throw new Error(detail);
+      throw new Error(apiErrorMessage(data.detail, "执行失败"));
     }
     if (data.async_mode && data.job_id) {
       setCollectingMsg(target);
@@ -1086,7 +1257,7 @@
       try {
         await runPipeline(null, msg);
       } catch (e) {
-        setCollectFailMsg(msg);
+        setCollectFailMsg(msg, e && e.message);
         setCollectBusy(false);
       }
     });
@@ -1326,7 +1497,7 @@
     setCollectBusy(true);
     runPipeline(null, msg).catch(function () {
       setCollectBusy(false);
-      setCollectFailMsg(msg);
+      setCollectFailMsg(msg, e && e.message);
       try { sessionStorage.removeItem(key); } catch (e2) { /* ignore */ }
     });
   });
@@ -1346,7 +1517,6 @@
 
   document.querySelectorAll(".daily-index-title[aria-controls]").forEach(function (btn) {
     if (btn.id === "btn-toggle-sectors") return;
-    if (btn.classList.contains("entity-index-group-head")) return;
     var list = document.getElementById(btn.getAttribute("aria-controls"));
     if (!list) return;
     btn.addEventListener("click", function () {

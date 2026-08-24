@@ -90,6 +90,7 @@ def _migrate_sqlite_columns(target_engine=engine) -> None:
         ("industry_reports", "version", "INTEGER NOT NULL DEFAULT 1"),
         ("industry_reports", "report_name", "VARCHAR(256)"),
         ("industry_reports", "supplement_search", "BOOLEAN NOT NULL DEFAULT 1"),
+        ("industry_reports", "library_saved", "BOOLEAN NOT NULL DEFAULT 0"),
         ("industry_reports", "source_manifest_json", "TEXT"),
         ("industry_reports", "generation_config_json", "TEXT"),
         ("industry_reports", "generation_mode", "VARCHAR(32)"),

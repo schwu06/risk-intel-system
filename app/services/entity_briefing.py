@@ -1,7 +1,7 @@
 """主体评估「最新消息」：近三个月核心风险摘要。
 
 优先使用主体配置的直连 RSS/JSON；无原生 feed 时，用已有 query 生成 Google News RSS。
-摘要优先走现有 Gemini，失败时回退模板句。采集补缺仍走秘塔等大模型检索。
+摘要使用 DeepSeek，失败时回退模板句。采集补缺仍走秘塔等检索来源。
 本板块只写近三个月核心风险分析；若无，则写同期情况概括。
 具体相关新闻列在公开信息事件中。
 """
@@ -45,8 +45,8 @@ from app.services.entity_kabutan import (
     load_kabutan_statements,
     period_sort_key,
 )
-from app.services.gemini_analyzer import gemini_for
 from app.services.deepseek_analyzer import DeepSeekAnalyzer
+from app.services.llm_cache import get_cached_items, material_hash, set_cached_items
 from app.services.mita_search import MitaSearchClient
 from app.services.risk_reasoning import build_risk_reasoning
 from app.services.display_zh import format_news_overview, translate_fields_to_chinese
@@ -56,17 +56,20 @@ logger = logging.getLogger(__name__)
 TOKYO = ZoneInfo("Asia/Tokyo")
 
 _SUMMARY_SYSTEM = (
-    "你是信用舆情简报助手。根据近三个月的核心事件与公开资讯标题，"
-    "用中文写成一段不超过200字的摘要。"
-    "只写观察期内的核心风险，不要编造未提供的事实，不要用列表，不要逐条罗列新闻。"
+    "你是银行授信风险分析助手。根据近三个月的核心事件与公开资讯标题，"
+    "用中文撰写一份300至500字的‘近三个月汇总报告’。"
+    "用2至3个自然段依次说明主要动态、可能的经营或信用传导、整体判断与后续关注点。"
+    "只根据输入事实分析，不要编造；不要逐条复述新闻标题，也不要使用项目符号。"
 )
 _OVERVIEW_SYSTEM = (
-    "你是信用舆情简报助手。近三个月没有重大风险。"
-    "根据观察期内的公开资讯标题与一般事件，用中文写成一段不超过200字的情况概括。"
-    "先写明未见重大负面风险，再概括主要公开动态。不要编造未提供的事实，不要用列表，不要逐条罗列新闻。"
+    "你是银行授信风险分析助手。近三个月没有重大风险。"
+    "根据观察期内的公开资讯标题与一般事件，用中文撰写一份300至500字的‘近三个月汇总报告’。"
+    "先说明整体风险态势，再概括主要经营、监管、市场或供应链动态及其潜在传导，并提出后续关注点。"
+    "只根据输入事实分析，不要编造；不要逐条复述新闻标题，也不要使用项目符号。"
 )
 _summary_cache: dict[str, tuple[float, str]] = {}
 _SUMMARY_CACHE_TTL = 3600
+_SUMMARY_PERSIST_HOURS = 24 * 7
 
 
 CORE_RISK_LEVELS = {"高", "极高"}
@@ -103,7 +106,7 @@ def _search_fallback_headlines(
     *,
     report_date: date,
 ) -> list[BriefingHeadline]:
-    """直连 RSS 为空时，用秘塔（失败则 Gemini/DeepSeek）补公开标题。"""
+    """直连 RSS 为空时，用秘塔及已配置的检索回退补公开标题。"""
     if profile is None:
         return []
     names = [str(n).strip() for n in profile.all_names if str(n).strip()][:3]
@@ -126,7 +129,7 @@ def _search_fallback_headlines(
         provider = getattr(response, "provider", None) or "mita"
         items = list(response.items or [])
     except Exception as exc:
-        logger.warning("最新消息秘塔补缺失败，改试 Gemini/DeepSeek: %s", exc)
+        logger.warning("最新消息秘塔补缺失败，改试备用检索: %s", exc)
         try:
             from app.services.llm_web_search import search_web_fallback
 
@@ -268,12 +271,12 @@ def summarize_latest_news(
     overview_titles: list[str] | None = None,
     live: bool = True,
     lookback_start: date | None = None,
+    db: Any | None = None,
 ) -> tuple[str, str | None, str]:
-    """返回 (摘要, 生成时间, 来源 gemini|template)。"""
+    """返回 (摘要, 生成时间, 来源 deepseek|template)。"""
     settings = get_settings()
-    gemini_ready = not is_placeholder_key(getattr(settings, "gemini_api_key", None))
     deepseek_ready = not is_placeholder_key(getattr(settings, "deepseek_api_key", None))
-    if not gemini_ready and not deepseek_ready:
+    if not deepseek_ready:
         return fallback, None, "template"
 
     extra = overview_titles or []
@@ -292,9 +295,27 @@ def summarize_latest_news(
     now = time.time()
     cached = _summary_cache.get(cache_key)
     if cached and cached[0] > now:
-        return cached[1], datetime.now(TOKYO).isoformat(timespec="seconds"), "gemini"
-    if not live:
-        return fallback, None, "template"
+        return cached[1], datetime.now(TOKYO).isoformat(timespec="seconds"), "deepseek"
+
+    # 进程内缓存会在 Render 重启后清空；把同一份报告写入 SQLite，
+    # 让再次登录、刷新页面或重启服务都不需要重复调用 DeepSeek。
+    persistent_key = material_hash(
+        cache_key,
+        module_code="A",
+        source="entity_latest_summary:v2",
+    )
+    if db is not None:
+        saved = get_cached_items(
+            db,
+            material_key=persistent_key,
+            max_age_hours=_SUMMARY_PERSIST_HOURS,
+        )
+        if saved and isinstance(saved[0], dict):
+            cached_text = str(saved[0].get("summary") or "").strip()
+            if cached_text:
+                generated_at = str(saved[0].get("generated_at") or "").strip() or None
+                _summary_cache[cache_key] = (now + _SUMMARY_CACHE_TTL, cached_text)
+                return cached_text, generated_at, "deepseek"
 
     event_lines = "\n".join(f"- {item.get('title')}" for item in highlights) or "无"
     news_lines = "\n".join(f"- {item.title}" for item in headlines[:12]) or "无"
@@ -317,16 +338,28 @@ def summarize_latest_news(
         )
         system_prompt = _SUMMARY_SYSTEM
     try:
-        analyzer = gemini_for("briefing", timeout=12) if gemini_ready else DeepSeekAnalyzer(timeout=12)
+        analyzer = DeepSeekAnalyzer(timeout=12)
         analyzer.retry_attempts = 1
         text = (analyzer.generate_text(system_prompt, user_content) or "").strip()
-        text = " ".join(text.split())
+        # 保留模型生成的段落结构，页面以汇总报告而非单句摘要呈现。
+        text = "\n\n".join(
+            " ".join(line.split()) for line in text.splitlines() if line.strip()
+        )
         if not text:
             return fallback, None, "template"
-        if len(text) > 280:
-            text = text[:280].rstrip("，,。.;； ") + "。"
+        if len(text) > 600:
+            text = text[:600].rstrip("，,。.;； ") + "。"
+        generated_at = datetime.now(TOKYO).isoformat(timespec="seconds")
         _summary_cache[cache_key] = (now + _SUMMARY_CACHE_TTL, text)
-        return text, datetime.now(TOKYO).isoformat(timespec="seconds"), "gemini" if gemini_ready else "deepseek"
+        if db is not None:
+            set_cached_items(
+                db,
+                material_key=persistent_key,
+                module_code="A",
+                source="entity_latest_summary:v2",
+                items=[{"summary": text, "generated_at": generated_at}],
+            )
+        return text, generated_at, "deepseek"
     except Exception as exc:
         logger.warning("最新消息 AI 摘要失败: %s", exc)
         return fallback, None, "template"
@@ -341,6 +374,7 @@ def build_latest_news(
     live: bool = True,
     recent_risks: Iterable[EntityRisk] | None = None,
     lookback_days: int | None = None,
+    db: Any | None = None,
 ) -> dict[str, Any]:
     lookback_days = news_lookback_days() if lookback_days is None else max(1, int(lookback_days))
     window_start = news_lookback_start(report_date, lookback_days)
@@ -484,6 +518,7 @@ def build_latest_news(
                 mode="core",
                 live=live,
                 lookback_start=window_start,
+                db=db,
             )
             summary = text
     elif headlines or overview_titles:
@@ -515,6 +550,7 @@ def build_latest_news(
             overview_titles=overview_titles,
             live=live,
             lookback_start=window_start,
+            db=db,
         )
         summary = text
     else:

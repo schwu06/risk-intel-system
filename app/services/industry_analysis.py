@@ -18,6 +18,7 @@ from app.services.data_source_service import (
     INDUSTRY_UPLOAD_ROOT,
     append_industry_network_search_sources,
     build_industry_authoritative_text,
+    clone_industry_library_sources,
     clone_industry_sources,
     list_industry_sources,
 )
@@ -186,6 +187,18 @@ class IndustryAnalysisService:
         row.root_report_id = row.id
         self.db.commit()
         self.db.refresh(row)
+        try:
+            reused_count = clone_industry_library_sources(self.db, industry_name, row.id)
+            if reused_count:
+                logger.info(
+                    "行业资料库复用: industry=%s report_id=%s sources=%s",
+                    industry_name, row.id, reused_count,
+                )
+        except Exception:
+            # A historical file may have been removed manually. Draft creation
+            # must remain available even when one reusable source is stale.
+            self.db.rollback()
+            logger.exception("行业资料库复用失败: industry=%s report_id=%s", industry_name, row.id)
         return row
 
     def fork_report(self, report_id: int) -> IndustryReport:
@@ -226,6 +239,19 @@ class IndustryAnalysisService:
         self.db.refresh(row)
         return row
 
+    def save_to_industry_library(self, report_id: int) -> IndustryReport:
+        """Mark this report's source snapshots reusable for future same-industry drafts."""
+        row = self.get_report(report_id)
+        if not row:
+            raise ValueError("报告不存在")
+        if not list_industry_sources(self.db, report_id):
+            raise ValueError("请先添加至少一条来源，再保存到行业资料库")
+        row.library_saved = True
+        row.updated_at = datetime.utcnow()
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
     def rename_report(self, report_id: int, report_name: str) -> IndustryReport:
         row = self.get_report(report_id)
         if not row:
@@ -240,6 +266,53 @@ class IndustryAnalysisService:
         self.db.commit()
         self.db.refresh(row)
         return row
+
+    def revise_completed_report(self, report_id: int, instruction: str) -> IndustryReport:
+        """Create a new version from a completed report and apply a user-requested revision."""
+        parent = self.get_report(report_id)
+        if not parent:
+            raise ValueError("报告不存在")
+        if parent.status != "completed":
+            raise ValueError("只有已完成的报告可以修改")
+        try:
+            existing_report = json.loads(parent.report_json or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError("当前报告缺少可修订的结构化正文") from exc
+        if not isinstance(existing_report, dict) or not existing_report:
+            raise ValueError("当前报告缺少可修订的结构化正文")
+        normalized_instruction = " ".join(str(instruction or "").split())
+        if len(normalized_instruction) < 2:
+            raise ValueError("请输入具体的修改要求")
+
+        draft = self.fork_report(report_id)
+        try:
+            revised = self.deepseek.revise_industry_report(
+                existing_report, normalized_instruction, parent.industry_name,
+            )
+            source_text, _ = build_industry_authoritative_text(self.db, draft.id)
+            _, chart_json = build_report_chart_specs(revised, source_text)
+            draft.report_json = json.dumps(revised, ensure_ascii=False)
+            draft.report_html = report_json_to_html(
+                revised, sources=list_industry_sources(self.db, draft.id),
+            )
+            draft.chart_specs = chart_json
+            draft.status = "completed"
+            draft.generation_mode = "revision"
+            draft.prompt_version = "deepseek-report-revision-v1"
+            draft.generation_config_json = json.dumps(
+                {"revision_instruction": normalized_instruction, "parent_report_id": parent.id},
+                ensure_ascii=False,
+            )
+            draft.updated_at = datetime.utcnow()
+            self.db.commit()
+            self.db.refresh(draft)
+            return draft
+        except Exception:
+            draft.status = "failed"
+            draft.error_message = "报告修改失败"
+            draft.updated_at = datetime.utcnow()
+            self.db.commit()
+            raise
 
     def generate_report(self, report_id: int) -> IndustryReport:
         mode = self.settings.industry_report_generation_mode

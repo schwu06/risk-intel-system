@@ -148,6 +148,40 @@
     });
   }
 
+  const addReportBtn = document.getElementById("btn-add-report");
+  const reportModal = document.getElementById("report-create-modal");
+  const reportNameInput = document.getElementById("report-name-input");
+  const reportCloseBtn = document.getElementById("btn-close-report-create");
+  const reportCancelBtn = document.getElementById("btn-cancel-report-create");
+
+  function openReportModal() {
+    if (!reportModal) return;
+    reportModal.classList.remove("hidden");
+    reportModal.hidden = false;
+    if (reportNameInput) {
+      window.setTimeout(function () { reportNameInput.focus(); reportNameInput.select(); }, 0);
+    }
+  }
+
+  function closeReportModal() {
+    if (!reportModal) return;
+    reportModal.classList.add("hidden");
+    reportModal.hidden = true;
+  }
+
+  if (addReportBtn) addReportBtn.addEventListener("click", openReportModal);
+  document.querySelectorAll("[data-open-report-modal]").forEach(function (button) {
+    button.addEventListener("click", openReportModal);
+  });
+  if (reportCloseBtn) reportCloseBtn.addEventListener("click", closeReportModal);
+  if (reportCancelBtn) reportCancelBtn.addEventListener("click", closeReportModal);
+  if (reportModal) reportModal.addEventListener("click", function (event) {
+    if (event.target === reportModal) closeReportModal();
+  });
+  if (reportNameInput) reportNameInput.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") closeReportModal();
+  });
+
   const generateBtn = document.getElementById("btn-generate-report");
   if (generateBtn) {
     generateBtn.addEventListener("click", async function () {
@@ -177,14 +211,70 @@
     });
   }
 
+  const revisionForm = document.getElementById("report-revision-form");
+  if (revisionForm) {
+    const revisionChat = document.querySelector(".report-revision-chat");
+    const content = document.querySelector(".industry-content");
+    const mainPanel = document.querySelector(".app-main");
+    function positionRevisionChat() {
+      if (!revisionChat || !mainPanel) return;
+      const bounds = mainPanel.getBoundingClientRect();
+      revisionChat.style.setProperty("--revision-left", Math.max(12, bounds.left + 20) + "px");
+      revisionChat.style.setProperty("--revision-right", Math.max(12, window.innerWidth - bounds.right + 20) + "px");
+    }
+    if (content) content.classList.add("has-floating-revision-chat");
+    positionRevisionChat();
+    window.addEventListener("resize", positionRevisionChat);
+    if (window.ResizeObserver && mainPanel) {
+      new ResizeObserver(positionRevisionChat).observe(mainPanel);
+    }
+    const revisionInput = document.getElementById("report-revision-input");
+    if (revisionInput) revisionInput.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        revisionForm.requestSubmit();
+      }
+    });
+    revisionForm.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      const input = document.getElementById("report-revision-input");
+      const submit = document.getElementById("btn-revise-report");
+      const message = document.getElementById("report-revision-msg");
+      const reportId = revisionForm.getAttribute("data-report-id");
+      const instruction = String(input ? input.value : "").trim();
+      if (instruction.length < 2) {
+        if (message) message.textContent = "请写明需要调整的内容。";
+        if (input) input.focus();
+        return;
+      }
+      if (submit) submit.disabled = true;
+      if (message) message.textContent = "DeepSeek 正在生成修订版本，请稍候…";
+      try {
+        const response = await industryFetch("/api/v1/industry/reports/" + reportId + "/revise", {
+          method: "POST",
+          body: JSON.stringify({ instruction: instruction }),
+        });
+        const data = await readApiJson(response);
+        if (!response.ok) throw new Error(apiError(data.detail, "修改报告失败"));
+        window.location.href = sectorBasePath() + "?report_id=" + data.id;
+      } catch (error) {
+        if (submit) submit.disabled = false;
+        if (message) message.textContent = "修改失败：" + error.message;
+      }
+    });
+  }
+
   const focusSourcesBtn = document.getElementById("btn-focus-data-sources");
   if (focusSourcesBtn) {
     focusSourcesBtn.addEventListener("click", function () {
       const drawer = document.getElementById("source-drawer");
       if (!drawer) return;
       document.body.classList.remove("sources-collapsed");
-      const addBox = document.getElementById("sources-add-box");
-      if (addBox) addBox.hidden = false;
+      const addModal = document.getElementById("source-add-modal");
+      if (addModal) {
+        addModal.hidden = false;
+        addModal.classList.remove("hidden");
+      }
       const addBtn = document.getElementById("btn-toggle-add-sources");
       if (addBtn) addBtn.focus();
     });
@@ -229,8 +319,11 @@
   try {
     var openAdd = new URLSearchParams(window.location.search).get("open_add") === "1";
     if (openAdd && !isCompletedIndustryReport()) {
-      var addBox = document.getElementById("sources-add-box");
-      if (addBox) addBox.hidden = false;
+      var addModal = document.getElementById("source-add-modal");
+      if (addModal) {
+        addModal.hidden = false;
+        addModal.classList.remove("hidden");
+      }
       document.body.classList.remove("sources-collapsed");
       var url = new URL(window.location.href);
       url.searchParams.delete("open_add");
@@ -478,7 +571,11 @@
         });
         const data = await readApiJson(resp);
         if (!resp.ok) throw new Error(apiError(data.detail, "删除行业失败"));
-        window.location.href = "/deep-reports";
+        if (data.next_sector_key) {
+          window.location.href = "/deep-reports/" + encodeURIComponent(data.next_sector_key);
+        } else {
+          window.location.href = "/deep-reports";
+        }
       } catch (e) {
         button.disabled = false;
         window.alert(e.message);
@@ -564,111 +661,6 @@
         submitNewSector();
       } else if (ev.key === "Escape") {
         closeSectorModal();
-      }
-    });
-  }
-
-  const addReportBtn = document.getElementById("btn-add-report");
-  const reportModal = document.getElementById("report-create-modal");
-  const reportNameInput = document.getElementById("report-create-name");
-  const reportCreateMsg = document.getElementById("report-create-msg");
-  const reportConfirmBtn = document.getElementById("btn-confirm-report-create");
-  const reportCancelBtn = document.getElementById("btn-cancel-report-create");
-  const reportCloseBtn = document.getElementById("btn-close-report-create");
-  const reportCreateHint = "未填写时将使用默认名称「新建报告」。";
-
-  function openReportModal() {
-    if (!reportModal) return;
-    reportModal.classList.remove("hidden");
-    reportModal.hidden = false;
-    if (reportCreateMsg) reportCreateMsg.textContent = reportCreateHint;
-    if (reportConfirmBtn) reportConfirmBtn.disabled = false;
-    if (reportNameInput) {
-      reportNameInput.value = "";
-      setTimeout(function () { reportNameInput.focus(); }, 0);
-    }
-  }
-
-  function closeReportModal() {
-    if (!reportModal) return;
-    reportModal.classList.add("hidden");
-    reportModal.hidden = true;
-    if (reportCreateMsg) reportCreateMsg.textContent = reportCreateHint;
-    if (reportConfirmBtn) reportConfirmBtn.disabled = false;
-    if (addReportBtn) addReportBtn.disabled = false;
-  }
-
-  async function submitNewReport() {
-    if (!sectorSelected()) {
-      if (reportCreateMsg) reportCreateMsg.textContent = "请先选择或新建行业";
-      return;
-    }
-    const rail = document.querySelector(".page-rail[data-default-industry-name]");
-    const industryName = ((rail && rail.getAttribute("data-default-industry-name")) || "").trim();
-    if (!industryName) {
-      if (reportCreateMsg) reportCreateMsg.textContent = "当前行业缺少默认名称，请重新选择行业";
-      return;
-    }
-    var reportName = String((reportNameInput && reportNameInput.value) || "").trim().replace(/\s+/g, " ");
-    if (!reportName) reportName = "新建报告";
-    if (reportName.length > 256) {
-      if (reportCreateMsg) reportCreateMsg.textContent = "报告名称不能超过 256 个字符";
-      return;
-    }
-    if (reportConfirmBtn) reportConfirmBtn.disabled = true;
-    if (addReportBtn) addReportBtn.disabled = true;
-    if (reportCreateMsg) reportCreateMsg.textContent = "正在创建…";
-    try {
-      const resp = await industryFetch("/api/v1/industry/reports/drafts", {
-        method: "POST",
-        body: JSON.stringify({
-          industry_name: industryName,
-          company_name: industryName,
-          supplement_search: false,
-        }),
-      });
-      const data = await readApiJson(resp);
-      if (!resp.ok) throw new Error(apiError(data.detail, "创建草稿失败"));
-      const renameResp = await industryFetch("/api/v1/industry/reports/" + data.id + "/name", {
-        method: "PATCH",
-        body: JSON.stringify({ report_name: reportName }),
-      });
-      const renameData = await readApiJson(renameResp);
-      if (!renameResp.ok) throw new Error(apiError(renameData.detail, "设置报告名称失败"));
-      window.location.href = sectorBasePath() + "?report_id=" + data.id;
-    } catch (e) {
-      if (reportConfirmBtn) reportConfirmBtn.disabled = false;
-      if (addReportBtn) addReportBtn.disabled = false;
-      if (reportCreateMsg) reportCreateMsg.textContent = e.message;
-    }
-  }
-
-  if (addReportBtn) {
-    addReportBtn.addEventListener("click", function () {
-      openReportModal();
-    });
-  }
-  if (reportConfirmBtn) {
-    reportConfirmBtn.addEventListener("click", function () { submitNewReport(); });
-  }
-  if (reportCancelBtn) {
-    reportCancelBtn.addEventListener("click", closeReportModal);
-  }
-  if (reportCloseBtn) {
-    reportCloseBtn.addEventListener("click", closeReportModal);
-  }
-  if (reportModal) {
-    reportModal.addEventListener("click", function (ev) {
-      if (ev.target === reportModal) closeReportModal();
-    });
-  }
-  if (reportNameInput) {
-    reportNameInput.addEventListener("keydown", function (ev) {
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        submitNewReport();
-      } else if (ev.key === "Escape") {
-        closeReportModal();
       }
     });
   }

@@ -30,7 +30,7 @@ from app.database.industry_db import (
     find_report_sector,
     industry_session,
     init_all_industry_databases,
-    list_sector_reports,
+    list_all_sector_reports,
 )
 from app.industry_sectors import INDUSTRY_SECTORS, ensure_registry_file, refresh_sectors, require_sector_key
 from app.services.api_keys import is_placeholder_key
@@ -283,6 +283,28 @@ def _daily_news_context(
     if selected:
         q = q.filter(NewsArticle.module_code == selected)
     raw_entries = q.all()
+    fallback_module_codes: set[str] = set()
+    # 日报当天没有新增时，保留最近一周内已经核验入库的最后资讯，避免某个板块
+    # 因为周末/披露空窗而整块留白。页面会明确标为“近 7 日最近资讯”。
+    if page_key == "daily_news":
+        active_codes = [selected] if selected else list(allowed_codes)
+        present_codes = {str(row.module_code or "").upper() for row in raw_entries}
+        missing_codes = [code for code in active_codes if code and code not in present_codes]
+        if missing_codes:
+            fallback_rows = (
+                db.query(NewsArticle)
+                .filter(NewsArticle.module_code.in_(missing_codes))
+                .filter(NewsArticle.report_date >= rd - timedelta(days=6))
+                .filter(NewsArticle.report_date < rd)
+                .filter(NewsArticle.window_hours.in_((NEWS_WINDOW_HOURS_24, NEWS_WINDOW_HOURS_7X24)))
+                .order_by(NewsArticle.published_at.desc(), NewsArticle.id.desc())
+                .all()
+            )
+            for code in missing_codes:
+                rows = [row for row in fallback_rows if row.module_code == code][:8]
+                if rows:
+                    raw_entries.extend(rows)
+                    fallback_module_codes.add(code)
     raw_entries = _dedupe_daily_news(raw_entries) if page_key == "daily_news" else _sort_news(raw_entries)
     # 展示层再滤一遍，立刻隐藏历史越界旧数据（科普/彩票/非本板块等）
     entries: list[NewsArticle] = []
@@ -362,10 +384,10 @@ def _daily_news_context(
         if has_entries:
             module_ui[code] = {
                 "state": "ok",
-                "message": "",
+                "message": "近 7 日最近资讯" if code in fallback_module_codes else "",
             }
         elif not run:
-            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击“刷新”开始采集。"}
+            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击右上角“刷新”开始采集。"}
         elif (run.status or "").lower() == "failed" or (
             run.notes and "请求失败" in (run.notes or "")
         ):
@@ -388,7 +410,7 @@ def _daily_news_context(
         elif (run.status or "").lower() in ("empty", "completed") and (run.entry_count or 0) == 0:
             module_ui[code] = {"state": "empty", "message": "今日无动态"}
         else:
-            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击“刷新”开始采集。"}
+            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击右上角“刷新”开始采集。"}
 
     return {
         "request": request,
@@ -414,6 +436,7 @@ def _daily_news_context(
         ) if page_key == "news_7x24" else None,
         "run_map": run_map,
         "module_ui": module_ui,
+        "fallback_module_codes": fallback_module_codes,
         "entry_charts_json": _news_charts_json(entries),
         "pages": PAGE_META,
         "window_hours": window_hours,
@@ -603,6 +626,7 @@ def _entity_assessment_context(
             live=live,
             recent_risks=risks if selected_entity else [],
             lookback_days=lookback_days,
+            db=db,
         ),
         "financials": build_financials_panel(profile, live=live),
         "credit_levels": CREDIT_LEVELS,
@@ -642,6 +666,8 @@ def _deep_reports_shell_context(
 ) -> dict:
     refresh_sectors()
     sectors = list(INDUSTRY_SECTORS.values())
+    # 一级索引才需要跨行业汇总；进入行业后只读取该行业自己的报告。
+    history_reports = list_all_sector_reports(limit=40) if not sector_key else []
     sector = None
     selected = None
     industry_sources: list = []
@@ -652,11 +678,22 @@ def _deep_reports_shell_context(
     candidate_stale = False
     generation_config: dict = {}
     source_list_markup = ""
-    history_reports: list = []
 
     if sector_key:
         sector = require_sector_key(sector_key)
-        history_reports = list_sector_reports(sector_key)
+        if db is not None:
+            # 二级索引只显示当前行业的报告历史，避免跨行业报告混在一起。
+            history_reports = [
+                {
+                    "id": row.id,
+                    "industry_name": row.industry_name,
+                    "report_name": row.report_name,
+                    "version": row.version,
+                    "status": row.status,
+                    "created_at": row.created_at,
+                }
+                for row in IndustryAnalysisService(db).list_reports(limit=40)
+            ]
         if db is not None and report_id:
             selected = IndustryAnalysisService(db).get_report(report_id)
         if selected:
@@ -727,6 +764,14 @@ def _deep_reports_shell_context(
         "candidate_validation": candidate_validation,
         "candidate_stale": candidate_stale,
         "drawer_sources": industry_sources,
+        "drawer_ai_sources": [
+            source for source in industry_sources
+            if source.source_type == "network_search" or source.source_origin == "network_search"
+        ],
+        "drawer_manual_sources": [
+            source for source in industry_sources
+            if source.source_type != "network_search" and source.source_origin != "network_search"
+        ],
         "drawer_selected_count": sum(
             1 for source in industry_sources
             if source.is_selected and (source.extracted_text or "").strip()
@@ -734,6 +779,10 @@ def _deep_reports_shell_context(
         "drawer_usable_count": sum(
             1 for source in industry_sources if (source.extracted_text or "").strip()
         ),
+        "drawer_reused_source_count": sum(
+            1 for source in industry_sources if source.source_origin == "industry_library"
+        ),
+        "drawer_library_saved": bool(selected and selected.library_saved),
         "drawer_report_id": selected.id if selected else None,
         "drawer_report_status": selected.status if selected else "",
         "generation_config": generation_config,
@@ -753,6 +802,12 @@ def deep_reports_index(request: Request, report_id: int | None = None):
                 url=f"/deep-reports/{sector_key}?report_id={report_id}",
                 status_code=302,
             )
+    sectors = refresh_sectors()
+    if not sectors:
+        ctx = _deep_reports_shell_context(request, prefer_client_redirect=False)
+        return templates.TemplateResponse("industry_analysis.html", ctx)
+    # 有行业时交给前端按「上次打开 / 列表第一项」跳转
+    # 保持一级“行业列表”页可见；不再在浏览器端自动跳转到上次行业。
     ctx = _deep_reports_shell_context(request, prefer_client_redirect=False)
     return templates.TemplateResponse("industry_analysis.html", ctx)
 
@@ -844,7 +899,9 @@ def entity_assessment_live_panels(
         report_date=report_date,
         entity_id=entity_id,
         db=db,
-        live=True,
+        # 页面加载与旧版前端的面板请求均只读取已落库的主体事件、
+        # 翻译与财务缓存；外部采集只能由用户主动点击刷新资讯触发。
+        live=False,
     )
     news_html = templates.get_template("entity_assessment_news_panel.html").render(ctx)
     finance_html = templates.get_template("entity_assessment_finance_panel.html").render(ctx)
