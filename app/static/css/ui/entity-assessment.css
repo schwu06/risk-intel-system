@@ -86,7 +86,8 @@
 
 .fin-chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  /* 修改记录：2026-08-25 | DingJiaye：财务四类图表固定 2×2，保持可读性与留白。 */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -127,6 +128,7 @@
 @media (max-width: 640px) {
   .fin-chart-section-head { align-items: flex-start; flex-direction: column; gap: 4px; }
   .fin-context-metric { min-height: 0; }
+  .fin-chart-grid { grid-template-columns: 1fr; }
 }
 
 /* 修改记录：2026-08-25 | DingJiaye
