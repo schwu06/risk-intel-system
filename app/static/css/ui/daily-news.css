@@ -3,7 +3,7 @@
  * 负责：新闻卡片、风险标签、筛选、时间轴与空状态。
  * 修改记录
  * - 2026-08-25 | DingJiaye | 从 dashboard.css 迁移 筛选无匹配 提示
- * - 2026-08-25 | DingJiaye | 恢复 feature/entity-ui 新闻汇总界面：可折叠索引、筛选下拉、标题内风险标签。
+ * - 2026-08-25 | wusicheng | 相对原 main：恢复可折叠索引、栏目条数、筛选下拉与标题内风险标签。
  */
 
 .module-filter-empty {

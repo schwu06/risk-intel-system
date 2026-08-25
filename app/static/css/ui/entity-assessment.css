@@ -3,7 +3,7 @@
  * 负责：主体概览、最新消息、公开事件与财务信息展示。
  * 修改记录
  * - 2026-08-25 | DingJiaye | 新建主体评估独立样式入口。
- * - 2026-08-25 | DingJiaye | 恢复 feature/entity-ui 主体评估界面：吸顶标题栏、分组索引折叠与计数。
+ * - 2026-08-25 | wusicheng | 相对原 main：恢复吸顶标题栏、分组索引折叠与主体计数。
  */
 
 body.entity-assessment-ui .entity-assessment-view {

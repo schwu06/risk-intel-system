@@ -3,7 +3,7 @@
  * 负责：评级概览、评级变动、市场信号与相关表格。
  * 修改记录
  * - 2026-08-25 | DingJiaye | 新建国际评级独立样式入口。
- * - 2026-08-25 | DingJiaye | 恢复可折叠左侧索引，与新闻汇总一致。
+ * - 2026-08-25 | wusicheng | 相对原 main：恢复左侧可折叠索引及箭头样式。
  */
 
 .ir-sidebar .daily-index-title[aria-controls] {
