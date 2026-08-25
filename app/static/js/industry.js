@@ -189,7 +189,7 @@
       if (!reportId) return;
       const selectedSources = document.querySelectorAll(".source-select-checkbox:checked");
       const sourceDrawer = document.getElementById("source-drawer");
-      if (sourceDrawer && sourceDrawer.getAttribute("data-report-status") !== "completed" && !selectedSources.length) {
+      if (sourceDrawer && !selectedSources.length) {
         setMainStatus("请先在右侧勾选至少一条含正文的数据源。", true);
         sourceDrawer.scrollIntoView({ behavior: "smooth", block: "start" });
         return;
@@ -279,57 +279,6 @@
       if (addBtn) addBtn.focus();
     });
   }
-
-  function isCompletedIndustryReport() {
-    var drawer = document.getElementById("source-drawer");
-    return !!(drawer && drawer.getAttribute("data-report-status") === "completed");
-  }
-
-  async function forkCompletedReportForAdd(triggerBtn) {
-    var drawer = document.getElementById("source-drawer");
-    var reportId = drawer ? drawer.getAttribute("data-report-id") : "";
-    if (!reportId) throw new Error("未找到当前报告");
-    if (triggerBtn) triggerBtn.disabled = true;
-    try {
-      var resp = await industryFetch("/api/v1/industry/reports/" + reportId + "/fork", { method: "POST" });
-      var data = await readApiJson(resp);
-      if (!resp.ok) throw new Error(apiError(data.detail, "创建新版失败"));
-      window.location.href = sectorBasePath() + "?report_id=" + data.id + "&open_add=1";
-    } catch (e) {
-      if (triggerBtn) triggerBtn.disabled = false;
-      throw e;
-    }
-  }
-
-  function bindAddSourceFork(btn) {
-    if (!btn) return;
-    btn.addEventListener("click", function (ev) {
-      if (!isCompletedIndustryReport()) return;
-      ev.preventDefault();
-      ev.stopImmediatePropagation();
-      forkCompletedReportForAdd(btn).catch(function (e) {
-        alert("错误：" + e.message);
-      });
-    }, true);
-  }
-
-  bindAddSourceFork(document.getElementById("btn-toggle-add-sources"));
-  bindAddSourceFork(document.getElementById("btn-empty-add-source"));
-
-  try {
-    var openAdd = new URLSearchParams(window.location.search).get("open_add") === "1";
-    if (openAdd && !isCompletedIndustryReport()) {
-      var addModal = document.getElementById("source-add-modal");
-      if (addModal) {
-        addModal.hidden = false;
-        addModal.classList.remove("hidden");
-      }
-      document.body.classList.remove("sources-collapsed");
-      var url = new URL(window.location.href);
-      url.searchParams.delete("open_add");
-      window.history.replaceState({}, "", url.pathname + url.search + url.hash);
-    }
-  } catch (e) { /* ignore */ }
 
   const promoteBtn = document.getElementById("btn-promote-grounded");
   if (promoteBtn) {

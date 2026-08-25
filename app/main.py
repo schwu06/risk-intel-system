@@ -670,6 +670,8 @@ def _deep_reports_shell_context(
     history_reports = list_all_sector_reports(limit=40) if not sector_key else []
     sector = None
     selected = None
+    library = None
+    drawer_report = None
     industry_sources: list = []
     display_report_html = ""
     citation_context = None
@@ -694,10 +696,17 @@ def _deep_reports_shell_context(
                 }
                 for row in IndustryAnalysisService(db).list_reports(limit=40)
             ]
+            library = IndustryAnalysisService(db).get_or_create_source_library(
+                sector.default_industry_name
+            )
         if db is not None and report_id:
             selected = IndustryAnalysisService(db).get_report(report_id)
+            if selected and selected.is_source_library:
+                selected = None
+        drawer_report = selected or library
+        if library is not None and db is not None:
+            industry_sources = list_industry_sources(db, library.id)
         if selected:
-            industry_sources = list_industry_sources(db, selected.id)
             display_report_html = selected.report_html or ""
             source_list_markup = source_list_html(industry_sources)
             if selected.generation_config_json:
@@ -782,9 +791,10 @@ def _deep_reports_shell_context(
         "drawer_reused_source_count": sum(
             1 for source in industry_sources if source.source_origin == "industry_library"
         ),
-        "drawer_library_saved": bool(selected and selected.library_saved),
-        "drawer_report_id": selected.id if selected else None,
-        "drawer_report_status": selected.status if selected else "",
+        "drawer_library_saved": bool((selected or library) and (selected or library).library_saved),
+        "drawer_report_id": library.id if library else None,
+        "drawer_report_status": library.status if library else "",
+        "drawer_is_industry_library": bool(library),
         "generation_config": generation_config,
         "source_list_markup": source_list_markup,
         "mita_configured": bool(settings.mita_api_key)

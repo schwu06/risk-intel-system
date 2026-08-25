@@ -80,7 +80,7 @@ from app.services.data_source_service import (
     save_module_url_source,
 )
 from app.services.source_registry import source_registry_state
-from app.services.mita_search import MitaSearchClient
+from app.services.mita_search import MitaSearchClient, split_search_terms
 from app.services.api_keys import is_placeholder_key
 from app.services.evidence_cards import (
     EvidenceCardService,
@@ -133,6 +133,14 @@ from app.services.intl_ratings_service import get_job, load_snapshot, start_refr
 from app.timeutil import tokyo_today
 
 router = APIRouter()
+
+
+def _industry_next_generation_suffix(report) -> str:
+    if not report:
+        return ""
+    if getattr(report, "is_source_library", False) or report.status in {"completed", "awaiting_approval"}:
+        return "，将在下次生成报告时生效"
+    return ""
 
 
 def _source_mutation_payload(row, *, message: str) -> dict:
@@ -513,6 +521,38 @@ def list_rss_sources(
 
 def _industry_source_origin_label(source_type: str) -> str:
     return "补充网络搜索功能" if source_type == "network_search" else "用户添加"
+
+
+def _resolve_industry_library(db: Session) -> IndustryReport:
+    from app.database.industry_db import current_industry_sector
+    from app.industry_sectors import INDUSTRY_SECTORS
+
+    key = current_industry_sector.get()
+    sector = INDUSTRY_SECTORS.get(key or "")
+    name = sector.default_industry_name if sector else "行业资料库"
+    return IndustryAnalysisService(db).get_or_create_source_library(name)
+
+
+def _serialize_industry_source(r) -> dict:
+    return {
+        "id": r.id,
+        "report_id": r.report_id,
+        "name": r.name,
+        "source_type": r.source_type,
+        "origin_label": _industry_source_origin_label(r.source_type),
+        "url": r.url,
+        "original_filename": r.original_filename,
+        "text_preview": (r.extracted_text or "")[:200],
+        "chars": len(r.extracted_text or ""),
+        "is_selected": r.is_selected,
+        "source_origin": r.source_origin,
+        "evidence_grade": r.evidence_grade,
+        "registry_state": source_registry_state(r),
+        "is_full_text": r.is_full_text,
+        "is_truncated": r.is_truncated,
+        "parse_warning": r.parse_warning,
+        "created_at": r.created_at.isoformat(),
+    }
 
 
 @router.post("/industry/analyze", response_model=IndustryReportOut)
@@ -1008,34 +1048,139 @@ def get_grounded_candidate_citation(
         raise _citation_error(exc, status_code=404) from exc
 
 
+@router.get("/industry/library/data-sources")
+def list_industry_library_data_sources(db: Session = Depends(get_industry_db_with_query)):
+    library = _resolve_industry_library(db)
+    return [_serialize_industry_source(r) for r in list_industry_sources(db, library.id)]
+
+
+@router.patch("/industry/library/data-sources/selection")
+def update_industry_library_source_selection(
+    body: IndustryDataSourceSelectionIn,
+    db: Session = Depends(get_industry_db_with_query),
+):
+    library = _resolve_industry_library(db)
+    try:
+        rows = set_industry_source_selection(db, library.id, body.source_ids)
+    except IndustryReportNotEditableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "message": "已更新下次生成将使用的数据源选择",
+        "selected_count": sum(1 for row in rows if row.is_selected),
+        "total_count": len(rows),
+    }
+
+
+def _search_industry_library_items(db: Session, query: str) -> dict:
+    library = _resolve_industry_library(db)
+    settings = get_settings()
+    if is_placeholder_key(settings.mita_api_key):
+        raise HTTPException(status_code=412, detail="未配置 MITA_API_KEY，暂不能执行 AI 搜索")
+    terms = split_search_terms(query or "")
+    if not terms:
+        terms = [f"{library.industry_name} 官方报告 监管披露 行业数据 授信风险"]
+    joined = " / ".join(terms)
+    client = MitaSearchClient()
+    seen_urls: set[str] = set()
+    items: list[dict] = []
+    try:
+        for term in terms:
+            response = client.search(query=term, max_results=8)
+            for item in response.items:
+                url = str(getattr(item, "url", "") or "").strip()
+                title = str(getattr(item, "title", "") or "").strip()
+                if not url or not title or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                items.append({
+                    "title": title,
+                    "url": url,
+                    "snippet": str(getattr(item, "snippet", "") or ""),
+                    "published_at": str(getattr(item, "published_at", "") or "") or None,
+                    "source_domain": str(getattr(item, "source_domain", "") or "") or None,
+                    "matched_term": term,
+                })
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI 搜索信源失败：{exc}") from exc
+    return {
+        "message": f"找到 {len(items)} 条候选来源，请选择后加入行业资料库",
+        "query": joined,
+        "terms": terms,
+        "items": items,
+    }
+
+
+@router.post("/industry/library/data-sources/search")
+def search_industry_library_data_sources(
+    body: IndustryDataSourceSearchIn,
+    db: Session = Depends(get_industry_db_with_query),
+):
+    return _search_industry_library_items(db, body.query or "")
+
+
+@router.post("/industry/library/data-sources/search/add")
+def add_industry_library_search_data_sources(
+    body: IndustryNetworkSearchAddIn,
+    db: Session = Depends(get_industry_db_with_query),
+):
+    library = _resolve_industry_library(db)
+    if not body.items:
+        raise HTTPException(status_code=400, detail="请至少选择一条来源")
+    try:
+        created = append_industry_network_search_sources(
+            db, library.id, body.items, is_selected=False,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"加入搜索信源失败：{exc}") from exc
+    return {
+        "message": f"已加入 {len(created)} 条来源，请勾选需要用于 AI 分析的资料，将在下次生成报告时生效",
+        "added_count": len(created),
+    }
+
+
+@router.get("/industry/library/data-sources/{source_id}")
+def get_industry_library_source_detail(
+    source_id: int, db: Session = Depends(get_industry_db_with_query)
+):
+    library = _resolve_industry_library(db)
+    row = get_industry_source_by_id(db, source_id)
+    if not row or row.report_id != library.id:
+        raise HTTPException(status_code=404, detail="行业数据源不存在")
+    return get_industry_data_source_detail(library.id, source_id, db)
+
+
+@router.post("/industry/library/data-sources/upload")
+async def upload_industry_library_data_source(
+    name: str = Form(""),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_industry_db_with_query),
+):
+    library = _resolve_industry_library(db)
+    return await upload_industry_data_source(library.id, name, file, db)
+
+
+@router.post("/industry/library/data-sources/url")
+def add_industry_library_url_source(
+    body: IndustryDataSourceUrlIn, db: Session = Depends(get_industry_db_with_query)
+):
+    library = _resolve_industry_library(db)
+    return add_industry_url_source(library.id, body, db)
+
+
+@router.delete("/industry/library/data-sources/{source_id}")
+def remove_industry_library_data_source(
+    source_id: int, db: Session = Depends(get_industry_db_with_query)
+):
+    library = _resolve_industry_library(db)
+    return remove_industry_data_source(library.id, source_id, db)
+
+
 @router.get("/industry/reports/{report_id}/data-sources")
 def get_industry_data_sources(report_id: int, db: Session = Depends(get_industry_db_with_query)):
-    report = IndustryAnalysisService(db).get_report(report_id)
-    if not report:
-        raise HTTPException(status_code=404, detail="报告不存在")
-    rows = list_industry_sources(db, report_id)
-    return [
-        {
-            "id": r.id,
-            "report_id": r.report_id,
-            "name": r.name,
-            "source_type": r.source_type,
-            "origin_label": _industry_source_origin_label(r.source_type),
-            "url": r.url,
-            "original_filename": r.original_filename,
-            "text_preview": (r.extracted_text or "")[:200],
-            "chars": len(r.extracted_text or ""),
-            "is_selected": r.is_selected,
-            "source_origin": r.source_origin,
-            "evidence_grade": r.evidence_grade,
-            "registry_state": source_registry_state(r),
-            "is_full_text": r.is_full_text,
-            "is_truncated": r.is_truncated,
-            "parse_warning": r.parse_warning,
-            "created_at": r.created_at.isoformat(),
-        }
-        for r in rows
-    ]
+    library = _resolve_industry_library(db)
+    return [_serialize_industry_source(r) for r in list_industry_sources(db, library.id)]
 
 
 @router.patch("/industry/reports/{report_id}/data-sources/selection")
@@ -1044,14 +1189,15 @@ def update_industry_data_source_selection(
     body: IndustryDataSourceSelectionIn,
     db: Session = Depends(get_industry_db_with_query),
 ):
+    library = _resolve_industry_library(db)
     try:
-        rows = set_industry_source_selection(db, report_id, body.source_ids)
+        rows = set_industry_source_selection(db, library.id, body.source_ids)
     except IndustryReportNotEditableError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
-        "message": "已更新本次生成的数据源选择",
+        "message": "已更新下次生成将使用的数据源选择",
         "selected_count": sum(1 for row in rows if row.is_selected),
         "total_count": len(rows),
     }
@@ -1063,37 +1209,8 @@ def search_industry_data_sources(
     body: IndustryDataSourceSearchIn,
     db: Session = Depends(get_industry_db_with_query),
 ):
-    """Search candidate sources without writing them into the report."""
-    report = IndustryAnalysisService(db).get_report(report_id)
-    if not report:
-        raise HTTPException(status_code=404, detail="报告不存在")
-    if report.status not in {"draft", "failed"}:
-        raise HTTPException(status_code=409, detail="只有草稿或生成失败的报告可以搜索数据源")
-    settings = get_settings()
-    if is_placeholder_key(settings.mita_api_key):
-        raise HTTPException(status_code=412, detail="未配置 MITA_API_KEY，暂不能执行 AI 搜索")
-    query = " ".join((body.query or "").split()) or (
-        f"{report.industry_name} 官方报告 监管披露 行业数据 授信风险"
-    )
-    try:
-        response = MitaSearchClient().search(query=query, max_results=8)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"AI 搜索信源失败：{exc}") from exc
-    return {
-        "message": f"找到 {len(response.items)} 条候选来源，请选择后加入报告",
-        "query": query,
-        "items": [
-            {
-                "title": str(getattr(item, "title", "") or ""),
-                "url": str(getattr(item, "url", "") or ""),
-                "snippet": str(getattr(item, "snippet", "") or ""),
-                "published_at": str(getattr(item, "published_at", "") or "") or None,
-                "source_domain": str(getattr(item, "source_domain", "") or "") or None,
-            }
-            for item in response.items
-            if str(getattr(item, "url", "") or "").strip()
-        ],
-    }
+    """Search candidate sources without writing them into the industry library."""
+    return _search_industry_library_items(db, body.query or "")
 
 
 @router.post("/industry/reports/{report_id}/data-sources/search/add")
@@ -1103,20 +1220,19 @@ def add_industry_search_data_sources(
     db: Session = Depends(get_industry_db_with_query),
 ):
     """Persist only the candidate webpages explicitly chosen in the search dialog."""
-    report = IndustryAnalysisService(db).get_report(report_id)
-    if not report:
-        raise HTTPException(status_code=404, detail="报告不存在")
-    if report.status not in {"draft", "failed"}:
-        raise HTTPException(status_code=409, detail="只有草稿或生成失败的报告可以添加数据源")
+    library = _resolve_industry_library(db)
     if not body.items:
         raise HTTPException(status_code=400, detail="请至少选择一条来源")
     try:
         created = append_industry_network_search_sources(
-            db, report_id, body.items, is_selected=False,
+            db, library.id, body.items, is_selected=False,
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"加入搜索信源失败：{exc}") from exc
-    return {"message": f"已加入 {len(created)} 条来源，请勾选需要用于 AI 分析的资料", "added_count": len(created)}
+    return {
+        "message": f"已加入 {len(created)} 条来源，请勾选需要用于 AI 分析的资料，将在下次生成报告时生效",
+        "added_count": len(created),
+    }
 
 
 @router.get("/industry/reports/{report_id}/data-sources/{source_id}")
@@ -1124,7 +1240,8 @@ def get_industry_data_source_detail(
     report_id: int, source_id: int, db: Session = Depends(get_industry_db_with_query)
 ):
     row = get_industry_source_by_id(db, source_id)
-    if not row or row.report_id != report_id:
+    library = _resolve_industry_library(db)
+    if not row or row.report_id != library.id:
         raise HTTPException(status_code=404, detail="行业数据源不存在")
     text = row.extracted_text or ""
     return {
@@ -1165,7 +1282,8 @@ def get_industry_data_source_chunks(
     report_id: int, source_id: int, db: Session = Depends(get_industry_db_with_query)
 ):
     row = get_industry_source_by_id(db, source_id)
-    if not row or row.report_id != report_id:
+    library = _resolve_industry_library(db)
+    if not row or row.report_id != library.id:
         raise HTTPException(status_code=404, detail="行业数据源不存在")
     return [
         {
@@ -1187,7 +1305,7 @@ def get_industry_data_source_chunks(
             "char_end": chunk.char_end,
             "content_hash": chunk.content_hash,
         }
-        for chunk in list_industry_source_chunks(db, report_id, source_id)
+        for chunk in list_industry_source_chunks(db, library.id, source_id)
     ]
 
 
@@ -1208,37 +1326,40 @@ async def upload_industry_data_source(
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="文件超过 25 MB 上传上限")
     try:
-        row = save_industry_file_source(db, report_id, name or filename, filename, content)
+        library = _resolve_industry_library(db)
+        row = save_industry_file_source(db, library.id, name or filename, filename, content)
     except IndustryReportNotEditableError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"message": "行业数据源已上传", "id": row.id}
+    return {"message": "行业数据源已上传，将在下次生成报告时生效", "id": row.id}
 
 
 @router.post("/industry/reports/{report_id}/data-sources/url")
 def add_industry_url_source(
     report_id: int, body: IndustryDataSourceUrlIn, db: Session = Depends(get_industry_db_with_query)
 ):
+    library = _resolve_industry_library(db)
     try:
-        row = save_industry_url_source(db, report_id, body.name, body.url)
+        row = save_industry_url_source(db, library.id, body.name, body.url)
     except IndustryReportNotEditableError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"message": "行业网址已添加", "id": row.id}
+    return {"message": "行业网址已添加，将在下次生成报告时生效", "id": row.id}
 
 
 @router.delete("/industry/reports/{report_id}/data-sources/{source_id}")
 def remove_industry_data_source(
     report_id: int, source_id: int, db: Session = Depends(get_industry_db_with_query)
 ):
+    library = _resolve_industry_library(db)
     try:
-        deleted = delete_industry_source(db, report_id, source_id)
+        deleted = delete_industry_source(db, library.id, source_id)
     except IndustryReportNotEditableError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:

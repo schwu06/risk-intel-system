@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block head_extra %}
-  <link rel="stylesheet" href="/static/css/ui/industry-analysis.css?v=20260825-3" />
+  <link rel="stylesheet" href="/static/css/ui/industry-analysis.css?v=20260825-13" />
 {% endblock %}
 
 {% block title %}行业分析 — {{ app_name }}{% endblock %}
@@ -126,7 +126,7 @@
       <header class="industry-page-heading">
         <span class="industry-kicker">{{ sector_label }} / 报告历史</span>
         <h1>选择一份报告，或新建分析</h1>
-        <p>左侧显示该行业的历史记录。点击右上角“+”创建新报告；创建后可在来源栏检索、上传和选择本次要使用的资料。</p>
+        <p>左侧显示该行业的历史记录。可先在来源栏检索或上传资料；新建并生成报告时会带入这些来源。</p>
       </header>
       <button type="button" class="btn notebook-open-report" data-open-report-modal>＋ 新建报告</button>
     </section>
@@ -159,6 +159,19 @@
     </section>
     {% endif %}
     <div id="industry-charts" class="chart-grid"></div>
+    <div class="notebook-composer" aria-label="重新生成报告">
+      <div>
+        <strong>用当前勾选来源重新生成</strong>
+        <span>新增来源不会改写当前正文</span>
+      </div>
+      <button
+        type="button"
+        class="btn notebook-generate-btn"
+        id="btn-generate-report"
+        data-report-id="{{ selected_report.id }}"
+        {% if drawer_selected_count == 0 %}disabled{% endif %}
+      >重新生成 →</button>
+    </div>
     <section class="report-revision-chat" aria-label="使用 DeepSeek 调整报告">
       <form id="report-revision-form" class="report-revision-composer" data-report-id="{{ selected_report.id }}">
         <textarea id="report-revision-input" rows="1" maxlength="2000" placeholder="输入修改要求，例如：补充成本波动风险，并将风险展望改为更审慎的表述。" required></textarea>
@@ -204,7 +217,7 @@
         <h2>添加资料，开始分析</h2>
         <p>在左侧来源栏搜索可信网页，或添加文件、网页与 PDF。资料提取完成后，勾选需要使用的来源。</p>
         {% endif %}
-        <button type="button" class="btn notebook-open-source" data-open-source-modal {% if selected_report.status not in ['draft', 'failed'] %}disabled{% endif %}>添加来源</button>
+        <button type="button" class="btn notebook-open-source" data-open-source-modal>添加来源</button>
       </div>
       <div class="notebook-composer" aria-label="生成报告">
         <div>
@@ -291,7 +304,7 @@
     sectorSelected: {{ 'true' if sector_selected else 'false' }}
   };
 </script>
-<script src="/static/js/industry.js?v=20260824-08"></script>
+<script src="/static/js/industry.js?v=20260825-09"></script>
 {% if selected_report and selected_report.chart_specs %}
 <script>
   window.INDUSTRY_CHARTS = {{ selected_report.chart_specs | safe }};

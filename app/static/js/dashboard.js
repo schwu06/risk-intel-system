@@ -116,6 +116,16 @@
     return Number((drawer && drawer.getAttribute("data-report-id")) || 0) || null;
   }
 
+  function requireIndustrySector() {
+    var drawer = document.getElementById("source-drawer");
+    if (sourceScope() === "industry" && drawer && drawer.getAttribute("data-sector-selected") === "0") {
+      throw new Error("请选择行业");
+    }
+    var sector = currentIndustrySector();
+    if (sourceScope() === "industry" && !sector) throw new Error("请选择行业");
+    return sector;
+  }
+
   function requireReportId() {
     var drawer = document.getElementById("source-drawer");
     if (sourceScope() === "industry" && drawer && drawer.getAttribute("data-sector-selected") === "0") {
@@ -133,10 +143,12 @@
   }
 
   function industrySourcesEditable() {
-    if (!industrySectorReady()) return false;
-    var drawer = document.getElementById("source-drawer");
-    var status = String((drawer && drawer.getAttribute("data-report-status")) || "");
-    return status === "draft" || status === "failed";
+    return industrySectorReady();
+  }
+
+  function industryLibraryUrl(suffix) {
+    suffix = suffix || "";
+    return industryRequestUrl("/api/v1/industry/library/data-sources" + suffix);
   }
 
   function currentIndustrySector() {
@@ -162,10 +174,7 @@
 
   function dataSourcesUrl() {
     if (sourceScope() === "industry") {
-      var reportId = currentReportId();
-      return reportId
-        ? industryRequestUrl("/api/v1/industry/reports/" + reportId + "/data-sources")
-        : null;
+      return industrySectorReady() ? industryLibraryUrl("") : null;
     }
     var eid = currentEntityId();
     return eid ? "/api/v1/data-sources?entity_id=" + eid : "/api/v1/data-sources";
@@ -315,7 +324,7 @@
             '<input class="search-result-select" type="checkbox" value="' + index + '">' +
             '<span class="search-result-content"><strong>' + escapeHtml(item.title) + '</strong>' +
             '<span>' + escapeHtml(item.snippet || "未提供摘要") + '</span>' +
-            '<small>' + escapeHtml(domain + date) + '</small></span>' +
+            '<small>' + escapeHtml((item.matched_term ? item.matched_term + " · " : "") + domain + date) + '</small></span>' +
             '<a href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener" title="打开原网页">↗</a>' +
           '</label>';
         }).join("")
@@ -363,9 +372,7 @@
     var original = aiSearchBtn.textContent;
     aiSearchBtn.textContent = "正在搜索…";
     try {
-      var endpoint = industryRequestUrl(
-        "/api/v1/industry/reports/" + requireReportId() + "/data-sources/search"
-      );
+      var endpoint = industryLibraryUrl("/search");
       var resp = await fetch(endpoint, {
         method: "POST",
         headers: industryRequestHeaders({ "Content-Type": "application/json" }),
@@ -403,9 +410,7 @@
     var original = addSearchResultsBtn.textContent;
     addSearchResultsBtn.textContent = "正在加入…";
     try {
-      var endpoint = industryRequestUrl(
-        "/api/v1/industry/reports/" + requireReportId() + "/data-sources/search/add"
-      );
+      var endpoint = industryLibraryUrl("/search/add");
       var response = await fetch(endpoint, {
         method: "POST",
         headers: industryRequestHeaders({ "Content-Type": "application/json" }),
@@ -507,8 +512,7 @@
     var endpoint = "/api/v1/data-sources/upload";
     var headers = {};
     if (sourceScope() === "industry") {
-      if (!industrySourcesEditable()) throw new Error("已完成报告的数据源不可修改，请先点击「添加数据源」创建新版");
-      endpoint = industryRequestUrl("/api/v1/industry/reports/" + requireReportId() + "/data-sources/upload");
+      endpoint = industryLibraryUrl("/upload");
       headers = industryRequestHeaders();
     } else {
       var eid = currentEntityId();
@@ -640,16 +644,13 @@
 
   async function saveIndustrySelection() {
     if (sourceScope() !== "industry" || !industrySourcesEditable()) return;
-    var reportId = requireReportId();
     var boxes = Array.prototype.slice.call(document.querySelectorAll(".source-select-checkbox:not(:disabled)"));
     var sourceIds = boxes.filter(function (box) { return box.checked; }).map(function (box) {
       return Number(box.getAttribute("data-id"));
     });
     boxes.forEach(function (box) { box.disabled = true; });
     try {
-      var endpoint = industryRequestUrl(
-        "/api/v1/industry/reports/" + reportId + "/data-sources/selection"
-      );
+      var endpoint = industryLibraryUrl("/selection");
       var resp = await fetch(endpoint, {
         method: "PATCH",
         headers: industryRequestHeaders({ "Content-Type": "application/json" }),
@@ -699,9 +700,7 @@
     if (!sources || !sources.length) {
       var emptyAction = industrySourcesEditable()
         ? '<p class="sources-empty-hint">将文件拖放到此处，或 <button type="button" class="text-link" id="btn-empty-add-source-dyn">添加数据源</button></p>'
-        : (String((drawer && drawer.getAttribute("data-report-status")) || "") === "completed"
-          ? '<p class="sources-empty-hint">已完成报告只读。点击上方「添加数据源」可创建新版草稿并继续补充。</p>'
-          : '<p class="sources-empty-hint">当前报告不可修改数据源。</p>');
+        : '<p class="sources-empty-hint">当前报告不可修改数据源。</p>';
       listWrap.innerHTML =
         '<div class="sources-empty" id="managed-source-list">' +
         '<p class="sources-empty-title">保存的数据源将显示在此处</p>' +
@@ -740,7 +739,7 @@
         '<span class="source-name">' + escapeHtml(src.name) + "</span>" +
         '<span class="source-meta">' + escapeHtml(meta.join(" · ")) + "</span>" +
         "</button>" +
-        ((industrySourcesEditable() || src.source_origin === "network_search" || src.source_type === "network_search") ? '<button type="button" class="link-btn delete-source" data-id="' + src.id + '">删除</button>' : '') +
+        ((industrySourcesEditable()) ? '<button type="button" class="link-btn delete-source" data-id="' + src.id + '">删除</button>' : '') +
         "</li>";
     });
     html += "</ul>";
@@ -863,8 +862,7 @@
           var endpoint = "/api/v1/data-sources/url";
           var headers = { "Content-Type": "application/json" };
           if (sourceScope() === "industry") {
-            if (!industrySourcesEditable()) throw new Error("已完成报告的数据源不可修改，请先点击「添加数据源」创建新版");
-            endpoint = industryRequestUrl("/api/v1/industry/reports/" + requireReportId() + "/data-sources/url");
+            endpoint = industryLibraryUrl("/url");
             headers = industryRequestHeaders(headers);
           } else {
             var eid = currentEntityId();
@@ -892,7 +890,7 @@
     if (!confirm("确认删除该数据源？")) return;
     await handleSourceMutation(async function () {
       const endpoint = sourceScope() === "industry"
-        ? industryRequestUrl("/api/v1/industry/reports/" + requireReportId() + "/data-sources/" + id)
+        ? industryLibraryUrl("/" + id)
         : "/api/v1/data-sources/" + id;
       const resp = await fetch(endpoint, {
         method: "DELETE",
@@ -918,9 +916,7 @@
     if (btn) btn.disabled = true;
     try {
       for (const id of ids) {
-        const endpoint = industryRequestUrl(
-          "/api/v1/industry/reports/" + requireReportId() + "/data-sources/" + id
-        );
+        const endpoint = industryLibraryUrl("/" + id);
         const resp = await fetch(endpoint, {
           method: "DELETE",
           headers: industryRequestHeaders(),
@@ -961,7 +957,7 @@
     if (sourceViewBody) sourceViewBody.innerHTML = '<p class="hint">加载中…</p>';
     try {
       const endpoint = sourceScope() === "industry"
-        ? industryRequestUrl("/api/v1/industry/reports/" + requireReportId() + "/data-sources/" + id)
+        ? industryLibraryUrl("/" + id)
         : "/api/v1/data-sources/item/" + id;
       const resp = await fetch(endpoint, { headers: industryRequestHeaders() });
       const data = await resp.json().catch(function () { return {}; });

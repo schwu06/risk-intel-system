@@ -129,6 +129,20 @@ class IndustryDataSourceServiceTests(unittest.TestCase):
             self.assertIsNone(db.get(IndustryDataSource, source_id))
             self.assertEqual(db.query(IndustrySourceChunk).filter_by(source_id=source_id).count(), 0)
 
+    def test_completed_report_can_upload_source_without_changing_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, isolated_session() as db:
+            report = IndustryReport(industry_name="能源", status="completed", version=1)
+            db.add(report)
+            db.commit()
+            with patch.object(data_source_service, "INDUSTRY_UPLOAD_ROOT", Path(tmp)):
+                row = save_industry_file_source(
+                    db, report.id, "补充材料", "extra.txt", "新增正文。".encode("utf-8")
+                )
+            db.refresh(report)
+            self.assertEqual(report.status, "completed")
+            self.assertEqual(row.report_id, report.id)
+            self.assertTrue(row.is_selected)
+
     def test_customer_url_uses_download_bytes_for_raw_hash(self) -> None:
         raw = b"<html><h1>Title</h1><p>Revenue 100 USD</p></html>"
         fetched = FetchedSource(
@@ -224,6 +238,32 @@ class IndustryDataSourceServiceTests(unittest.TestCase):
             self.assertEqual(
                 db.query(IndustrySourceChunk).filter_by(source_id=source_id).count(), 0
             )
+
+
+class IndustrySourceLibraryTests(unittest.TestCase):
+    def test_library_upload_is_reused_by_new_draft(self) -> None:
+        from app.services.industry_analysis import IndustryAnalysisService
+
+        with tempfile.TemporaryDirectory() as tmp, isolated_session() as db:
+            service = IndustryAnalysisService(db)
+            library = service.get_or_create_source_library("新能源")
+            with patch.object(data_source_service, "INDUSTRY_UPLOAD_ROOT", Path(tmp)):
+                save_industry_file_source(
+                    db, library.id, "库文件", "lib.txt", "库正文。".encode("utf-8")
+                )
+            listed_ids = [row.id for row in service.list_reports()]
+            self.assertNotIn(library.id, listed_ids)
+            draft = service.create_draft("新能源")
+            self.assertEqual(
+                db.query(IndustryDataSource).filter(IndustryDataSource.report_id == draft.id).count(),
+                0,
+            )
+            kept = (
+                db.query(IndustryDataSource)
+                .filter(IndustryDataSource.report_id == library.id)
+                .all()
+            )
+            self.assertTrue(any((src.extracted_text or "").find("库正文") >= 0 for src in kept))
 
 
 if __name__ == "__main__":

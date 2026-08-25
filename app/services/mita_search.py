@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -17,6 +18,28 @@ from app.services.http_client import get_http_client
 from app.services.http_retry import is_retryable_error, with_retries
 
 logger = logging.getLogger(__name__)
+
+_SEARCH_TERM_SPLIT_RE = re.compile(r"[\s,，、&/]+")
+_MAX_SPLIT_SEARCH_TERMS = 6
+
+
+def split_search_terms(raw: str) -> list[str]:
+    """按空格、逗号、顿号、&、/ 拆成独立检索词，去重并保持顺序。"""
+    seen: set[str] = set()
+    terms: list[str] = []
+    for part in _SEARCH_TERM_SPLIT_RE.split(raw or ""):
+        term = part.strip()
+        if not term:
+            continue
+        key = term.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        terms.append(term)
+        if len(terms) >= _MAX_SPLIT_SEARCH_TERMS:
+            break
+    return terms
+
 
 _QUOTA_LOCK = threading.Lock()
 _MITA_QUOTA_EXHAUSTED = False

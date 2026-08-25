@@ -226,6 +226,7 @@ def list_all_sector_reports(limit: int = 40) -> list[dict]:
         try:
             rows = (
                 session.query(IndustryReport)
+                .filter(IndustryReport.is_source_library.is_(False))
                 .order_by(IndustryReport.created_at.desc())
                 .limit(limit)
                 .all()

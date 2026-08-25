@@ -284,7 +284,7 @@ def set_industry_source_selection(
     db: Session, report_id: int, source_ids: list[int]
 ) -> list[IndustryDataSource]:
     """Persist the source set intentionally selected for the next report run."""
-    _editable_industry_report(db, report_id)
+    _editable_industry_report(db, report_id, allow_completed=True)
     selected_ids = {int(source_id) for source_id in source_ids}
     rows = list_industry_sources(db, report_id)
     known_ids = {row.id for row in rows}
@@ -299,7 +299,9 @@ def set_industry_source_selection(
     return rows
 
 
-def _editable_industry_report(db: Session, report_id: int) -> IndustryReport:
+def _editable_industry_report(
+    db: Session, report_id: int, *, allow_completed: bool = False
+) -> IndustryReport:
     report = (
         db.query(IndustryReport)
         .populate_existing()
@@ -308,8 +310,13 @@ def _editable_industry_report(db: Session, report_id: int) -> IndustryReport:
     )
     if not report:
         raise ValueError("报告不存在")
-    if report.status not in {"draft", "failed"}:
-        raise IndustryReportNotEditableError("只有草稿或生成失败的报告可以修改数据源")
+    if report.status == "running":
+        raise IndustryReportNotEditableError("报告正在生成，暂不能修改数据源")
+    allowed = {"draft", "failed"}
+    if allow_completed:
+        allowed.update({"completed", "awaiting_approval"})
+    if report.status not in allowed:
+        raise IndustryReportNotEditableError("当前报告不可修改数据源")
     if report.status == "failed":
         report.status = "draft"
         report.error_message = None
@@ -352,7 +359,7 @@ def append_industry_network_search_sources(
     )
     if not report:
         raise ValueError("报告不存在")
-    if report.status not in {"running", "draft", "failed"}:
+    if report.status not in {"running", "draft", "failed", "completed", "awaiting_approval"}:
         raise ValueError("当前报告不可添加搜索结果")
 
     existing = list_industry_sources(db, report_id)
@@ -462,7 +469,7 @@ def save_industry_file_source(
     filename: str,
     file_bytes: bytes,
 ) -> IndustryDataSource:
-    _editable_industry_report(db, report_id)
+    _editable_industry_report(db, report_id, allow_completed=True)
     ensure_upload_dirs()
     safe_name = Path(filename).name
     dest = _unique_destination(report_id, safe_name)
@@ -480,7 +487,7 @@ def save_industry_file_source(
         dest.unlink(missing_ok=True)
         raise ValueError(f"文件解析失败: {exc}") from exc
     try:
-        _editable_industry_report(db, report_id)
+        _editable_industry_report(db, report_id, allow_completed=True)
         row = IndustryDataSource(
             report_id=report_id,
             name=name or safe_name,
@@ -511,7 +518,7 @@ def save_industry_url_source(
     name: str,
     url: str,
 ) -> IndustryDataSource:
-    _editable_industry_report(db, report_id)
+    _editable_industry_report(db, report_id, allow_completed=True)
     try:
         fetched = fetch_url_source(url)
         metadata = build_registry_metadata(
@@ -521,7 +528,7 @@ def save_industry_url_source(
             mime_type=fetched.mime_type,
             is_full_text=True,
         )
-        _editable_industry_report(db, report_id)
+        _editable_industry_report(db, report_id, allow_completed=True)
         row = IndustryDataSource(
             report_id=report_id,
             name=name or url,
@@ -545,13 +552,17 @@ def save_industry_url_source(
     return row
 
 
-def clone_industry_sources(db: Session, source_report_id: int, target_report_id: int) -> int:
-    _editable_industry_report(db, target_report_id)
+def clone_industry_sources(
+    db: Session, source_report_id: int, target_report_id: int, *, require_editable: bool = True
+) -> int:
+    if require_editable:
+        _editable_industry_report(db, target_report_id)
     count = 0
     for src in list_industry_sources(db, source_report_id):
         _clone_industry_source(db, src, target_report_id, is_selected=bool(src.is_selected))
         count += 1
-    _editable_industry_report(db, target_report_id)
+    if require_editable:
+        _editable_industry_report(db, target_report_id)
     db.commit()
     return count
 
@@ -638,6 +649,49 @@ def _industry_source_reuse_key(src: IndustryDataSource) -> tuple[str, str]:
     return ("name", f"{src.source_type}:{src.name}".strip().lower())
 
 
+def adopt_sources_into_library(db: Session, library_id: int) -> int:
+    """Move unique report-owned sources into the industry library."""
+    library_rows = list_industry_sources(db, library_id)
+    seen = {_industry_source_reuse_key(src) for src in library_rows}
+    moved = 0
+    others = (
+        db.query(IndustryDataSource)
+        .filter(IndustryDataSource.report_id != library_id)
+        .order_by(IndustryDataSource.created_at.desc(), IndustryDataSource.id.desc())
+        .all()
+    )
+    for src in others:
+        key = _industry_source_reuse_key(src)
+        if key in seen:
+            continue
+        src.report_id = library_id
+        for chunk in src.chunks:
+            chunk.report_id = library_id
+        seen.add(key)
+        moved += 1
+    if moved:
+        db.commit()
+    return moved
+
+
+def replace_report_sources_from_library(
+    db: Session, report_id: int, library_id: int
+) -> int:
+    """Copy the industry library onto a report for one generation run."""
+    if report_id == library_id:
+        return len(list_industry_sources(db, report_id))
+    for src in list_industry_sources(db, report_id):
+        if src.file_path:
+            library_paths = {
+                row.file_path for row in list_industry_sources(db, library_id) if row.file_path
+            }
+            if src.file_path not in library_paths:
+                Path(src.file_path).unlink(missing_ok=True)
+        db.delete(src)
+    db.commit()
+    return clone_industry_sources(db, library_id, report_id, require_editable=False)
+
+
 def clone_industry_library_sources(
     db: Session, industry_name: str, target_report_id: int
 ) -> int:
@@ -692,17 +746,19 @@ def delete_industry_source(db: Session, report_id: int, source_id: int) -> bool:
     report = db.query(IndustryReport).filter(IndustryReport.id == report_id).first()
     if not report:
         return False
-    # Network-search leads are explicitly removable after generation; customer
-    # sources retain the existing draft/failed edit lock.
-    if report.status not in {"draft", "failed", "running"} and row.source_origin != "network_search" and row.source_type != "network_search":
-        raise IndustryReportNotEditableError("completed_report_customer_source_locked")
+    if report.status == "running":
+        raise IndustryReportNotEditableError("报告正在生成，暂不能修改数据源")
+    frozen = report.status in {"completed", "awaiting_approval"}
+    if report.status not in {"draft", "failed", "completed", "awaiting_approval"}:
+        raise IndustryReportNotEditableError("当前报告不可修改数据源")
     if report.status == "failed":
         report.status = "draft"
         report.error_message = None
     if row.file_path:
         Path(row.file_path).unlink(missing_ok=True)
     db.delete(row)
-    if report.source_manifest_json:
+    # Keep the last-run source manifest frozen so the displayed report is unchanged.
+    if report.source_manifest_json and not frozen:
         try:
             manifest = json.loads(report.source_manifest_json)
             if isinstance(manifest, list):

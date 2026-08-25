@@ -653,6 +653,8 @@ class IndustryReport(Base):
     supplement_search: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Explicit opt-in for reusing this report's sources in the same industry.
     library_saved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Hidden per-industry holder so sources can be uploaded before any report exists.
+    is_source_library: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     report_html: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     report_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     chart_specs: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

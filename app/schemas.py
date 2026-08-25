@@ -337,10 +337,11 @@ class IndustryNetworkSearchCandidateIn(BaseModel):
     snippet: str = Field(default="", max_length=8000)
     published_at: Optional[str] = Field(default=None, max_length=100)
     source_domain: Optional[str] = Field(default=None, max_length=512)
+    matched_term: Optional[str] = Field(default=None, max_length=300)
 
 
 class IndustryNetworkSearchAddIn(BaseModel):
-    items: list[IndustryNetworkSearchCandidateIn] = Field(default_factory=list, max_length=8)
+    items: list[IndustryNetworkSearchCandidateIn] = Field(default_factory=list, max_length=24)
 
 
 class IndustryReportRevisionIn(BaseModel):

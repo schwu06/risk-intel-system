@@ -1,7 +1,7 @@
-{# Notebook 式来源栏：每份报告拥有独立数据源组 #}
-{% set drawer_editable = drawer_report_status in ['draft', 'failed'] %}
-{% set can_add_or_fork = drawer_editable or drawer_report_status == 'completed' %}
+{# 行业资料库按行业共用，不依赖是否打开报告 #}
 {% set sector_ready = sector_selected if sector_selected is defined else true %}
+{% set drawer_editable = sector_ready %}
+{% set can_add_or_fork = drawer_editable %}
 <aside
   class="sources-panel industry-sources-panel {% if not sector_ready %}sources-panel-no-sector{% endif %}"
   id="source-drawer"
@@ -14,7 +14,7 @@
 >
   <div class="sources-panel-header">
     <div>
-      <h2 class="sources-panel-title">来源</h2>
+      <h2 class="sources-panel-title">信息源</h2>
       <p class="sources-panel-subtitle">搜索、上传与选择</p>
     </div>
     <button
@@ -31,6 +31,7 @@
         <path d="M9 4v16" stroke="currentColor" stroke-width="1.6"/>
       </svg>
     </button>
+    <span class="sources-panel-rail-title" aria-hidden="true">信息源</span>
   </div>
 
   <div class="sources-panel-content">
@@ -44,7 +45,7 @@
         id="industry-source-search-query"
         class="source-search-input"
         type="search"
-        placeholder="输入关键词，例如：行业政策、财报、市场数据"
+        placeholder="多个关键词可用空格、逗号、顿号、&、/ 分隔"
         autocomplete="off"
         {% if not drawer_editable or not sector_ready %}disabled{% endif %}
       />
@@ -95,7 +96,7 @@
       {% if not sector_ready %}
       <div class="sources-empty sources-empty-gated">
         <p class="sources-empty-title">请选择行业</p>
-        <p class="sources-empty-desc">选择或新建行业后，再创建报告草稿并上传数据源。</p>
+        <p class="sources-empty-desc">选择行业后即可搜索和上传，来源在本行业内共用。</p>
       </div>
       {% elif drawer_sources %}
       {% if drawer_editable %}
@@ -104,6 +105,11 @@
         <button type="button" class="text-link" id="btn-select-all-sources">全选</button>
         <button type="button" class="text-link danger-link" id="btn-delete-selected-sources">删除所选</button>
       </div>
+      {% endif %}
+      {% if drawer_is_industry_library %}
+      <p class="source-library-note">来源按行业共用。勾选后将在下次生成报告时生效。</p>
+      {% elif drawer_report_status in ['completed', 'awaiting_approval'] %}
+      <p class="source-library-note">当前正文来自上次生成。新增或勾选的来源将在下次生成时生效。</p>
       {% endif %}
       {% if drawer_reused_source_count %}
       <p class="source-library-note">已带入 {{ drawer_reused_source_count }} 条本行业历史资料，请按需勾选。</p>
@@ -129,7 +135,7 @@
               {% if not (src.extracted_text or '')|trim %} · 等待解析{% endif %}
             </span>
           </button>
-          {% if drawer_editable or src.source_origin == 'network_search' or src.source_type == 'network_search' %}<button type="button" class="link-btn delete-source" data-id="{{ src.id }}">删除</button>{% endif %}
+          {% if drawer_editable %}<button type="button" class="link-btn delete-source" data-id="{{ src.id }}">删除</button>{% endif %}
         </li>
         {% endfor %}
       </ul>
@@ -176,9 +182,8 @@
         <p class="sources-empty-desc">搜索公开资料，或添加文件与网页链接。</p>
         <p class="sources-empty-hint">
           {% if drawer_editable %}<button type="button" class="text-link" id="btn-empty-add-source">添加来源</button>
-          {% elif drawer_report_status == 'completed' %}已完成报告的数据源只读；添加来源将创建新版草稿。
-          {% elif drawer_report_id %}当前报告不可修改数据源。
-          {% else %}创建文档后即可添加来源。{% endif %}
+          {% elif drawer_report_id %}当前报告正在生成，暂不能修改数据源。
+          {% else %}选择行业后即可添加来源。{% endif %}
         </p>
       </div>
       {% endif %}

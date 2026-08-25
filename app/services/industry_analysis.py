@@ -16,11 +16,12 @@ from app.database.models import IndustryReport
 from app.services.chart_generator import extract_and_build_charts, to_echarts_option
 from app.services.data_source_service import (
     INDUSTRY_UPLOAD_ROOT,
+    adopt_sources_into_library,
     append_industry_network_search_sources,
     build_industry_authoritative_text,
-    clone_industry_library_sources,
     clone_industry_sources,
     list_industry_sources,
+    replace_report_sources_from_library,
 )
 from app.services.deepseek_analyzer import (
     GROUNDED_REPORT_PROMPT_VERSION,
@@ -187,18 +188,49 @@ class IndustryAnalysisService:
         row.root_report_id = row.id
         self.db.commit()
         self.db.refresh(row)
+        return row
+
+    def get_or_create_source_library(self, industry_name: str) -> IndustryReport:
+        """Return the hidden industry source library, creating it if needed."""
+        industry_name = " ".join((industry_name or "").split()) or "行业资料库"
+        row = (
+            self.db.query(IndustryReport)
+            .filter(IndustryReport.is_source_library.is_(True))
+            .order_by(IndustryReport.id.asc())
+            .first()
+        )
+        if row:
+            changed = False
+            if not row.library_saved:
+                row.library_saved = True
+                changed = True
+            if row.industry_name != industry_name:
+                row.industry_name = industry_name
+                changed = True
+            if changed:
+                row.updated_at = datetime.utcnow()
+                self.db.commit()
+                self.db.refresh(row)
+        else:
+            row = IndustryReport(
+                industry_name=industry_name,
+                report_name="行业资料库",
+                status="draft",
+                supplement_search=False,
+                version=1,
+                library_saved=True,
+                is_source_library=True,
+            )
+            self.db.add(row)
+            self.db.flush()
+            row.root_report_id = row.id
+            self.db.commit()
+            self.db.refresh(row)
         try:
-            reused_count = clone_industry_library_sources(self.db, industry_name, row.id)
-            if reused_count:
-                logger.info(
-                    "行业资料库复用: industry=%s report_id=%s sources=%s",
-                    industry_name, row.id, reused_count,
-                )
+            adopt_sources_into_library(self.db, row.id)
         except Exception:
-            # A historical file may have been removed manually. Draft creation
-            # must remain available even when one reusable source is stale.
             self.db.rollback()
-            logger.exception("行业资料库复用失败: industry=%s report_id=%s", industry_name, row.id)
+            logger.exception("归并行业资料库失败: industry=%s report_id=%s", industry_name, row.id)
         return row
 
     def fork_report(self, report_id: int) -> IndustryReport:
@@ -228,15 +260,6 @@ class IndustryAnalysisService:
         self.db.add(row)
         self.db.commit()
         self.db.refresh(row)
-        try:
-            clone_industry_sources(self.db, parent.id, row.id)
-        except Exception:
-            self.db.rollback()
-            self.db.delete(row)
-            self.db.commit()
-            shutil.rmtree(INDUSTRY_UPLOAD_ROOT / str(row.id), ignore_errors=True)
-            raise
-        self.db.refresh(row)
         return row
 
     def save_to_industry_library(self, report_id: int) -> IndustryReport:
@@ -244,7 +267,7 @@ class IndustryAnalysisService:
         row = self.get_report(report_id)
         if not row:
             raise ValueError("报告不存在")
-        if not list_industry_sources(self.db, report_id):
+        if not list_industry_sources(self.db, self.get_or_create_source_library(row.industry_name).id):
             raise ValueError("请先添加至少一条来源，再保存到行业资料库")
         row.library_saved = True
         row.updated_at = datetime.utcnow()
@@ -285,15 +308,17 @@ class IndustryAnalysisService:
             raise ValueError("请输入具体的修改要求")
 
         draft = self.fork_report(report_id)
+        library = self.get_or_create_source_library(parent.industry_name)
+        replace_report_sources_from_library(self.db, draft.id, library.id)
         try:
             revised = self.deepseek.revise_industry_report(
                 existing_report, normalized_instruction, parent.industry_name,
             )
-            source_text, _ = build_industry_authoritative_text(self.db, draft.id)
+            source_text, _ = build_industry_authoritative_text(self.db, library.id)
             _, chart_json = build_report_chart_specs(revised, source_text)
             draft.report_json = json.dumps(revised, ensure_ascii=False)
             draft.report_html = report_json_to_html(
-                revised, sources=list_industry_sources(self.db, draft.id),
+                revised, sources=list_industry_sources(self.db, library.id),
             )
             draft.chart_specs = chart_json
             draft.status = "completed"
@@ -315,6 +340,18 @@ class IndustryAnalysisService:
             raise
 
     def generate_report(self, report_id: int) -> IndustryReport:
+        row = self.get_report(report_id)
+        if not row:
+            raise ValueError("报告不存在")
+        if row.is_source_library:
+            raise ValueError("请先新建报告。资料库中的来源会在生成时带入。")
+        # Source edits on a completed report stay on that library; the next
+        # generation copies them into a new version and leaves the current body unchanged.
+        if row.status == "completed":
+            row = self.fork_report(report_id)
+            report_id = row.id
+        library = self.get_or_create_source_library(row.industry_name)
+        replace_report_sources_from_library(self.db, report_id, library.id)
         mode = self.settings.industry_report_generation_mode
         logger.info("行业正式报告生成模式: %s report_id=%s", mode, report_id)
         if mode == "grounded":
@@ -362,7 +399,7 @@ class IndustryAnalysisService:
                     network_added = len(
                         append_industry_network_search_sources(
                             self.db,
-                            row.id,
+                            self.get_or_create_source_library(row.industry_name).id,
                             response.items,
                             translator=translator if callable(translator) else None,
                             require_translation=False,
@@ -374,7 +411,9 @@ class IndustryAnalysisService:
                         network_error = network_error[:240] + "…"
                     logger.warning("行业分析网络补充检索失败: %s", exc)
 
-            authority_text, manifest = build_industry_authoritative_text(self.db, row.id)
+            library = self.get_or_create_source_library(row.industry_name)
+            replace_report_sources_from_library(self.db, row.id, library.id)
+            authority_text, manifest = build_industry_authoritative_text(self.db, library.id)
             if not manifest:
                 raise IndustryGenerationError(
                     "no_selected_sources",
@@ -581,6 +620,8 @@ class IndustryAnalysisService:
         row = self.get_report(report_id)
         if not row:
             return False
+        if row.is_source_library:
+            raise ValueError("行业资料库不能删除")
         if row.status == "running":
             raise ValueError("报告正在生成，暂不能删除")
         self.db.delete(row)
@@ -591,6 +632,7 @@ class IndustryAnalysisService:
     def list_reports(self, limit: int = 20) -> list[IndustryReport]:
         return (
             self.db.query(IndustryReport)
+            .filter(IndustryReport.is_source_library.is_(False))
             .order_by(IndustryReport.created_at.desc())
             .limit(limit)
             .all()
