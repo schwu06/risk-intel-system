@@ -17,9 +17,9 @@
   {% if latest_news.status == 'ready' %}
   <article class="ea-news-digest">
     {% if latest_news.highlights %}
-    <p class="ea-news-kicker">近三个月核心风险</p>
+    <p class="ea-news-kicker">近三个月汇总报告</p>
     {% else %}
-    <p class="ea-news-kicker">近三个月概况</p>
+    <p class="ea-news-kicker">近三个月汇总报告</p>
     {% endif %}
     {% if latest_news.summary %}
     <p class="ea-news-summary">{{ latest_news.summary }}</p>
@@ -54,4 +54,5 @@
     {% endif %}
   </div>
   {% endif %}
+
 </section>

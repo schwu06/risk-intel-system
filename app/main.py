@@ -498,6 +498,8 @@ def _entity_assessment_context(
     observed_source_count = 0
     unverified_time_count = 0
     profile = None
+    monitoring_focus: list[str] = []
+    alert_rules: list[dict[str, object]] = []
     if selected_entity:
         risks = (
             db.query(EntityRisk)
@@ -582,6 +584,13 @@ def _entity_assessment_context(
 
         if profile:
             entity_sources = [source.as_dict() for source in profile.sources if source.enabled]
+            # 修改记录：2026-08-25 | DingJiaye
+            # 监测清单只作后续核验方向展示，不改变既有风险等级或事件归属。
+            monitoring_focus = list(profile.monitoring_focus)
+            alert_rules = [
+                {"level": level, "items": list(items)}
+                for level, items in profile.alert_rules
+            ]
     else:
         display_risks = []
 
@@ -619,6 +628,8 @@ def _entity_assessment_context(
         "observed_source_count": observed_source_count,
         "unverified_time_count": unverified_time_count,
         "entity_sources": entity_sources,
+        "monitoring_focus": monitoring_focus,
+        "alert_rules": alert_rules,
         "latest_news": build_latest_news(
             risks=display_risks,
             report_date=rd,

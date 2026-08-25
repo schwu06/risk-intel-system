@@ -39,7 +39,7 @@ entities:
   - key: Godiva
     display_name: 歌帝梵 Godiva
     category: 重点关注
-    aliases: [Godiva Chocolatier, GODIVA, 歌帝梵, 歌帝梵（上海）食品商贸有限公司]
+    aliases: [Godiva Chocolatier, GODIVA, 歌帝梵, Godiva Japan, GODIVA Japan, ゴディバ ジャパン, 歌帝梵（上海）食品商贸有限公司]
     industry: 消费品 / 巧克力
     region: 全球
     executives: [Steve Lesnard, Salman Amin, Murat Ülker, Murat Ulker, Ali Ülker, Ali Ulker]
@@ -75,6 +75,18 @@ entities:
         relation: direct
         priority: 40
         query: 'site:godiva.com/blogs/media (Godiva OR GODIVA) (press OR recall OR store OR partnership)'
+      - label: Godiva Japan 公司信息与公告
+        url: https://www.godiva.co.jp/company/
+        source_type: official
+        relation: direct
+        priority: 44
+        query: 'site:godiva.co.jp/company (Godiva OR ゴディバ) (会社概要 OR お知らせ OR 資金 OR 役員)'
+      - label: Godiva Japan 官方消息
+        url: https://www.godiva.co.jp/
+        source_type: official
+        relation: direct
+        priority: 42
+        query: 'site:godiva.co.jp (ゴディバ OR Godiva) (お知らせ OR 店舗 OR 事業 OR 役員)'
       - label: Yıldız Holding Newsroom
         url: https://www.yildizholding.com.tr/en/press-room
         source_type: official
@@ -105,6 +117,35 @@ entities:
         relation: direct
         priority: 30
         query: '(Godiva OR "Godiva Chocolatier" OR 歌帝梵) (earnings OR lawsuit OR recall OR debt OR store OR supply chain)'
+      - label: MBK Partners 官方消息
+        url: https://www.mbkpartners.com/
+        source_type: official
+        relation: contextual
+        priority: 32
+        query: 'site:mbkpartners.com (Godiva OR Orchid OR ゴディバ) (investment OR exit OR sale OR portfolio)'
+      - label: MBK Partners 新闻媒体追踪
+        url: https://news.google.com/
+        source_type: media
+        relation: contextual
+        priority: 30
+        query: '(MBK Partners AND (Godiva OR Orchid OR ゴディバ)) (sale OR exit OR financing OR debt OR loan)'
+    # 修改记录：2026-08-25 | DingJiaye
+    # 以下为持续核验方向，不代表已发生股权出售、贷款展期或经营异常。
+    monitoring_focus:
+      - MBK Partners 对 Godiva Japan／Orchid 的持股处置、潜在买方、交易估值及融资安排
+      - Godiva Japan 银团贷款的到期、展期条件、担保安排及新增融资披露
+      - 主要融资银行、管理层、门店网络、生产物流及核心供应链的异常变化
+      - Godiva Japan 与 Orchid 的股权结构、董事及法定公告更新
+    alert_rules:
+      红色预警:
+        - 股东出售或质押客户公司股权，或控制权发生已公告变动
+        - 债券或贷款违约、银行停止新增融资、重大资产被冻结或查封
+        - 董事长、CEO、CFO 突发变更，重大诉讼、监管调查或评级大幅下调
+      橙色预警:
+        - 债务展期、重大资产出售、PE 股东启动退出或股东出现流动性压力
+        - 经营出现大额亏损、核心管理人员连续调整或评级展望转负
+      黄色关注:
+        - 一般管理层调整、新增融资、资产证券化、战略调整或门店业务重组
     # Godiva 为非上市品牌，未公开独立损益表、资产负债表或现金流量表，不能用 Kabutan 替代。
     # 以下均为其母公司 Yıldız Holding 合并口径，只作为可核验的经营及偿债背景。
     financial_source_page: https://www.medyamerkezi.yildizholding.com.tr/en/press-releases/yildiz-holding-continued-to-grow-through-production-exports-and-investment-in-2025-maintaining-financial-discipline-and-pursuing-its-focused-strategy
@@ -134,7 +175,31 @@ entities:
     aliases: [GLP, GLP Pte. Ltd., Global Logistic Properties, 普洛斯]
     industry: 物流地产 / 基础设施
     region: 亚太 / 全球
-    stock_code: '3281'
+    # GLP（普洛斯）是非上市私营集团；东京上市的 3281 是 GLP J-REIT，
+    # 并非 GLP 集团股票，因此不得以 3281 调用株探数据。
+    prefer_financial_pdf: true
+    # 修改记录：2026-08-25 | DingJiaye
+    # 2017 年 GLP 私有化财团的公开持有人：万科、厚朴、高瓴和中银集团投资。
+    # 中投公司与 CPP Investments 为可核验的历史合作/共同投资方，并非据此断言为当前 GLP 股东。
+    related_parties:
+      - name: 万科企业
+        aliases: [万科, China Vanke, Vanke Real Estate, 万科地产（香港）]
+        role: shareholder
+      - name: 厚朴投资
+        aliases: [厚朴, HOPU, Hopu Investments, Hopu Capital]
+        role: shareholder
+      - name: 高瓴资本
+        aliases: [高瓴, Hillhouse, Hillhouse Capital]
+        role: shareholder
+      - name: 中银集团投资
+        aliases: [中银投, BOCGI, Bank of China Group Investment]
+        role: shareholder
+      - name: 中国投资有限责任公司
+        aliases: [中投公司, CIC, China Investment Corporation]
+        role: counterparty
+      - name: CPP Investments
+        aliases: [CPPIB, Canada Pension Plan Investment Board, 加拿大养老金计划投资委员会]
+        role: counterparty
     # “最新消息”固定优先抓取这三条一手通道；页面实时刷新后会由 AI 汇总，
     # 同时把每条可追溯标题和链接显示在下方公开信息事件区。
     briefing_sources:
@@ -198,10 +263,170 @@ entities:
         source_type: official
         relation: direct
         priority: 42
+      # 以下为指定关联机构的双通道追踪：官网/披露优先，新闻媒体用于补缺。
+      - label: 万科官方披露
+        url: https://www.vanke.com/investor/data?newsid=3169&typeid=64
+        source_type: official
+        relation: contextual
+        priority: 34
+        query: 'site:vanke.com (万科 OR "China Vanke") (公告 OR 业绩 OR 融资 OR 债务 OR 评级)'
+      - label: 万科管理团队
+        url: https://www.vanke.com/about/leader
+        source_type: official
+        relation: contextual
+        priority: 35
+        query: 'site:vanke.com/about/leader (万科 OR "China Vanke")'
+      - label: 万科管理层完整名单
+        url: https://www.vanke.com/about/member
+        source_type: official
+        relation: contextual
+        priority: 34
+        query: 'site:vanke.com/about/member (万科 OR "China Vanke") (董事长 OR 总裁 OR 财务负责人)'
+      - label: 万科公司治理与董事履历
+        url: https://www.vanke.com/investor/data?newsid=3169&typeid=64
+        source_type: official
+        relation: contextual
+        priority: 38
+        query: 'site:vanke.com/investor/data?newsid=3169 (徐恩利 OR 黄力平 OR 黄宇 OR 董事会)'
+      - label: 黄宇任职信息
+        url: https://www.vanke.com/investor/data?newsid=3168
+        source_type: official
+        relation: contextual
+        priority: 37
+        query: 'site:vanke.com/investor/data?newsid=3168 黄宇'
+      - label: 万科集团官网
+        url: https://www.vanke.com/
+        source_type: official
+        relation: contextual
+        priority: 30
+        query: 'site:vanke.com 万科 (董事会 OR 管理层 OR 融资 OR 债务 OR 公告)'
+      - label: 万科新闻中心
+        url: https://www.vanke.com/news/
+        source_type: official
+        relation: contextual
+        priority: 31
+        query: 'site:vanke.com/news 万科 (董事会 OR 管理层 OR 融资 OR 债务)'
+      - label: 万科董事会换届公告转载
+        url: https://www.cfi.net.cn/p20260731001143.html
+        source_type: exchange
+        relation: contextual
+        priority: 39
+        query: '"万科" "第二十一届董事会第一次会议决议"'
+      - label: 万科董事会换届新闻报道
+        url: https://companies.caixin.com/2026-08-01/102470366.html
+        source_type: media
+        relation: contextual
+        priority: 33
+        query: '(万科 OR "China Vanke") (徐恩利 OR 黄宇) (董事长 OR 董事会换届)'
+      - label: 万科新闻媒体追踪
+        url: https://news.google.com/
+        source_type: media
+        relation: contextual
+        priority: 33
+        query: '(万科 OR "China Vanke") (融资 OR 债务 OR 业绩 OR 监管 OR 评级)'
+      - label: 厚朴投资官方消息
+        url: https://www.hopucap.com/
+        source_type: official
+        relation: contextual
+        priority: 32
+        query: 'site:hopucap.com (HOPU OR 厚朴) (news OR investment OR financing OR portfolio)'
+      - label: 厚朴投资新闻媒体追踪
+        url: https://news.google.com/
+        source_type: media
+        relation: contextual
+        priority: 31
+        query: '(HOPU OR 厚朴投资) (融资 OR 投资 OR 退出 OR 监管 OR 诉讼)'
+      - label: 高瓴资本官方消息
+        url: https://www.hillhouseinvestment.com/
+        source_type: official
+        relation: contextual
+        priority: 30
+        query: 'site:hillhouseinvestment.com (Hillhouse OR 高瓴) (news OR investment OR financing)'
+      - label: 高瓴资本新闻媒体追踪
+        url: https://news.google.com/
+        source_type: media
+        relation: contextual
+        priority: 29
+        query: '(Hillhouse OR 高瓴资本) (融资 OR 投资 OR 退出 OR 监管 OR 诉讼)'
+      - label: 中银集团投资官方披露
+        url: https://www.boc.cn/english/thisisboc/gls/ibc/
+        source_type: official
+        relation: contextual
+        priority: 28
+        query: 'site:boc.cn ("Bank of China Group Investment" OR BOCGI OR 中银集团投资) (公告 OR 投资 OR 融资 OR 业绩)'
+      - label: 中银集团投资新闻媒体追踪
+        url: https://news.google.com/
+        source_type: media
+        relation: contextual
+        priority: 27
+        query: '("Bank of China Group Investment" OR BOCGI OR 中银集团投资) (融资 OR 投资 OR 监管 OR 诉讼)'
+      - label: 中投公司官方披露
+        url: https://www.china-inv.cn/china_inv/Media/Press_Releases.shtml
+        source_type: official
+        relation: contextual
+        priority: 26
+        query: 'site:china-inv.cn (中投公司 OR "China Investment Corporation") (公告 OR 投资 OR 年报 OR 人事)'
+      - label: 中投公司新闻媒体追踪
+        url: https://news.google.com/
+        source_type: media
+        relation: contextual
+        priority: 25
+        query: '(中投公司 OR "China Investment Corporation" OR CIC) (投资 OR 监管 OR 年报 OR 人事)'
+      - label: CPP Investments 官方消息
+        url: https://www.cppinvestments.com/newsroom/
+        source_type: official
+        relation: contextual
+        priority: 24
+        query: 'site:cppinvestments.com ("CPP Investments" OR CPPIB) (news OR investment OR real estate OR logistics)'
+      - label: CPP Investments 新闻媒体追踪
+        url: https://news.google.com/
+        source_type: media
+        relation: contextual
+        priority: 23
+        query: '("CPP Investments" OR CPPIB) (investment OR real estate OR logistics OR financing OR regulation)'
+    # 修改记录：2026-08-25 | DingJiaye
+    # 将股东/合作方的新闻与 GLP 主体事件分开判定；仅在披露可核验的股权、融资、治理或控制权联系时，才提示可能传导。
+    monitoring_focus:
+      - 万科董事会与管理层变化、债务偿付或展期、国资股东资金支持及非核心资产处置
+      - 万科所涉 GLP 财团权益的出售、质押、股权转让、董事委派及控制权变化
+      - 厚朴、高瓴及中银集团投资的退出、质押、融资、监管或重大诉讼信号
+      - GLP 的股权结构、引入新投资人、IPO、再融资、债务到期及重大资产交易披露
+      - CIC 与 CPP Investments 的物流地产合作、共同投资或退出事项；未经公告不得认定为 GLP 当前股东变化
+    # 已核验基准事件：作为 GLP 关联方风险监测的起点，启动服务时按标题与来源链接去重入库。
+    # 修改记录：2026-08-25 | DingJiaye
+    verified_events:
+      - title: 万科完成第二十一届董事会换届，徐恩利任董事长、黄宇续任总裁
+        summary: 2026年7月31日，万科召开第二十一届董事会第一次会议，选举徐恩利为董事长，并续聘黄宇为总裁、韩慧华为财务负责人、田钧为董事会秘书。董事会成员及法定代表人同步调整。
+        impact_analysis: 本次为关联股东万科的治理层变动。公告未显示万科已处置其与 GLP 相关权益；但若后续配合非核心资产处置、债务展期或股权交易，可能通过股东结构、董事委派或资本运作安排向 GLP 传导，需持续核验。
+        source_name: 万科董事会换届公告转载
+        source_url: https://www.cfi.net.cn/p20260731001143.html
+        published_at: '2026-07-31T00:00:00+08:00'
+        related_company: 万科企业
+        risk_category: 供应链/关联方监控
+        risk_level: 中
+      - title: 万科官网更新公司治理资料，确认徐恩利任董事长、黄宇任董事及总裁
+        summary: 万科公司治理页面披露，徐恩利自2026年7月起任公司党委书记、董事长；黄宇自2026年7月起任公司党委副书记、董事、总裁。页面同时载列董事及高级管理人员履历。
+        impact_analysis: 官网资料确认治理架构已完成更新。该信息本身不等同于 GLP 股权、融资或经营变化；应结合万科债务安排、非核心资产处置及 GLP 财团权益的后续公告，判断是否存在实际传导。
+        source_name: 万科公司治理（官方）
+        source_url: https://www.vanke.com/investor/data?newsid=3169&typeid=64
+        published_at: '2026-08-01T00:00:00+08:00'
+        related_company: 万科企业
+        risk_category: 供应链/关联方监控
+        risk_level: 中
+    alert_rules:
+      红色预警:
+        - GLP 或其已核验控股股东发生股权出售、质押、控制权变动、债务违约或融资冻结
+        - GLP 董事长、CEO、CFO 突发变更，重大资产冻结、重大诉讼或监管调查
+      橙色预警:
+        - 重要股东启动退出、债务展期、重大资产出售、流动性压力或评级展望转负
+        - GLP 再融资条件显著收紧、核心管理层连续调整或重大项目出现实质延误
+      黄色关注:
+        - 一般董事会调整、新增融资、资产证券化、战略优化或尚未影响控制权的合作项目变化
     financial_source_page: https://www.glpjreit.com/ja/ir/library.html
     financial_pdf_hint: ir_library_term
-    financial_source_label: "GLP J-REIT 決算资料（整理自公开披露）"
-    financial_unit: "单位: 百万日元 (決算资料)"
+    financial_source_label: "GLP J-REIT 官方 IR 财务报告（非 GLP 集团独立三表）"
+    financial_unit: "单位：百万日元（GLP J-REIT）"
+    financial_context_notice: "GLP（普洛斯）为非上市私营集团，未见可核验的独立公开三表。以下损益、资产负债和现金流数据来自东京证券交易所上市的 GLP J-REIT（3281）官方 IR 披露，仅用于观察日本物流地产公开载体的经营与资本结构，不等同于 GLP 集团财务数据。"
     financial_sources:
       - statement: income
         label: 当期财务报告 PDF
