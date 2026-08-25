@@ -30,20 +30,6 @@
     } catch (e) { /* ignore */ }
   }
 
-  function reorderGroup(buttons, isActive) {
-    if (!buttons.length) return;
-    var parent = buttons[0].parentNode;
-    var selected = [];
-    var rest = [];
-    buttons.forEach(function (button) {
-      if (isActive(button)) selected.push(button);
-      else rest.push(button);
-    });
-    selected.concat(rest).forEach(function (button) {
-      parent.appendChild(button);
-    });
-  }
-
   function syncButtons() {
     riskButtons.forEach(function (button) {
       var selected = activeRiskTypes.has(button.getAttribute("data-news-risk"));
@@ -55,12 +41,6 @@
       button.classList.toggle("active", selected);
       button.setAttribute("aria-pressed", String(selected));
     });
-    reorderGroup(riskButtons, function (button) {
-      return activeRiskTypes.has(button.getAttribute("data-news-risk"));
-    });
-    reorderGroup(levelButtons, function (button) {
-      return activeLevels.has(button.getAttribute("data-news-level"));
-    });
     var count = activeRiskTypes.size + activeLevels.size + (searchTerm ? 1 : 0);
     if (filterCount) {
       filterCount.textContent = String(count);
@@ -69,35 +49,16 @@
     if (clearButton) clearButton.disabled = count === 0;
   }
 
-  function cardMatchesFilters(card) {
-    var tags = String(card.getAttribute("data-risk-tags") || "").split("|").filter(Boolean);
-    var riskMatches = !activeRiskTypes.size || tags.some(function (tag) { return activeRiskTypes.has(tag); });
-    var levelMatches = !activeLevels.size || activeLevels.has(card.getAttribute("data-risk-level") || "");
-    var searchText = String(card.getAttribute("data-news-search") || card.textContent || "").toLowerCase();
-    var searchMatches = !searchTerm || searchText.indexOf(searchTerm) !== -1;
-    return riskMatches && levelMatches && searchMatches;
-  }
-
-  function updateIndexCounts() {
-    var counts = {};
-    document.querySelectorAll("[data-risk-tags]").forEach(function (card) {
-      if (!cardMatchesFilters(card)) return;
-      var code = card.getAttribute("data-module");
-      if (!code) return;
-      counts[code] = (counts[code] || 0) + 1;
-    });
-    document.querySelectorAll("[data-module-count]").forEach(function (badge) {
-      var n = counts[badge.getAttribute("data-module-count")] || 0;
-      badge.textContent = String(n);
-      badge.setAttribute("aria-label", n + "条新闻");
-    });
-  }
-
   function apply() {
     var visible = 0;
     document.querySelectorAll("[data-risk-tags]").forEach(function (card) {
+      var tags = String(card.getAttribute("data-risk-tags") || "").split("|").filter(Boolean);
+      var riskMatches = !activeRiskTypes.size || tags.some(function (tag) { return activeRiskTypes.has(tag); });
+      var levelMatches = !activeLevels.size || activeLevels.has(card.getAttribute("data-risk-level") || "");
       var moduleMatches = card.getAttribute("data-module-match") !== "false";
-      card.hidden = !cardMatchesFilters(card) || !moduleMatches;
+      var searchText = String(card.getAttribute("data-news-search") || card.textContent || "").toLowerCase();
+      var searchMatches = !searchTerm || searchText.indexOf(searchTerm) !== -1;
+      card.hidden = !riskMatches || !levelMatches || !moduleMatches || !searchMatches;
       if (!card.hidden) visible += 1;
     });
 
@@ -126,7 +87,6 @@
     });
     var empty = document.getElementById("news-search-empty");
     if (empty) empty.hidden = !hasFilter || visible > 0;
-    updateIndexCounts();
   }
 
   window.applyNewsRiskFilter = apply;

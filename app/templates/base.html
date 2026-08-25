@@ -7,11 +7,23 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Abril+Fatface&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/dashboard.css?v=20260824-13" />
+  {#
+    UI 样式加载顺序（请保持）：
+    1. dashboard.css：历史兼容基础层；不再新增页面功能样式。
+    2. ui/*.css：按功能页拆分的可维护样式层，新改动写入对应文件。
+    修改规范见 docs/UI_STYLE_GUIDE.md。
+  #}
+  <link rel="stylesheet" href="/static/css/dashboard.css?v=20260825-1" />
+  <link rel="stylesheet" href="/static/css/ui/tokens.css?v=20260825-1" />
+  <link rel="stylesheet" href="/static/css/ui/layout.css?v=20260825-1" />
+  <link rel="stylesheet" href="/static/css/ui/daily-news.css?v=20260825-1" />
+  <link rel="stylesheet" href="/static/css/ui/entity-assessment.css?v=20260825-1" />
+  <link rel="stylesheet" href="/static/css/ui/industry-analysis.css?v=20260825-1" />
+  <link rel="stylesheet" href="/static/css/ui/intl-ratings.css?v=20260825-1" />
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
   {% block head_extra %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% if active_page in ('daily_news', 'news_7x24') %}daily-news-ui{% elif active_page == 'entity_assessment' %}entity-assessment-ui{% endif %}{% endblock %}">
+<body class="{% if active_page in ('daily_news', 'news_7x24') %}daily-news-ui{% endif %}">
   <header class="top-bar">
     <div class="brand">
       <span class="brand-title">RiskIntel</span>
@@ -38,7 +50,7 @@
     {% block source_panel %}{% endblock %}
   </div>
 
-  <script src="/static/js/dashboard.js?v=20260824-11"></script>
+  <script src="/static/js/dashboard.js?v=20260824-10"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

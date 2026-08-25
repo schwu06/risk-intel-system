@@ -1,0 +1,16 @@
+/*
+ * 新闻汇总（中东日报 / 大型企业 / 宏观市场）
+ * 负责：新闻卡片、风险标签、筛选、时间轴与空状态。
+ * 修改记录
+ * - 2026-08-25 | DingJiaye | 从 dashboard.css 迁移 筛选无匹配 提示
+ */
+
+.module-filter-empty {
+  margin: 0.5rem 0 0;
+  padding: 0.65rem 0.8rem;
+  border: 1px dashed var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-muted);
+  font-size: 13px;
+  background: #f8fafc;
+}
