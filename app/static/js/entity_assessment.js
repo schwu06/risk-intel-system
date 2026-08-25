@@ -79,6 +79,62 @@
     ? Array.prototype.slice.call(indexScroll.querySelectorAll(".entity-index-group"))
     : [];
   var collapsedKey = "entity-group-collapsed";
+  var scrollKey = "entity-index-scroll-top";
+  var lockScrollSave = false;
+
+  function saveIndexScroll() {
+    if (!indexScroll || lockScrollSave) return;
+    try {
+      window.sessionStorage.setItem(scrollKey, String(indexScroll.scrollTop));
+    } catch (e) {
+      /* ignore quota / private mode */
+    }
+  }
+
+  function scrollChildNearest(container, child) {
+    if (!container || !child) return;
+    var box = container.getBoundingClientRect();
+    var rect = child.getBoundingClientRect();
+    if (rect.top < box.top) {
+      container.scrollTop -= box.top - rect.top;
+    } else if (rect.bottom > box.bottom) {
+      container.scrollTop += rect.bottom - box.bottom;
+    }
+  }
+
+  function restoreIndexScroll() {
+    if (!indexScroll) return;
+    var y = NaN;
+    try {
+      y = parseInt(window.sessionStorage.getItem(scrollKey) || "", 10);
+    } catch (e) {
+      y = NaN;
+    }
+    if (!isNaN(y)) indexScroll.scrollTop = y;
+    scrollChildNearest(indexScroll, indexScroll.querySelector(".entity-link.active"));
+    saveIndexScroll();
+  }
+
+  // 展开/收起时保持分类标题的视觉位置，避免浏览器把焦点滚到索引顶部。
+  function keepGroupHeadPlace(group, fn) {
+    var head = group.querySelector(".entity-index-group-head");
+    if (!indexScroll || !head) {
+      fn();
+      return;
+    }
+    var top = head.getBoundingClientRect().top;
+    var y = indexScroll.scrollTop;
+    fn();
+    function restore() {
+      indexScroll.scrollTop = y + (head.getBoundingClientRect().top - top);
+      saveIndexScroll();
+    }
+    restore();
+    requestAnimationFrame(function () {
+      restore();
+      requestAnimationFrame(restore);
+    });
+  }
 
   function currentQuery() {
     return (searchInput && searchInput.value ? searchInput.value : "").trim().toLowerCase();
@@ -159,10 +215,15 @@
   groups.forEach(function (group) {
     var head = group.querySelector(".entity-index-group-head");
     if (!head) return;
+    head.addEventListener("mousedown", function (event) {
+      if (event.button === 0) event.preventDefault();
+    });
     head.addEventListener("click", function () {
       if (currentQuery()) return;
       var next = !group.classList.contains("is-collapsed");
-      setGroupCollapsed(group, next);
+      keepGroupHeadPlace(group, function () {
+        setGroupCollapsed(group, next);
+      });
       var key = group.getAttribute("data-group") || "";
       var collapsed = loadCollapsed().filter(function (item) { return item !== key; });
       if (next) collapsed.push(key);
@@ -180,8 +241,26 @@
       if (searchInput) searchInput.focus();
     });
   }
+  if (indexScroll) {
+    indexScroll.addEventListener("scroll", saveIndexScroll, { passive: true });
+    indexScroll.addEventListener("mousedown", function (event) {
+      var link = event.target.closest(".entity-link");
+      if (!link || event.button !== 0) return;
+      saveIndexScroll();
+      lockScrollSave = true;
+    }, true);
+    window.addEventListener("mouseup", function () {
+      window.setTimeout(function () { lockScrollSave = false; }, 0);
+    });
+    indexScroll.addEventListener("click", function (event) {
+      if (event.target.closest(".entity-link")) saveIndexScroll();
+    }, true);
+  }
+  window.addEventListener("pagehide", saveIndexScroll);
   if (groups.length) {
     applyEntitySearch();
+    restoreIndexScroll();
+    requestAnimationFrame(restoreIndexScroll);
   }
 
   function replacePanel(id, html) {

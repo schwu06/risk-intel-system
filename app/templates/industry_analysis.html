@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block head_extra %}
-  <link rel="stylesheet" href="/static/css/ui/industry-analysis.css?v=20260825-13" />
+  <link rel="stylesheet" href="/static/css/ui/industry-analysis.css?v=20260825-14" />
 {% endblock %}
 
 {% block title %}行业分析 — {{ app_name }}{% endblock %}
@@ -292,7 +292,9 @@
 {% endblock %}
 
 {% block source_panel_before_main %}
+{% if sector_selected %}
 {% include "partials/source_drawer.html" %}
+{% endif %}
 {% endblock %}
 
 {% block scripts %}

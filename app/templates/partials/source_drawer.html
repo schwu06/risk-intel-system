@@ -6,7 +6,8 @@
   class="sources-panel industry-sources-panel {% if not sector_ready %}sources-panel-no-sector{% endif %}"
   id="source-drawer"
   aria-label="数据源"
-  aria-hidden="false"
+  aria-hidden="{{ 'false' if sector_ready else 'true' }}"
+  {% if not sector_ready %}hidden{% endif %}
   data-source-scope="industry"
   data-report-id="{{ drawer_report_id or '' }}"
   data-report-status="{{ drawer_report_status or '' }}"

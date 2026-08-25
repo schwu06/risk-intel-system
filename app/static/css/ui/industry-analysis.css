@@ -10,6 +10,7 @@
  * - 2026-08-25 | wusicheng | 左侧栏改回贴边铺满，去掉外边距与圆角，避免悬浮在界面上。
  * - 2026-08-25 | wusicheng | 信息源栏收起后，展开按钮置顶，「信息源」三字竖排标在按钮下方。
  * - 2026-08-25 | wusicheng | 信息源栏去掉悬浮卡片边距与圆角，贴紧左侧栏铺满。
+ * - 2026-08-25 | wusicheng | 未选择行业时不展示信息源栏；信息源栏与左侧栏之间加浅灰分界线。
  */
 
 .app-shell > .industry-sidebar.page-rail {
@@ -48,6 +49,7 @@
   z-index: auto;
   background: #fbfcfe;
   border: none;
+  border-left: 1px solid var(--ui-border, #d8e1eb);
   border-right: 1px solid var(--ui-border, var(--border));
   border-radius: 0;
   box-shadow: none;
@@ -59,9 +61,13 @@
 }
 
 .industry-sources-panel {
-  border-left: 0;
+  border-left: 1px solid var(--ui-border, #d8e1eb);
   border-right: 1px solid var(--ui-border, var(--border));
   background: #fbfcfe;
+}
+
+.app-shell > .industry-sources-panel.sources-panel-no-sector {
+  display: none;
 }
 
 .manual-source-list-wrap {

@@ -78,6 +78,44 @@
     <p class="hint" id="pipeline-msg">异步采集当前主体近三个月公开信源；空结果不会生成演示数据。</p>
     <p class="hint" id="export-msg" hidden></p>
   </div>
+  {# 侧栏 DOM 就绪后立刻恢复折叠与滚动，避免切主体时先闪到索引顶部。 #}
+  <script>
+    (function restoreEntityIndexPlace() {
+      var el = document.getElementById("entity-index-scroll");
+      if (!el) return;
+      var collapsed = [];
+      try {
+        var parsed = JSON.parse(window.localStorage.getItem("entity-group-collapsed") || "[]");
+        if (Array.isArray(parsed)) collapsed = parsed;
+      } catch (e) {}
+      var groups = el.querySelectorAll(".entity-index-group");
+      var activeGroup = null;
+      for (var i = 0; i < groups.length; i += 1) {
+        if (groups[i].querySelector(".entity-link.active")) {
+          activeGroup = groups[i];
+          break;
+        }
+      }
+      for (var j = 0; j < groups.length; j += 1) {
+        var group = groups[j];
+        var key = group.getAttribute("data-group") || "";
+        var shouldCollapse = collapsed.indexOf(key) !== -1 && group !== activeGroup;
+        group.classList.toggle("is-collapsed", shouldCollapse);
+        var head = group.querySelector(".entity-index-group-head");
+        if (head) {
+          head.classList.toggle("is-collapsed", shouldCollapse);
+          head.setAttribute("aria-expanded", shouldCollapse ? "false" : "true");
+        }
+      }
+      try {
+        var y = parseInt(window.sessionStorage.getItem("entity-index-scroll-top") || "", 10);
+        if (!isNaN(y)) {
+          el.scrollTop = y;
+          requestAnimationFrame(function () { el.scrollTop = y; });
+        }
+      } catch (e) {}
+    })();
+  </script>
 </aside>
 {% endblock %}
 
@@ -265,7 +303,7 @@
   window.ENTITY_ID = {% if selected_entity %}{{ selected_entity.id }}{% else %}null{% endif %};
   window.ENTITY_NAME = {% if selected_entity %}{{ (selected_entity.display_name or selected_entity.name)|tojson }}{% else %}null{% endif %};
 </script>
-<script src="/static/js/entity_assessment.js?v=20260813-5"></script>
+<script src="/static/js/entity_assessment.js?v=20260825-6"></script>
 <script src="/static/js/entity_financial_charts.js?v=20260825-1"></script>
 <script>
   (function initRiskTabs() {

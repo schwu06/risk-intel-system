@@ -4,9 +4,25 @@
  * 修改记录
  * - 2026-08-25 | DingJiaye | 新建主体评估独立样式入口。
  * - 2026-08-25 | DingJiaye | 增加非上市主体替代财务口径提示与 PDF 网络失败说明。
+ * - 2026-08-25 | 主体索引展开时只在分类下方增减高度，避免滚动锚定把列表顶到顶部。
  *
  * 新增主体评估卡片、事件、财务区域样式请写入此文件。
  */
+
+/* 折叠用裁切高度而不是 display:none，列表只在分类标题下方展开。 */
+.entity-sidebar .entity-index-scroll {
+  overflow-anchor: none;
+}
+
+.entity-sidebar .entity-index-group.is-collapsed > .entity-list {
+  display: flex;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
 
 /* 非上市主体的替代公开披露说明；避免将关联上市载体误读为主体独立财报。 */
 .fin-disclosure-note {
