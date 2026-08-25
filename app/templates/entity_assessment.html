@@ -1,7 +1,5 @@
 {% extends "base.html" %}
 
-{% block body_class %}entity-assessment-ui{% endblock %}
-
 {% block title %}主体评估 — {{ app_name }}{% endblock %}
 
 {% block page_sidebar %}
@@ -17,6 +15,7 @@
     <button type="button" class="entity-search-clear" id="entity-search-clear" title="清空搜索" aria-label="清空搜索" hidden>×</button>
     <span aria-hidden="true">⌕</span>
   </label>
+  <h2 class="daily-index-title">索引</h2>
   <div class="daily-index-list entity-index" id="entity-index">
     <div class="entity-index-scroll" id="entity-index-scroll">
       {% for group in entity_groups %}
@@ -28,13 +27,13 @@
       >
         <button
           type="button"
-          class="daily-index-title entity-index-group-head"
+          class="entity-index-group-head"
           aria-expanded="true"
           aria-controls="entity-group-list-{{ group.key }}"
         >
-          <span class="daily-index-chevron entity-index-chevron" aria-hidden="true"></span>
+          <span class="entity-index-chevron" aria-hidden="true"></span>
           <span class="entity-index-group-title">{{ group.label }}</span>
-          <span class="entity-index-count" data-group-count="{{ group.key }}" aria-label="{{ group.entities|length }}个主体">{{ group.entities|length }}</span>
+          <span class="entity-index-count">{{ group.entities|length }}</span>
         </button>
         <ul class="entity-list" id="entity-group-list-{{ group.key }}">
           {% for ent in group.entities %}
@@ -68,15 +67,15 @@
     <div class="daily-sidebar-actions">
       <button
         type="button"
-        class="sidebar-action-primary daily-export"
+        class="sidebar-action-primary"
         id="btn-export-entity-docx"
         {% if not selected_entity %}disabled{% endif %}
         data-entity-id="{{ selected_entity.id if selected_entity else '' }}"
         data-report-date="{{ report_date }}"
-      >导出 PDF</button>
-      <button type="button" class="sidebar-action-secondary daily-refresh" id="btn-run-pipeline">刷新资讯</button>
+      >导出公开信息简报</button>
+      <button type="button" class="sidebar-action-secondary" id="btn-run-pipeline">采集近三个月资讯</button>
     </div>
-    <p class="hint" id="pipeline-msg"></p>
+    <p class="hint" id="pipeline-msg">异步采集当前主体近三个月公开信源；空结果不会生成演示数据。</p>
     <p class="hint" id="export-msg" hidden></p>
   </div>
 </aside>
@@ -85,37 +84,55 @@
 {% block content %}
 <main class="layout content-shell" data-modules="{{ module_codes_csv }}">
   <section class="content entity-assessment-view">
-    <div class="entity-page-sticky">
-      <div class="entity-sticky-row">
-        {% if selected_entity %}
-        <header class="entity-header">
-          <div class="entity-header-main">
-            <h1 class="entity-title">{{ selected_entity.display_name or selected_entity.name }}</h1>
-            <div class="entity-header-tags">
-              {% if selected_entity.industry %}
-              <span class="industry-tag">{{ selected_entity.industry }}</span>
-              {% endif %}
-              {% if selected_entity.region %}
-              <span class="region-tag">{{ selected_entity.region }}</span>
-              {% endif %}
-              <span class="credit-status-badge credit-badge-{{ selected_entity.credit_level }}">
-                {{ selected_entity.credit_level }}
-              </span>
-            </div>
-          </div>
-        </header>
-        {% endif %}
-        <form class="filter-form entity-date-filter" method="get" action="{{ page_path }}">
-          <label for="report_date">报告日期</label>
-          <input type="date" id="report_date" name="report_date" value="{{ report_date }}" />
-          {% if selected_entity %}
-          <input type="hidden" name="entity_id" value="{{ selected_entity.id }}" />
-          {% endif %}
-          <button type="submit">查询</button>
-        </form>
-      </div>
-    </div>
+    <form class="filter-form entity-date-filter" method="get" action="{{ page_path }}">
+      <label for="report_date">报告日期</label>
+      <input type="date" id="report_date" name="report_date" value="{{ report_date }}" />
+      {% if selected_entity %}
+      <input type="hidden" name="entity_id" value="{{ selected_entity.id }}" />
+      {% endif %}
+      <button type="submit">查询</button>
+    </form>
     {% if selected_entity %}
+    <header class="entity-header">
+      <div class="entity-header-main">
+        <div class="entity-title-row">
+          <h1 class="entity-title">{{ selected_entity.display_name or selected_entity.name }}</h1>
+          {% if monitoring_focus or alert_rules %}
+          {# 修改记录：2026-08-25 | DingJiaye。监测清单收纳为标题角落的悬浮备注。 #}
+          <span class="entity-monitoring-note" tabindex="0" aria-label="查看重点监测事项与触发预警条件">
+            <span class="entity-monitoring-note-icon" aria-hidden="true">i</span>
+            <span class="entity-monitoring-tooltip" role="tooltip">
+              {% if monitoring_focus %}
+              <strong>重点监测事项</strong>
+              <ul>
+                {% for item in monitoring_focus %}<li>{{ item }}</li>{% endfor %}
+              </ul>
+              {% endif %}
+              {% if alert_rules %}
+              <strong>触发预警条件</strong>
+              <div class="entity-monitoring-rules">
+                {% for rule in alert_rules %}
+                <p><b>{{ rule.level }}</b>{{ rule['items']|join('；') }}</p>
+                {% endfor %}
+              </div>
+              {% endif %}
+            </span>
+          </span>
+          {% endif %}
+        </div>
+        <div class="entity-header-tags">
+          {% if selected_entity.industry %}
+          <span class="industry-tag">{{ selected_entity.industry }}</span>
+          {% endif %}
+          {% if selected_entity.region %}
+          <span class="region-tag">{{ selected_entity.region }}</span>
+          {% endif %}
+          <span class="credit-status-badge credit-badge-{{ selected_entity.credit_level }}">
+            {{ selected_entity.credit_level }}
+          </span>
+        </div>
+      </div>
+    </header>
 
     {# 1. 最新消息：近三个月变动与核心风险分析；具体新闻见公开信息事件 #}
     {% include "entity_assessment_news_panel.html" %}
@@ -127,7 +144,14 @@
     <section class="ea-panel" aria-labelledby="risk-panel-title">
       <div class="ea-panel-head">
         <h2 id="risk-panel-title">近三个月公开信息事件{% if risks %}（{{ risks|length }}）{% endif %}</h2>
-        <span class="ea-panel-count">{{ news_lookback_start }} 至 {{ report_date }}{% if unverified_time_count %} · {{ unverified_time_count }} 条发布时间待核验{% endif %}</span>
+        <div class="ea-event-tools">
+          <label class="ea-event-search" for="entity-event-search">
+            <span class="sr-only">搜索公开信息事件</span>
+            <input id="entity-event-search" type="search" placeholder="搜索标题、内容或来源" autocomplete="off" />
+            <span aria-hidden="true">⌕</span>
+          </label>
+          <span class="ea-panel-count">{{ news_lookback_start }} 至 {{ report_date }}{% if unverified_time_count %} · {{ unverified_time_count }} 条发布时间待核验{% endif %}</span>
+        </div>
       </div>
 
       <div class="risk-tabs" role="tablist" aria-label="风险事件分类">
@@ -145,6 +169,7 @@
           class="risk-event-card level-border-{{ e.risk_level }}"
           data-category="{{ e.risk_category or '' }}"
           data-tab="{{ e.risk_tab or '' }}"
+          data-search="{{ ((e.display_title or e.title or '') ~ ' ' ~ (e.display_overview or '') ~ ' ' ~ (e.source_name or '') ~ ' ' ~ (e.related_company or ''))|lower }}"
         >
           <div class="risk-event-top">
             <span class="risk-level-tag risk-tag-{{ e.risk_level }}">信号 {{ e.risk_level }}</span>
@@ -152,8 +177,6 @@
             {% if e.risk_category %}
             <span class="risk-category-chip">{{ e.risk_category }}</span>
             {% endif %}
-            {% if e.provenance == 'degraded' %}<span class="risk-provenance degraded">降级摘要</span>{% endif %}
-            {% if e.relevance == 'contextual' %}<span class="risk-provenance contextual">背景信息</span>{% endif %}
             {% if not e.published_at %}<span class="risk-provenance unverified">时间待核验</span>{% endif %}
             <time class="risk-event-time">{% if e.published_at %}源发布时间 {{ e.published_at }}{% else %}报告日 {{ e.report_date }}{% endif %}</time>
           </div>
@@ -193,7 +216,7 @@
           </svg>
         </div>
         <p class="ea-empty-title">该主体近三个月暂无已核验来源事件</p>
-        <p class="ea-empty-desc">{% if recent_risks_count %}观察期内另有记录未纳入展示（已排除背景信息等）。可调整报告日期，或点击左侧「刷新资讯」补充。{% else %}已配置 {{ entity_sources|length }} 个公开信息源，可点击左侧「刷新资讯」获取真实结果。{% endif %}</p>
+        <p class="ea-empty-desc">{% if recent_risks_count %}观察期内另有记录未纳入展示（已排除背景信息等）。可调整报告日期，或点击左侧「采集近三个月资讯」补充。{% else %}已配置 {{ entity_sources|length }} 个公开信息源，可点击左侧「采集近三个月资讯」获取真实结果。{% endif %}</p>
       </div>
       <div class="risk-event-list" id="risk-event-list" hidden></div>
       {% endif %}
@@ -242,11 +265,14 @@
   window.ENTITY_ID = {% if selected_entity %}{{ selected_entity.id }}{% else %}null{% endif %};
   window.ENTITY_NAME = {% if selected_entity %}{{ (selected_entity.display_name or selected_entity.name)|tojson }}{% else %}null{% endif %};
 </script>
-<script src="/static/js/entity_assessment.js?v=20260825-2"></script>
+<script src="/static/js/entity_assessment.js?v=20260813-5"></script>
+<script src="/static/js/entity_financial_charts.js?v=20260825-1"></script>
 <script>
   (function initRiskTabs() {
     var tabs = document.querySelectorAll(".risk-tabs:not(.fin-tabs) .risk-tab");
     var emptyEl = document.getElementById("risk-tab-empty");
+    var searchInput = document.getElementById("entity-event-search");
+    var activeTab = "all";
     if (!tabs.length) return;
 
     var MATCHERS = {
@@ -256,20 +282,25 @@
       supply: /供应链|关联|上下游|合作方|物流/
     };
 
-    function cardMatches(card, key) {
-      if (key === "all") return true;
+    function cardMatches(card, key, keyword) {
+      var categoryMatched = key === "all";
       var tab = card.getAttribute("data-tab") || "";
-      if (tab && tab === key) return true;
+      if (tab && tab === key) categoryMatched = true;
       var cat = card.getAttribute("data-category") || "";
       var re = MATCHERS[key];
-      return re ? re.test(cat) : false;
+      if (re && re.test(cat)) categoryMatched = true;
+      if (!categoryMatched) return false;
+      if (!keyword) return true;
+      return (card.getAttribute("data-search") || "").toLowerCase().indexOf(keyword) !== -1;
     }
 
-    function applyTab(key) {
+    // 修改记录：2026-08-25 | DingJiaye。分类与关键词共同过滤已加载的公开事件。
+    function applyFilters() {
       var cards = document.querySelectorAll(".risk-event-card");
       var visible = 0;
+      var keyword = searchInput ? searchInput.value.trim().toLowerCase() : "";
       cards.forEach(function (card) {
-        var show = cardMatches(card, key);
+        var show = cardMatches(card, activeTab, keyword);
         card.classList.toggle("hidden", !show);
         card.hidden = !show;
         if (show) visible += 1;
@@ -284,15 +315,24 @@
     tabs.forEach(function (tab) {
       tab.addEventListener("click", function () {
         var key = tab.getAttribute("data-tab") || "all";
+        activeTab = key;
         tabs.forEach(function (t) {
           var on = t === tab;
           t.classList.toggle("active", on);
           t.setAttribute("aria-selected", on ? "true" : "false");
         });
-        applyTab(key);
+        applyFilters();
       });
     });
-    window.applyEntityRiskTab = applyTab;
+    if (searchInput) {
+      searchInput.addEventListener("input", applyFilters);
+      searchInput.addEventListener("search", applyFilters);
+    }
+    applyFilters();
+    window.applyEntityRiskTab = function (key) {
+      activeTab = key || "all";
+      applyFilters();
+    };
   })();
 </script>
 {% endblock %}

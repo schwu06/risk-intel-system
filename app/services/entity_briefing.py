@@ -632,6 +632,9 @@ def _financial_source_page(
     *,
     latest_pdf_url: str | None = None,
 ) -> str | None:
+    # 非上市主体采用指定的官方 IR 口径时，不能因关联证券代码错误跳转到株探。
+    if profile and profile.prefer_financial_pdf and profile.financial_source_page:
+        return profile.financial_source_page
     kabutan = kabutan_finance_url(profile)
     if kabutan:
         return kabutan
@@ -700,7 +703,18 @@ def build_financials_panel(profile: EntityProfile | None, *, live: bool = True) 
         kabutan_ok=bool(scraped.ok),
         pdf_rows_used=used_pdf_rows,
     )
-    context_metrics = [item.as_dict() for item in (profile.financial_context_metrics if profile else ())]
+    # 修改记录：2026-08-25 | DingJiaye
+    # 非上市主体优先展示官方披露的“本次 vs 上次”可比指标，不将关联集团或 J-REIT
+    # 的数据伪装成被监测品牌/集团自己的三张财务报表。
+    context_metrics = [
+        _with_financial_comparison(item.as_dict())
+        for item in (profile.financial_context_metrics if profile else ())
+    ]
+    chart_metrics = [
+        item
+        for item in context_metrics
+        if item.get("current_numeric") is not None and item.get("previous_numeric") is not None
+    ]
     return {
         "status": "linked" if has_sources else "pending",
         "period_label": "通期",
@@ -717,5 +731,37 @@ def build_financials_panel(profile: EntityProfile | None, *, live: bool = True) 
         "context_notice": (
             profile.financial_context_notice if profile and profile.financial_context_notice else None
         ),
+        "comparison_title": (
+            profile.financial_comparison_title if profile and profile.financial_comparison_title else None
+        ),
+        "comparison_summary": (
+            profile.financial_comparison_summary if profile and profile.financial_comparison_summary else None
+        ),
+        "chart_metrics": chart_metrics,
         "statements": statements,
     }
+
+
+def _with_financial_comparison(metric: dict[str, Any]) -> dict[str, Any]:
+    """补齐同口径披露间的变动文本；只对明确提供的数值计算。"""
+    current = metric.get("current_numeric")
+    previous = metric.get("previous_numeric")
+    if current is None or previous is None:
+        metric["change_display"] = None
+        metric["change_direction"] = None
+        return metric
+    try:
+        delta = float(current) - float(previous)
+        pct = (delta / abs(float(previous)) * 100) if float(previous) else None
+    except (TypeError, ValueError, ZeroDivisionError):
+        metric["change_display"] = None
+        metric["change_direction"] = None
+        return metric
+    sign = "+" if delta > 0 else ""
+    if pct is None:
+        display = f"较上次 {sign}{delta:,.1f}"
+    else:
+        display = f"较上次 {sign}{pct:.1f}%"
+    metric["change_display"] = display
+    metric["change_direction"] = "up" if delta > 0 else "down" if delta < 0 else "flat"
+    return metric

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -80,7 +80,68 @@ def seed_default_entities(db: Session) -> int:
         created += 1
     _sync_extra_display_names(db)
     db.commit()
+    # 修改记录：2026-08-25 | DingJiaye
+    # 仅写入配置中附有发布日期和来源链接的已核验基准事件；重复启动不会重复插入。
+    _seed_configured_entity_events(db, profiles)
     return created
+
+
+def _seed_configured_entity_events(db: Session, profiles: tuple[object, ...]) -> int:
+    """把目录内的可追溯历史事件写入主体事件表，供首次打开页面时直接展示。"""
+    inserted = 0
+    for profile in profiles:
+        events = getattr(profile, "verified_events", ()) or ()
+        if not events:
+            continue
+        entity = db.query(TargetEntity).filter(TargetEntity.name == profile.key).first()
+        if entity is None:
+            continue
+        for event in events:
+            exists = (
+                db.query(EntityRisk.id)
+                .filter(
+                    EntityRisk.entity_id == entity.id,
+                    EntityRisk.title == event.title,
+                    EntityRisk.source_url == event.source_url,
+                )
+                .first()
+            )
+            if exists:
+                continue
+            try:
+                published_at = datetime.fromisoformat(event.published_at.replace("Z", "+00:00"))
+            except ValueError:
+                try:
+                    published_at = datetime.combine(date.fromisoformat(event.published_at), datetime.min.time())
+                except ValueError:
+                    continue
+            db.add(
+                EntityRisk(
+                    entity_id=entity.id,
+                    report_date=published_at.date(),
+                    title=event.title,
+                    risk_category=event.risk_category,
+                    risk_level=event.risk_level if event.risk_level in {"低", "中", "高", "极高"} else "中",
+                    summary=event.summary,
+                    impact_analysis=event.impact_analysis,
+                    source_url=event.source_url,
+                    source_name=event.source_name,
+                    published_at=published_at,
+                    related_company=event.related_company,
+                    provenance="real",
+                    relevance="contextual",
+                    news_importance="中",
+                    sentiment_direction="neutral",
+                    credit_impact="low",
+                    confidence=0.9,
+                    review_status="verified",
+                    rule_version="configured-event-v1",
+                )
+            )
+            inserted += 1
+    if inserted:
+        db.commit()
+    return inserted
 
 
 def _sync_extra_display_names(db: Session) -> None:

@@ -279,6 +279,34 @@ class DeepSeekAnalyzer:
         )
         return self._chat_json_object(INDUSTRY_ANALYSIS_PROMPT, user_content)
 
+    def summarize_daily_news(self, facts: list[dict[str, Any]], report_date: str) -> str:
+        """按已入库新闻生成日报汇总；调用方负责缓存与无密钥回退。"""
+        system = (
+            "你是银行风险情报日报分析师。仅根据给定新闻事实，用简体中文输出一份"
+            "180至320字的日报汇总。依次写：当日整体动态、各板块的关键驱动、"
+            "需要关注的风险传导。不得编造事实、数字或来源；不使用标题式罗列、"
+            "不写投资建议或授信结论。"
+        )
+        content = json.dumps(
+            {"报告日": report_date, "新闻事实": facts}, ensure_ascii=False
+        )
+        return self._request_chat(system, content).strip()
+
+    def summarize_daily_news_sections(self, facts: list[dict[str, Any]], report_date: str) -> dict[str, Any]:
+        """将日报按 B/C/D 三板块输出，供页面分栏展示。"""
+        system = (
+            "你是银行风险情报日报分析师。仅根据给定新闻事实，返回严格 JSON 对象："
+            '{"overview":"...","sections":[{"code":"B","summary":"...","important_points":["..."]}]}。'
+            "overview 为100至160字的整体结论。sections 必须按输入中出现的 B、C、D 分别输出，"
+            "每个 summary 为80至150字，说明该板块最重要的已披露事实及可能传导；"
+            "important_points 最多3条，只保留需要优先关注的具体事项。没有新闻的板块如实写‘当日暂无已入库资讯’。"
+            "不得编造事实、数字、来源或未披露的因果，不得给出投资建议或授信结论。"
+        )
+        content = json.dumps(
+            {"报告日": report_date, "新闻事实": facts}, ensure_ascii=False
+        )
+        return self._chat_json_object(system, content)
+
     def revise_industry_report(
         self, report: dict[str, Any], instruction: str, industry_name: str,
     ) -> dict[str, Any]:

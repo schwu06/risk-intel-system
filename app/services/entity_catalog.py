@@ -109,6 +109,15 @@ class FinancialContextMetric:
     as_of: str | None = None
     note: str | None = None
     url: str | None = None
+    # 修改记录：2026-08-25 | DingJiaye
+    # 同源、同口径的上次披露数值，用于财务面板的披露对比与图表；无可比口径时保持为空。
+    previous_value: str | None = None
+    previous_as_of: str | None = None
+    previous_url: str | None = None
+    current_numeric: float | None = None
+    previous_numeric: float | None = None
+    chart_group: str | None = None
+    comparison_note: str | None = None
 
     def as_dict(self) -> dict[str, str | None]:
         return {
@@ -117,6 +126,13 @@ class FinancialContextMetric:
             "as_of": self.as_of,
             "note": self.note,
             "url": self.url,
+            "previous_value": self.previous_value,
+            "previous_as_of": self.previous_as_of,
+            "previous_url": self.previous_url,
+            "current_numeric": self.current_numeric,
+            "previous_numeric": self.previous_numeric,
+            "chart_group": self.chart_group,
+            "comparison_note": self.comparison_note,
         }
 
 
@@ -162,6 +178,21 @@ class RelatedPartySpec:
 
 
 @dataclass(frozen=True)
+class VerifiedEntityEvent:
+    """配置内、可追溯的历史事件；启动时仅按来源链接去重入库一次。"""
+
+    title: str
+    summary: str
+    source_name: str
+    source_url: str
+    published_at: str
+    risk_category: str = "供应链/关联方监控"
+    risk_level: str = "中"
+    related_company: str | None = None
+    impact_analysis: str | None = None
+
+
+@dataclass(frozen=True)
 class EntityProfile:
     key: str
     display_name: str
@@ -179,11 +210,18 @@ class EntityProfile:
     financial_pdf_hint: str | None = None
     financial_context_metrics: tuple[FinancialContextMetric, ...] = field(default_factory=tuple)
     financial_context_notice: str | None = None
+    financial_comparison_title: str | None = None
+    financial_comparison_summary: str | None = None
     # 某些主体（如 GLP）虽有证券代码，但页面财务口径指定为其官方 IR 报告。
     # 此时不应以第三方株探数据覆盖官方来源。
     prefer_financial_pdf: bool = False
     related_parties: tuple[RelatedPartySpec, ...] = field(default_factory=tuple)
     executives: tuple[str, ...] = field(default_factory=tuple)
+    # 修改记录：2026-08-25 | DingJiaye
+    # 仅保存人工复核所需的持续监测清单；它们不是已发生风险或事实结论。
+    monitoring_focus: tuple[str, ...] = field(default_factory=tuple)
+    alert_rules: tuple[tuple[str, tuple[str, ...]], ...] = field(default_factory=tuple)
+    verified_events: tuple[VerifiedEntityEvent, ...] = field(default_factory=tuple)
 
     @property
     def all_names(self) -> tuple[str, ...]:
@@ -379,7 +417,30 @@ def _parse_financial_context_metric(row: dict[str, Any]) -> FinancialContextMetr
         as_of=str(row["as_of"]).strip() if row.get("as_of") else None,
         note=str(row["note"]).strip() if row.get("note") else None,
         url=str(row["url"]).strip() if row.get("url") else None,
+        previous_value=(
+            str(row["previous_value"]).strip() if row.get("previous_value") else None
+        ),
+        previous_as_of=(
+            str(row["previous_as_of"]).strip() if row.get("previous_as_of") else None
+        ),
+        previous_url=str(row["previous_url"]).strip() if row.get("previous_url") else None,
+        current_numeric=_as_optional_float(row.get("current_numeric")),
+        previous_numeric=_as_optional_float(row.get("previous_numeric")),
+        chart_group=str(row["chart_group"]).strip() if row.get("chart_group") else None,
+        comparison_note=(
+            str(row["comparison_note"]).strip() if row.get("comparison_note") else None
+        ),
     )
+
+
+def _as_optional_float(value: Any) -> float | None:
+    """配置中的图表数值仅接受可安全转换的数字，展示文本仍保留原始口径。"""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_related_party(row: dict[str, Any]) -> RelatedPartySpec | None:
@@ -397,6 +458,30 @@ def _parse_related_party(row: dict[str, Any]) -> RelatedPartySpec | None:
         if str(alias).strip()
     )
     return RelatedPartySpec(name=name, aliases=aliases, role=role)
+
+
+def _parse_verified_event(row: dict[str, Any]) -> VerifiedEntityEvent | None:
+    """读取可追溯的基准事件，缺少日期或来源链接时不入库。"""
+    if not isinstance(row, dict):
+        return None
+    title = str(row.get("title") or "").strip()
+    summary = str(row.get("summary") or "").strip()
+    source_name = str(row.get("source_name") or "").strip()
+    source_url = str(row.get("source_url") or "").strip()
+    published_at = str(row.get("published_at") or "").strip()
+    if not all((title, summary, source_name, source_url, published_at)):
+        return None
+    return VerifiedEntityEvent(
+        title=title,
+        summary=summary,
+        source_name=source_name,
+        source_url=source_url,
+        published_at=published_at,
+        risk_category=str(row.get("risk_category") or "供应链/关联方监控").strip(),
+        risk_level=str(row.get("risk_level") or "中").strip(),
+        related_company=str(row["related_company"]).strip() if row.get("related_company") else None,
+        impact_analysis=str(row["impact_analysis"]).strip() if row.get("impact_analysis") else None,
+    )
 
 
 def _parse_source(row: dict[str, Any]) -> EntitySourceSpec | None:
@@ -493,11 +578,33 @@ def _parse_catalog(data: dict[str, Any]) -> EntityCatalog:
             )
             if party is not None
         )
+        verified_events = tuple(
+            event
+            for event in (
+                _parse_verified_event(item) for item in (row.get("verified_events") or [])
+            )
+            if event is not None
+        )
         executives = tuple(
             str(item).strip()
             for item in (row.get("executives") or [])
             if str(item).strip()
         )
+        monitoring_focus = tuple(
+            str(item).strip()
+            for item in (row.get("monitoring_focus") or [])
+            if str(item).strip()
+        )
+        alert_rules: list[tuple[str, tuple[str, ...]]] = []
+        raw_alert_rules = row.get("alert_rules") or {}
+        if isinstance(raw_alert_rules, dict):
+            for level in ("红色预警", "橙色预警", "黄色关注"):
+                items = raw_alert_rules.get(level) or []
+                if isinstance(items, str):
+                    items = [items]
+                normalized = tuple(str(item).strip() for item in items if str(item).strip())
+                if normalized:
+                    alert_rules.append((level, normalized))
         profiles.append(
             EntityProfile(
                 key=key,
@@ -516,6 +623,9 @@ def _parse_catalog(data: dict[str, Any]) -> EntityCatalog:
                 financial_sources=financial_sources,
                 related_parties=related_parties,
                 executives=executives,
+                monitoring_focus=monitoring_focus,
+                alert_rules=tuple(alert_rules),
+                verified_events=verified_events,
                 financial_source_page=(
                     str(row["financial_source_page"]).strip()
                     if row.get("financial_source_page")
@@ -538,6 +648,16 @@ def _parse_catalog(data: dict[str, Any]) -> EntityCatalog:
                 financial_context_notice=(
                     str(row["financial_context_notice"]).strip()
                     if row.get("financial_context_notice")
+                    else None
+                ),
+                financial_comparison_title=(
+                    str(row["financial_comparison_title"]).strip()
+                    if row.get("financial_comparison_title")
+                    else None
+                ),
+                financial_comparison_summary=(
+                    str(row["financial_comparison_summary"]).strip()
+                    if row.get("financial_comparison_summary")
                     else None
                 ),
                 prefer_financial_pdf=bool(row.get("prefer_financial_pdf", False)),

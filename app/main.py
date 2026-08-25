@@ -58,6 +58,7 @@ from app.services.entity_briefing import (
 from app.services.entity_relevance import classify_risk_tab, is_monitored_public_event
 from app.services.risk_reasoning import build_risk_reasoning
 from app.services.news_quality import is_substantive_news_item
+from app.services.daily_news_summary import build_daily_news_summary
 from app.services.industry_analysis import IndustryAnalysisService, source_list_html
 from app.services.industry_migration import migrate_main_db_industry_reports
 from app.services.news_section_router import item_in_module_scope
@@ -332,6 +333,14 @@ def _daily_news_context(
         return _published_timestamp(getattr(card, "published_at", None)), int(getattr(card, "id", 0) or 0)
 
     display_cards.sort(key=_display_card_sort_key, reverse=True)
+    # 修改记录：2026-08-25 | DingJiaye
+    # 新闻汇总顶部固定保留日报汇总；有 DeepSeek 时缓存 AI 结果，无密钥也不留空。
+    daily_summary = build_daily_news_summary(
+        display_cards,
+        report_date=rd.isoformat(),
+        modules=allowed,
+        db=db,
+    )
 
     runs = (
         db.query(ReportRun)
@@ -427,6 +436,7 @@ def _daily_news_context(
         "grouped_entries": grouped,
         "stats": stats,
         "overview": overview,
+        "daily_summary": daily_summary,
         "timeline_entries": display_cards if page_key == "news_7x24" else [],
         "timeline_start": (rd - timedelta(days=6)).isoformat() if page_key == "news_7x24" else None,
         "timeline_range_label": (
@@ -498,6 +508,8 @@ def _entity_assessment_context(
     observed_source_count = 0
     unverified_time_count = 0
     profile = None
+    monitoring_focus: list[str] = []
+    alert_rules: list[dict[str, object]] = []
     if selected_entity:
         risks = (
             db.query(EntityRisk)
@@ -582,6 +594,13 @@ def _entity_assessment_context(
 
         if profile:
             entity_sources = [source.as_dict() for source in profile.sources if source.enabled]
+            # 修改记录：2026-08-25 | DingJiaye
+            # 监测清单只作后续核验方向展示，不改变既有风险等级或事件归属。
+            monitoring_focus = list(profile.monitoring_focus)
+            alert_rules = [
+                {"level": level, "items": list(items)}
+                for level, items in profile.alert_rules
+            ]
     else:
         display_risks = []
 
@@ -619,6 +638,8 @@ def _entity_assessment_context(
         "observed_source_count": observed_source_count,
         "unverified_time_count": unverified_time_count,
         "entity_sources": entity_sources,
+        "monitoring_focus": monitoring_focus,
+        "alert_rules": alert_rules,
         "latest_news": build_latest_news(
             risks=display_risks,
             report_date=rd,
