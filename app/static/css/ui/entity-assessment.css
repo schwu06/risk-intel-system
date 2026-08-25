@@ -21,6 +21,115 @@
 }
 
 /* 修改记录：2026-08-25 | DingJiaye
+ * 财务披露对比：仅呈现配置中已核验、同口径的本次与上次披露，图表用于直观比较。 */
+.fin-comparison-summary {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #d9e5f1;
+  border-radius: 8px;
+  background: #fff;
+  color: #52677e;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.fin-comparison-summary strong {
+  color: #3c5d7f;
+  font-size: 12px;
+}
+
+.fin-comparison-summary p { margin: 4px 0 0; }
+
+.fin-context-metric { min-height: 168px; }
+
+.fin-comparison-row {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid #e9eef4;
+  color: #748194;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.fin-comparison-row b { font-weight: 650; }
+.fin-comparison-row a { color: #587da5; text-decoration: none; }
+.fin-comparison-row a:hover { text-decoration: underline; }
+.fin-comparison-row b.is-up { color: #2f7a59; }
+.fin-comparison-row b.is-down { color: #a5643f; }
+.fin-comparison-row b.is-flat { color: #718095; }
+
+.fin-comparison-note {
+  margin: 8px 0 0;
+  color: #68788b;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.fin-chart-section {
+  margin-top: 18px;
+  padding-top: 15px;
+  border-top: 1px solid #e0e8f0;
+}
+
+.fin-chart-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.fin-chart-section h4 { margin: 0; color: #344f6d; font-size: 14px; }
+.fin-chart-section-head span { color: #8290a0; font-size: 11px; }
+
+.fin-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.fin-chart-card {
+  overflow: hidden;
+  border: 1px solid #e1e8f0;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.fin-chart-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #ebf0f5;
+}
+
+.fin-chart-card-head h5 {
+  margin: 0;
+  color: #526d8a;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.fin-chart-toggle { display: inline-flex; flex: 0 0 auto; gap: 2px; padding: 2px; border-radius: 6px; background: #f1f5f9; }
+.fin-chart-toggle button { min-width: 38px; padding: 3px 6px; border: 0; border-radius: 4px; background: transparent; color: #8190a1; cursor: pointer; font: inherit; font-size: 10px; }
+.fin-chart-toggle button.active { background: #fff; box-shadow: 0 1px 2px rgba(38, 67, 103, .12); color: #416d9d; font-weight: 650; }
+
+.fin-chart-host {
+  min-height: 230px;
+  padding: 4px 8px 8px;
+}
+
+@media (max-width: 640px) {
+  .fin-chart-section-head { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .fin-context-metric { min-height: 0; }
+}
+
+/* 修改记录：2026-08-25 | DingJiaye
  * 重点客户实时监测：用标题旁 i 图标承载待核验监测规则，避免与新闻正文混排。 */
 .entity-title-row {
   display: inline-flex;

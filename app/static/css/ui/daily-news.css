@@ -3,7 +3,6 @@
  * 负责：新闻卡片、风险标签、筛选、时间轴与空状态。
  * 修改记录
  * - 2026-08-25 | DingJiaye | 从 dashboard.css 迁移 筛选无匹配 提示
- * - 2026-08-25 | wusicheng | 相对原 main：恢复可折叠索引、栏目条数、筛选下拉与标题内风险标签。
  */
 
 .module-filter-empty {
@@ -16,172 +15,55 @@
   background: #f8fafc;
 }
 
-body.daily-news-ui .sidebar .daily-index-title[aria-controls] {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin: 1.5rem 0 0.8rem;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #000;
-  font: inherit;
-  font-family: var(--font-cjk);
-  font-size: 10pt;
-  font-weight: 400;
-  letter-spacing: 0;
-  line-height: 1.2;
-  cursor: pointer;
+/* 修改记录：2026-08-25 | DingJiaye
+ * 新闻汇总顶部日报报告：AI 不可用时仍展示基于已入库新闻的可追溯汇总。 */
+.daily-summary-report {
+  margin: 0 0 18px;
+  padding: 18px 20px;
+  border: 1px solid #dce5ee;
+  border-radius: 12px;
+  background: linear-gradient(115deg, #fbfdff 0%, #f5f9fd 100%);
+  box-shadow: 0 4px 14px rgba(44, 67, 93, .045);
 }
 
-body.daily-news-ui .sidebar .daily-index-chevron {
-  display: inline-block;
-  width: 0;
-  height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 6px solid #000;
-  transition: transform 0.15s ease;
-  flex-shrink: 0;
-}
-
-body.daily-news-ui .sidebar .daily-index-title.is-collapsed .daily-index-chevron {
-  transform: rotate(-90deg);
-}
-
-body.daily-news-ui .daily-index-list .mod-name {
+.daily-summary-head {
   display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-body.daily-news-ui .daily-index-list .mod-name-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-body.daily-news-ui .daily-index-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.25rem;
-  height: 1.25rem;
-  margin-left: auto;
-  padding: 0 0.3rem;
-  border-radius: 999px;
-  background: #e4e7ec;
-  color: #7a828d;
-  font-size: 0.7rem;
-  font-weight: 500;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-body.daily-news-ui .daily-index-list .mod-name.active .daily-index-count {
-  background: #d4d9e0;
-  color: #4a5160;
-}
-
-body.daily-news-ui .daily-page-caption-actions {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  overflow: visible;
-}
-
-body.daily-news-ui .news-filter-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  box-sizing: border-box;
-  width: 325px;
-  height: auto;
-  margin: 0;
-  padding: 0.85rem 0.9rem;
-  border: 1px solid #e6e9ef;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 10px 28px rgba(45, 55, 72, 0.12);
-  overflow: visible;
-}
-
-body.daily-news-ui .news-filter-panel[hidden] {
-  display: none;
-}
-
-body.daily-news-ui .news-filter-cols {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  align-items: stretch;
-}
-
-body.daily-news-ui .news-filter-col-title {
-  margin: 0 0 0.45rem;
-  color: #8a93a0;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-body.daily-news-ui .news-filter-panel .news-risk-filters,
-body.daily-news-ui .news-filter-panel .news-level-filters {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
   align-items: flex-start;
-  justify-content: flex-start;
-  gap: 0.35rem;
-  width: 100%;
-  overflow: visible;
+  justify-content: space-between;
+  gap: 14px;
 }
 
-body.daily-news-ui .news-filter-panel .news-risk-filter,
-body.daily-news-ui .news-filter-panel .news-level-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.22rem;
+.daily-summary-eyebrow { display: block; margin-bottom: 4px; color: #6a86a5; font-size: 11px; font-weight: 650; letter-spacing: .08em; }
+.daily-summary-head h2 { margin: 0; color: #304b68; font-size: 18px; }
+.daily-summary-meta { margin-top: 3px; color: #7b8a9d; font-size: 12px; white-space: nowrap; }
+.daily-summary-overview { margin: 12px 0 15px; color: #516276; font-size: 14px; line-height: 1.8; }
+
+.daily-summary-sections {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.daily-summary-section {
   min-width: 0;
-  width: auto;
-  padding: 0.18rem 0.55rem;
-  border-radius: 4px;
-  font-size: 0.78rem;
-  line-height: 1.3;
-  text-align: center;
-  white-space: nowrap;
+  padding: 13px;
+  border: 1px solid #e1e8f0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .82);
 }
 
-body.daily-news-ui .news-filter-panel .news-risk-filter.active::after,
-body.daily-news-ui .news-filter-panel .news-level-filter.active::after {
-  content: "×";
-  font-size: 0.85em;
-  line-height: 1;
-  opacity: 0.72;
-}
+.daily-summary-section h3 { margin: 0 0 7px; color: #3e5c7c; font-size: 14px; }
+.daily-summary-section > p { margin: 0; color: #5d6f84; font-size: 12px; line-height: 1.7; }
+.daily-summary-b { border-top: 3px solid #d79d74; }
+.daily-summary-c { border-top: 3px solid #7ba3ce; }
+.daily-summary-d { border-top: 3px solid #83a993; }
+.daily-summary-points { margin-top: 10px; padding-top: 9px; border-top: 1px solid #edf1f5; }
+.daily-summary-points > span { color: #72859a; font-size: 11px; font-weight: 650; }
+.daily-summary-points ul { display: grid; gap: 4px; margin: 5px 0 0; padding-left: 16px; color: #61748a; font-size: 11px; line-height: 1.55; }
 
-body.daily-news-ui .news-filter-panel .timeline-category-filters {
-  margin: 0.75rem 0 0;
-  padding-top: 0.7rem;
-  border-top: 1px solid #edf0f3;
-}
-
-body.daily-news-ui .risk-event-title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem 0.45rem;
-}
-
-body.daily-news-ui .risk-event-title-text {
-  min-width: 0;
-}
-
-body.daily-news-ui .risk-event-title .news-risk-tag {
-  flex: 0 0 auto;
+@media (max-width: 640px) {
+  .daily-summary-report { padding: 15px; }
+  .daily-summary-head { flex-direction: column; gap: 5px; }
+  .daily-summary-meta { margin-top: 0; white-space: normal; }
+  .daily-summary-sections { grid-template-columns: 1fr; }
 }

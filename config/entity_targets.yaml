@@ -152,12 +152,35 @@ entities:
     financial_source_label: "Yıldız Holding 2025 年经营与财务披露（集团口径，非 Godiva 独立财报）"
     financial_unit: "集团合并口径：土耳其里拉（TRY）"
     financial_context_notice: "Godiva 为非上市品牌，未见可核验的独立公开三表。以下采用其母公司 Yıldız Holding 的官方合并披露，仅用于判断集团经营与偿债背景，不等同于 Godiva 独立财务数据。"
+    # 修改记录：2026-08-25 | DingJiaye
+    # 2025 与 2024 均为 Yıldız Holding 官方新闻稿中的集团合并口径；未披露的可比项不计算变动。
+    financial_comparison_title: "母公司合并披露对比（2025 年 vs 2024 年）"
+    financial_comparison_summary: "2025 年集团合并销售额升至 TRY 657.8 billion，官方披露同比增长 34%；出口额亦由 TRY 22.7 billion 增至 TRY 30.6 billion。增长显示集团经营规模扩张，但这些均为 Yıldız Holding 合并口径，不能据此推断 Godiva 单品牌的收入、利润或现金流。最新披露同时称净债务／EBITDA 已降至 2.0 倍以下，反映集团层面仍在维持债务纪律；后续应等待品牌或其直接持股主体的独立融资、审计或法定披露。"
     financial_context_metrics:
       - label: 2025 年合并销售额
         value: "TRY 657.8 billion"
         as_of: "截至 2025 年度"
         note: "Yıldız Holding 集团合并口径"
         url: https://www.medyamerkezi.yildizholding.com.tr/en/press-releases/yildiz-holding-continued-to-grow-through-production-exports-and-investment-in-2025-maintaining-financial-discipline-and-pursuing-its-focused-strategy
+        previous_value: "TRY 490.5 billion"
+        previous_as_of: "截至 2024 年度"
+        previous_url: https://www.medyamerkezi.yildizholding.com.tr/en/press-releases/stars-of-the-year-recognized-for-the-17th-time
+        current_numeric: 657.8
+        previous_numeric: 490.5
+        chart_group: "经营规模（TRY billion）"
+        comparison_note: "官方 2025 披露称销售额同比增长 34%；按两期披露数字计算约为 34.1%。"
+      - label: 集团出口额
+        value: "TRY 30.6 billion"
+        as_of: "截至 2025 年度"
+        note: "Yıldız Holding 集团合并口径"
+        url: https://www.medyamerkezi.yildizholding.com.tr/en/press-releases/yildiz-holding-continued-to-grow-through-production-exports-and-investment-in-2025-maintaining-financial-discipline-and-pursuing-its-focused-strategy
+        previous_value: "TRY 22.7 billion"
+        previous_as_of: "截至 2024 年度"
+        previous_url: https://www.medyamerkezi.yildizholding.com.tr/en/press-releases/stars-of-the-year-recognized-for-the-17th-time
+        current_numeric: 30.6
+        previous_numeric: 22.7
+        chart_group: "经营规模（TRY billion）"
+        comparison_note: "出口额来自两期母公司官方披露；其增长仅反映集团整体跨境业务，不代表 Godiva 单品牌出口。"
       - label: 净债务 / EBITDA
         value: "低于 2.0x"
         as_of: "2025 年度披露"
@@ -427,6 +450,99 @@ entities:
     financial_source_label: "GLP J-REIT 官方 IR 财务报告（非 GLP 集团独立三表）"
     financial_unit: "单位：百万日元（GLP J-REIT）"
     financial_context_notice: "GLP（普洛斯）为非上市私营集团，未见可核验的独立公开三表。以下损益、资产负债和现金流数据来自东京证券交易所上市的 GLP J-REIT（3281）官方 IR 披露，仅用于观察日本物流地产公开载体的经营与资本结构，不等同于 GLP 集团财务数据。"
+    # 修改记录：2026-08-25 | DingJiaye
+    # 数字摘自 GLP J-REIT 2026 年 2 月期决算短信第一页，与 2025 年 8 月期同口径比较。
+    financial_comparison_title: "GLP J-REIT 官方披露对比（2026 年 2 月期 vs 2025 年 8 月期）"
+    financial_comparison_summary: "2026 年 2 月期营业收入、营业利润、经常利润及当期净利润均较上一期下降。决算短信明确说明，主要原因是上一期确认的 GLP 春日部及 GLP 川岛出售收益在本期不再贡献，不能简单解读为租赁主营业务恶化。期末总资产与净资产小幅下降、权益比率维持 51.5%；经营现金流下降，但期末现金及等价物增加至 41,535 百万日元。该对比仅反映东京上市的 GLP J-REIT（3281），不构成对普洛斯集团独立财务状况的判断。"
+    financial_context_metrics:
+      - label: 营业收入
+        value: "28,821"
+        as_of: "2026 年 2 月期"
+        note: "GLP J-REIT 决算短信；百万日元"
+        url: https://www.glpjreit.com/file/ir_library_term-b27c8e1e0e03cbb73b334f936028c498466e778f.pdf
+        previous_value: "30,505"
+        previous_as_of: "2025 年 8 月期"
+        current_numeric: 28821
+        previous_numeric: 30505
+        chart_group: "损益表要点（百万日元）"
+        comparison_note: "较上一期下降 5.5%。"
+      - label: 营业利润
+        value: "16,482"
+        as_of: "2026 年 2 月期"
+        note: "GLP J-REIT 决算短信；百万日元"
+        url: https://www.glpjreit.com/file/ir_library_term-b27c8e1e0e03cbb73b334f936028c498466e778f.pdf
+        previous_value: "17,647"
+        previous_as_of: "2025 年 8 月期"
+        current_numeric: 16482
+        previous_numeric: 17647
+        chart_group: "损益表要点（百万日元）"
+        comparison_note: "较上一期下降 6.6%；决算短信说明主要受上一期资产出售收益不再贡献影响。"
+      - label: 当期净利润
+        value: "14,896"
+        as_of: "2026 年 2 月期"
+        note: "GLP J-REIT 决算短信；百万日元"
+        url: https://www.glpjreit.com/file/ir_library_term-b27c8e1e0e03cbb73b334f936028c498466e778f.pdf
+        previous_value: "16,062"
+        previous_as_of: "2025 年 8 月期"
+        current_numeric: 14896
+        previous_numeric: 16062
+        chart_group: "损益表要点（百万日元）"
+        comparison_note: "较上一期下降 7.3%。"
+      - label: 每单位分配金（含超额分配）
+        value: "3,399 日元"
+        as_of: "2026 年 2 月期"
+        note: "GLP J-REIT 决算短信"
+        url: https://www.glpjreit.com/file/ir_library_term-b27c8e1e0e03cbb73b334f936028c498466e778f.pdf
+        previous_value: "3,643 日元"
+        previous_as_of: "2025 年 8 月期"
+        current_numeric: 3399
+        previous_numeric: 3643
+        chart_group: "每单位分配（日元）"
+        comparison_note: "较上一期下降 6.7%；两期均包含超额分配金。"
+      - label: 总资产
+        value: "872,305"
+        as_of: "2026 年 2 月期"
+        note: "GLP J-REIT 决算短信；百万日元"
+        url: https://www.glpjreit.com/file/ir_library_term-b27c8e1e0e03cbb73b334f936028c498466e778f.pdf
+        previous_value: "876,820"
+        previous_as_of: "2025 年 8 月期"
+        current_numeric: 872305
+        previous_numeric: 876820
+        chart_group: "资产负债表要点（百万日元）"
+        comparison_note: "较上一期下降 0.5%。"
+      - label: 净资产
+        value: "449,408"
+        as_of: "2026 年 2 月期"
+        note: "GLP J-REIT 决算短信；百万日元"
+        url: https://www.glpjreit.com/file/ir_library_term-b27c8e1e0e03cbb73b334f936028c498466e778f.pdf
+        previous_value: "451,990"
+        previous_as_of: "2025 年 8 月期"
+        current_numeric: 449408
+        previous_numeric: 451990
+        chart_group: "资产负债表要点（百万日元）"
+        comparison_note: "较上一期下降 0.6%；权益比率两期均为 51.5%。"
+      - label: 经营活动现金流
+        value: "28,010"
+        as_of: "2026 年 2 月期"
+        note: "GLP J-REIT 决算短信；百万日元"
+        url: https://www.glpjreit.com/file/ir_library_term-b27c8e1e0e03cbb73b334f936028c498466e778f.pdf
+        previous_value: "37,079"
+        previous_as_of: "2025 年 8 月期"
+        current_numeric: 28010
+        previous_numeric: 37079
+        chart_group: "现金流要点（百万日元）"
+        comparison_note: "较上一期下降 24.5%。"
+      - label: 期末现金及等价物
+        value: "41,535"
+        as_of: "2026 年 2 月期"
+        note: "GLP J-REIT 决算短信；百万日元"
+        url: https://www.glpjreit.com/file/ir_library_term-b27c8e1e0e03cbb73b334f936028c498466e778f.pdf
+        previous_value: "37,356"
+        previous_as_of: "2025 年 8 月期"
+        current_numeric: 41535
+        previous_numeric: 37356
+        chart_group: "现金流要点（百万日元）"
+        comparison_note: "较上一期增加 11.2%。"
     financial_sources:
       - statement: income
         label: 当期财务报告 PDF

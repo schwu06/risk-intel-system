@@ -109,6 +109,15 @@ class FinancialContextMetric:
     as_of: str | None = None
     note: str | None = None
     url: str | None = None
+    # 修改记录：2026-08-25 | DingJiaye
+    # 同源、同口径的上次披露数值，用于财务面板的披露对比与图表；无可比口径时保持为空。
+    previous_value: str | None = None
+    previous_as_of: str | None = None
+    previous_url: str | None = None
+    current_numeric: float | None = None
+    previous_numeric: float | None = None
+    chart_group: str | None = None
+    comparison_note: str | None = None
 
     def as_dict(self) -> dict[str, str | None]:
         return {
@@ -117,6 +126,13 @@ class FinancialContextMetric:
             "as_of": self.as_of,
             "note": self.note,
             "url": self.url,
+            "previous_value": self.previous_value,
+            "previous_as_of": self.previous_as_of,
+            "previous_url": self.previous_url,
+            "current_numeric": self.current_numeric,
+            "previous_numeric": self.previous_numeric,
+            "chart_group": self.chart_group,
+            "comparison_note": self.comparison_note,
         }
 
 
@@ -194,6 +210,8 @@ class EntityProfile:
     financial_pdf_hint: str | None = None
     financial_context_metrics: tuple[FinancialContextMetric, ...] = field(default_factory=tuple)
     financial_context_notice: str | None = None
+    financial_comparison_title: str | None = None
+    financial_comparison_summary: str | None = None
     # 某些主体（如 GLP）虽有证券代码，但页面财务口径指定为其官方 IR 报告。
     # 此时不应以第三方株探数据覆盖官方来源。
     prefer_financial_pdf: bool = False
@@ -399,7 +417,30 @@ def _parse_financial_context_metric(row: dict[str, Any]) -> FinancialContextMetr
         as_of=str(row["as_of"]).strip() if row.get("as_of") else None,
         note=str(row["note"]).strip() if row.get("note") else None,
         url=str(row["url"]).strip() if row.get("url") else None,
+        previous_value=(
+            str(row["previous_value"]).strip() if row.get("previous_value") else None
+        ),
+        previous_as_of=(
+            str(row["previous_as_of"]).strip() if row.get("previous_as_of") else None
+        ),
+        previous_url=str(row["previous_url"]).strip() if row.get("previous_url") else None,
+        current_numeric=_as_optional_float(row.get("current_numeric")),
+        previous_numeric=_as_optional_float(row.get("previous_numeric")),
+        chart_group=str(row["chart_group"]).strip() if row.get("chart_group") else None,
+        comparison_note=(
+            str(row["comparison_note"]).strip() if row.get("comparison_note") else None
+        ),
     )
+
+
+def _as_optional_float(value: Any) -> float | None:
+    """配置中的图表数值仅接受可安全转换的数字，展示文本仍保留原始口径。"""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_related_party(row: dict[str, Any]) -> RelatedPartySpec | None:
@@ -607,6 +648,16 @@ def _parse_catalog(data: dict[str, Any]) -> EntityCatalog:
                 financial_context_notice=(
                     str(row["financial_context_notice"]).strip()
                     if row.get("financial_context_notice")
+                    else None
+                ),
+                financial_comparison_title=(
+                    str(row["financial_comparison_title"]).strip()
+                    if row.get("financial_comparison_title")
+                    else None
+                ),
+                financial_comparison_summary=(
+                    str(row["financial_comparison_summary"]).strip()
+                    if row.get("financial_comparison_summary")
                     else None
                 ),
                 prefer_financial_pdf=bool(row.get("prefer_financial_pdf", False)),

@@ -266,6 +266,7 @@
   window.ENTITY_NAME = {% if selected_entity %}{{ (selected_entity.display_name or selected_entity.name)|tojson }}{% else %}null{% endif %};
 </script>
 <script src="/static/js/entity_assessment.js?v=20260813-5"></script>
+<script src="/static/js/entity_financial_charts.js?v=20260825-1"></script>
 <script>
   (function initRiskTabs() {
     var tabs = document.querySelectorAll(".risk-tabs:not(.fin-tabs) .risk-tab");
