@@ -3,6 +3,38 @@
  * 负责：评级概览、评级变动、市场信号与相关表格。
  * 修改记录
  * - 2026-08-25 | DingJiaye | 新建国际评级独立样式入口。
- *
- * 新增评级表、评级变动、市场信号样式请写入此文件。
+ * - 2026-08-25 | DingJiaye | 恢复可折叠左侧索引，与新闻汇总一致。
  */
+
+.ir-sidebar .daily-index-title[aria-controls] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 1.5rem 0 0.8rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #000;
+  font: inherit;
+  font-family: var(--font-cjk);
+  font-size: 10pt;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.ir-sidebar .daily-index-chevron {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid #000;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.ir-sidebar .daily-index-title.is-collapsed .daily-index-chevron {
+  transform: rotate(-90deg);
+}

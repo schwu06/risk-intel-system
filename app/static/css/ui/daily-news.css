@@ -3,6 +3,7 @@
  * 负责：新闻卡片、风险标签、筛选、时间轴与空状态。
  * 修改记录
  * - 2026-08-25 | DingJiaye | 从 dashboard.css 迁移 筛选无匹配 提示
+ * - 2026-08-25 | DingJiaye | 恢复 feature/entity-ui 新闻汇总界面：可折叠索引、筛选下拉、标题内风险标签。
  */
 
 .module-filter-empty {
@@ -13,4 +14,174 @@
   color: var(--ui-muted);
   font-size: 13px;
   background: #f8fafc;
+}
+
+body.daily-news-ui .sidebar .daily-index-title[aria-controls] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 1.5rem 0 0.8rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #000;
+  font: inherit;
+  font-family: var(--font-cjk);
+  font-size: 10pt;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+body.daily-news-ui .sidebar .daily-index-chevron {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid #000;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+body.daily-news-ui .sidebar .daily-index-title.is-collapsed .daily-index-chevron {
+  transform: rotate(-90deg);
+}
+
+body.daily-news-ui .daily-index-list .mod-name {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+body.daily-news-ui .daily-index-list .mod-name-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.daily-news-ui .daily-index-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  margin-left: auto;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: #e4e7ec;
+  color: #7a828d;
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+body.daily-news-ui .daily-index-list .mod-name.active .daily-index-count {
+  background: #d4d9e0;
+  color: #4a5160;
+}
+
+body.daily-news-ui .daily-page-caption-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  overflow: visible;
+}
+
+body.daily-news-ui .news-filter-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-sizing: border-box;
+  width: 325px;
+  height: auto;
+  margin: 0;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid #e6e9ef;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(45, 55, 72, 0.12);
+  overflow: visible;
+}
+
+body.daily-news-ui .news-filter-panel[hidden] {
+  display: none;
+}
+
+body.daily-news-ui .news-filter-cols {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+body.daily-news-ui .news-filter-col-title {
+  margin: 0 0 0.45rem;
+  color: #8a93a0;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+body.daily-news-ui .news-filter-panel .news-risk-filters,
+body.daily-news-ui .news-filter-panel .news-level-filters {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0.35rem;
+  width: 100%;
+  overflow: visible;
+}
+
+body.daily-news-ui .news-filter-panel .news-risk-filter,
+body.daily-news-ui .news-filter-panel .news-level-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  min-width: 0;
+  width: auto;
+  padding: 0.18rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  text-align: center;
+  white-space: nowrap;
+}
+
+body.daily-news-ui .news-filter-panel .news-risk-filter.active::after,
+body.daily-news-ui .news-filter-panel .news-level-filter.active::after {
+  content: "×";
+  font-size: 0.85em;
+  line-height: 1;
+  opacity: 0.72;
+}
+
+body.daily-news-ui .news-filter-panel .timeline-category-filters {
+  margin: 0.75rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid #edf0f3;
+}
+
+body.daily-news-ui .risk-event-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.45rem;
+}
+
+body.daily-news-ui .risk-event-title-text {
+  min-width: 0;
+}
+
+body.daily-news-ui .risk-event-title .news-risk-tag {
+  flex: 0 0 auto;
 }

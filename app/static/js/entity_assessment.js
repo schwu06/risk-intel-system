@@ -10,7 +10,7 @@
     if (!exportBtn) return;
     exportBtn.disabled = !!on || !window.ENTITY_ID;
     exportBtn.classList.toggle("is-loading", !!on);
-    exportBtn.textContent = on ? "正在生成…" : "导出公开信息简报";
+    exportBtn.textContent = on ? "正在生成…" : "导出 PDF";
   }
 
   function showExportMsg(text, isError) {
@@ -105,7 +105,10 @@
   function setGroupCollapsed(group, collapsed) {
     group.classList.toggle("is-collapsed", collapsed);
     var head = group.querySelector(".entity-index-group-head");
-    if (head) head.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    if (head) {
+      head.classList.toggle("is-collapsed", collapsed);
+      head.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    }
   }
 
   function applyStoredCollapse() {
@@ -138,6 +141,12 @@
       var showGroup = query ? matched > 0 : true;
       group.hidden = !showGroup;
       if (showGroup) visibleCount += 1;
+      var countBadge = group.querySelector(".entity-index-count");
+      if (countBadge) {
+        var n = query ? matched : items.length;
+        countBadge.textContent = String(n);
+        countBadge.setAttribute("aria-label", n + "个主体");
+      }
       var emptyRow = group.querySelector(".entity-index-empty");
       if (emptyRow) emptyRow.hidden = !!query && isEmptyGroup;
       if (query && matched > 0) setGroupCollapsed(group, false);
