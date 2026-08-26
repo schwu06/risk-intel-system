@@ -8,7 +8,10 @@
     <input type="search" id="daily-module-search" placeholder="搜索新闻、来源或日期" autocomplete="off" />
     <span aria-hidden="true">⌕</span>
   </label>
-  <h2 class="daily-index-title">索引</h2>
+  <h2 class="daily-index-title">
+    <span class="daily-index-chevron" aria-hidden="true"></span>
+    索引
+  </h2>
   <ul class="run-list daily-index-list" id="daily-index-list">
     {% for code, name in modules.items() %}
     {% set run = run_map.get(code) %}

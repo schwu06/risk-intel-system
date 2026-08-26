@@ -2,9 +2,13 @@
  * 主体评估页面
  * 负责：主体概览、最新消息、公开事件与财务信息展示。
  * 修改记录
+ * - 2026-08-26 | wusicheng | 收紧索引分类间距，并按 10pt 字号调整数量气泡与条目高度。
+ * - 2026-08-26 | wusicheng | 去掉「索引」标题，搜索框下方直接显示已有分类条目。
+ * - 2026-08-26 | wusicheng | 索引标题前增加实心黑色三角，与其他页面一致。
+ * - 2026-08-26 | wusicheng | 索引标题位置与字号对齐其他页面，主体名称改为 10pt 并收紧间距。
  * - 2026-08-25 | DingJiaye | 新建主体评估独立样式入口。
  * - 2026-08-25 | DingJiaye | 增加非上市主体替代财务口径提示与 PDF 网络失败说明。
- * - 2026-08-25 | 主体索引展开时只在分类下方增减高度，避免滚动锚定把列表顶到顶部。
+ * - 2026-08-25 | wusicheng | 主体索引展开时只在分类下方增减高度，避免滚动锚定把列表顶到顶部。
  *
  * 新增主体评估卡片、事件、财务区域样式请写入此文件。
  */
@@ -22,6 +26,61 @@
   overflow: hidden;
   visibility: hidden;
   pointer-events: none;
+}
+
+.entity-sidebar .entity-index {
+  margin-top: 0.9rem;
+}
+
+.entity-sidebar .entity-index-group-head {
+  margin: 0 0 0.4rem;
+  min-height: 1.5rem;
+}
+
+.entity-sidebar .entity-index-group + .entity-index-group .entity-index-group-head {
+  margin-top: 0.85rem;
+}
+
+.entity-sidebar .entity-index-group.is-collapsed .entity-index-group-head {
+  margin-bottom: 0;
+}
+
+.entity-sidebar .entity-index-group:first-child .entity-index-group-head {
+  margin-top: 0;
+}
+
+.entity-sidebar .entity-index-count {
+  min-width: 1.2rem;
+  height: 1.2rem;
+  padding: 0 0.35rem;
+  font-size: 8pt;
+  line-height: 1.2rem;
+  box-sizing: border-box;
+}
+
+.entity-sidebar .entity-list {
+  gap: 2px;
+}
+
+.entity-sidebar .entity-link {
+  padding: 0.22rem 0.45rem;
+  min-height: 1.55rem;
+  font-size: 10pt;
+  line-height: 1.2;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+.entity-sidebar .entity-name,
+.entity-sidebar .entity-name-zh,
+.entity-sidebar .entity-name-en,
+.entity-sidebar .entity-link .credit {
+  font-size: 10pt;
+  line-height: 1.2;
+}
+
+.entity-sidebar .entity-name {
+  gap: 0.2rem 0.35rem;
 }
 
 /* 非上市主体的替代公开披露说明；避免将关联上市载体误读为主体独立财报。 */

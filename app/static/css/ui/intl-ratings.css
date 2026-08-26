@@ -7,6 +7,8 @@
  * - 2026-08-26 | wusicheng | 表格增加序号及 Excel 字段列宽，不改原有视觉规格。
  * - 2026-08-26 | wusicheng | 索引去掉简易/非简易分类层，公司名直接列在索引下。
  * - 2026-08-26 | wusicheng | 穆迪、标普、惠誉拆分为三个间距适中的独立列。
+ * - 2026-08-26 | wusicheng | 企业索引字号改为 10pt，并收紧行距与内边距。
+ * - 2026-08-26 | wusicheng | 隐藏发行体索引滑动条，保留滚轮与触控滑动。
  */
 
 .ir-sidebar .daily-index-title[aria-controls] {
@@ -73,16 +75,30 @@
   overflow-x: hidden;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.app-shell > .ir-sidebar.page-rail .ir-sidebar-body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .ir-sidebar .ir-tree-list {
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .ir-sidebar .ir-tree-item {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 0.18rem 0.5rem;
+  font-size: 10pt;
+  line-height: 1.2;
+  border-radius: 5px;
 }
 
 .ir-table .col-seq {
