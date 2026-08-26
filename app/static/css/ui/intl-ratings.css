@@ -38,3 +38,36 @@
 .ir-sidebar .daily-index-title.is-collapsed .daily-index-chevron {
   transform: rotate(-90deg);
 }
+
+/* 国际评级采用固定工作区：表格与发行体索引各自滚动，避免内容被外层
+   app-main 的 overflow:hidden 裁切。Modified by DingJiaye: 2026-08-25. */
+.app-main:has(.ir-main) {
+  min-height: 0;
+}
+
+.ir-main {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ir-content {
+  min-height: 0;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.ir-table-wrap {
+  min-height: 12rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-shell > .ir-sidebar.page-rail .ir-sidebar-body {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}

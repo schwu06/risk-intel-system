@@ -1759,10 +1759,13 @@ body.daily-news-ui .day-tab.active {
 }
 
 .news-filter-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 50;
+  /* Fixed positioning is paired with the toggle script so this panel remains
+     anchored beneath the trigger even though it is rendered outside that DOM
+     container. Modified by DingJiaye: 2026-08-25. */
+  position: fixed;
+  top: 0;
+  right: auto;
+  z-index: 300;
   box-sizing: border-box;
   width: 325px;
   height: auto;

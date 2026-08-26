@@ -3,6 +3,57 @@
  * 负责：顶栏、侧边栏、页面分栏与跨页面响应式布局。
  * 修改记录
  * - 2026-08-25 | DingJiaye | 新建布局维护入口；跨页面布局改动统一放在此文件。
+ * - 2026-08-26 | DingJiaye | 增加低干扰页面进入、卡片与控件反馈动效。
  *
  * 说明：现有布局仍由 dashboard.css 兼容层提供，后续规则逐步迁移至本文件。
  */
+
+/* --------------------------------------------------------------------------
+ * Motion layer
+ * 负责：不改变信息层级的页面进入、滚动呈现与按钮反馈。
+ * JS 只为命中的内容加 class；用户启用“减少动态效果”时全部关闭。
+ * Modified by DingJiaye: 2026-08-26.
+ * -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .motion-reveal {
+    opacity: 0;
+    transform: translateY(10px);
+    transition:
+      opacity 420ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition-delay: var(--motion-delay, 0ms);
+    will-change: opacity, transform;
+  }
+
+  .motion-reveal.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+    will-change: auto;
+  }
+
+  .motion-press {
+    transition:
+      transform 150ms ease,
+      box-shadow 180ms ease,
+      background-color 180ms ease,
+      border-color 180ms ease;
+  }
+
+  .motion-press:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+
+  .motion-press.is-pressed {
+    transform: translateY(1px) scale(0.985);
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-reveal,
+  .motion-press {
+    transition: none !important;
+    transform: none !important;
+  }
+}
