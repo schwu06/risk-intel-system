@@ -81,6 +81,17 @@
     });
   }
 
+  function updateFilterBadge() {
+    var count = activeRiskTypes.size + activeLevels.size + (searchTerm ? 1 : 0);
+    var badge = document.getElementById("news-filter-count");
+    if (badge) {
+      badge.textContent = String(count);
+      badge.hidden = count === 0;
+    }
+    var clearBtn = document.getElementById("news-filter-clear");
+    if (clearBtn) clearBtn.disabled = count === 0;
+  }
+
   function apply() {
     var visible = 0;
     document.querySelectorAll("[data-risk-tags]").forEach(function (card) {
@@ -99,11 +110,26 @@
     var empty = document.getElementById("news-search-empty");
     if (empty) empty.hidden = !hasFilter || visible > 0;
     updateIndexCounts();
+    updateFilterBadge();
+  }
+
+  function clearAll() {
+    activeRiskTypes.clear();
+    activeLevels.clear();
+    searchTerm = "";
+    if (searchInput) searchInput.value = "";
+    syncButtons();
+    save();
+    apply();
   }
 
   window.applyNewsRiskFilter = apply;
   syncButtons();
   apply();
+
+  var clearBtn = document.getElementById("news-filter-clear");
+  if (clearBtn) clearBtn.addEventListener("click", clearAll);
+
   riskButtons.forEach(function (button) {
     button.addEventListener("click", function () {
       var value = button.getAttribute("data-news-risk");

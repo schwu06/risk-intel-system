@@ -51,6 +51,41 @@
             <path fill="currentColor" d="M1.4 2h13.2L9.6 8.5v4.15L6.4 14.8V8.5z"/>
           </svg>
         </button>
+        <div class="news-filter-panel" id="news-filter-panel" hidden>
+        <div class="news-filter-panel-head">
+          <strong>筛选新闻</strong>
+        </div>
+        <div class="news-filter-group news-filter-group-risk">
+          <span class="news-filter-label">风险类型</span>
+          <nav class="news-risk-filters" aria-label="风险类型筛选">
+            <button type="button" class="news-risk-filter" data-news-risk="信贷风险">信贷风险</button>
+            <button type="button" class="news-risk-filter" data-news-risk="市场风险">市场风险</button>
+            <button type="button" class="news-risk-filter" data-news-risk="流动性与资产负债">流动性与资产负债</button>
+            <button type="button" class="news-risk-filter" data-news-risk="合规与反洗钱">合规与反洗钱</button>
+            <button type="button" class="news-risk-filter" data-news-risk="国别与地缘">国别与地缘</button>
+            <button type="button" class="news-risk-filter" data-news-risk="操作与网络安全">操作与网络安全</button>
+            <button type="button" class="news-risk-filter" data-news-risk="治理与信息披露">治理与信息披露</button>
+          </nav>
+        </div>
+        <div class="news-filter-group news-filter-group-level">
+          <span class="news-filter-label">风险等级</span>
+          <nav class="news-level-filters" aria-label="风险等级筛选">
+            <button type="button" class="news-level-filter level-low" data-news-level="低">低</button>
+            <button type="button" class="news-level-filter level-medium" data-news-level="中">中</button>
+            <button type="button" class="news-level-filter level-high" data-news-level="高">高</button>
+            <button type="button" class="news-level-filter level-extreme" data-news-level="极高">极高</button>
+          </nav>
+        </div>
+        {% if active_page == 'news_7x24' %}
+        <nav class="timeline-category-filters" aria-label="资讯栏目筛选">
+          <button type="button" class="timeline-category-filter active" data-timeline-module="all">全部栏目</button>
+          {% for code, name in modules.items() %}
+          <button type="button" class="timeline-category-filter" data-timeline-module="{{ code }}">{{ name }}</button>
+          {% endfor %}
+        </nav>
+        {% endif %}
+        <button type="button" class="news-filter-clear" id="news-filter-clear" disabled>清除全部</button>
+        </div>
       </div>
     </div>
     {% if active_page == 'daily_news' and daily_summary and daily_summary.overview %}
@@ -79,44 +114,6 @@
       </div>
     </section>
     {% endif %}
-    <div class="news-filter-panel" id="news-filter-panel" hidden>
-    <div class="news-filter-panel-head">
-      <div>
-        <strong>筛选新闻</strong>
-        <span>可多选，同一组内满足任一条件</span>
-      </div>
-      <button type="button" class="news-filter-clear" id="news-filter-clear" disabled>清除全部</button>
-    </div>
-    <div class="news-filter-group news-filter-group-risk">
-    <span class="news-filter-label">风险类型</span>
-    <nav class="news-risk-filters" aria-label="风险类型筛选">
-      <button type="button" class="news-risk-filter" data-news-risk="信贷风险">信贷风险</button>
-      <button type="button" class="news-risk-filter" data-news-risk="市场风险">市场风险</button>
-      <button type="button" class="news-risk-filter" data-news-risk="流动性与资产负债">流动性与资产负债</button>
-      <button type="button" class="news-risk-filter" data-news-risk="合规与反洗钱">合规与反洗钱</button>
-      <button type="button" class="news-risk-filter" data-news-risk="国别与地缘">国别与地缘</button>
-      <button type="button" class="news-risk-filter" data-news-risk="操作与网络安全">操作与网络安全</button>
-      <button type="button" class="news-risk-filter" data-news-risk="治理与信息披露">治理与信息披露</button>
-    </nav>
-    </div>
-    <div class="news-filter-group news-filter-group-level">
-    <span class="news-filter-label">风险等级</span>
-    <nav class="news-level-filters" aria-label="风险等级筛选">
-      <button type="button" class="news-level-filter level-low" data-news-level="低">低</button>
-      <button type="button" class="news-level-filter level-medium" data-news-level="中">中</button>
-      <button type="button" class="news-level-filter level-high" data-news-level="高">高</button>
-      <button type="button" class="news-level-filter level-extreme" data-news-level="极高">极高</button>
-    </nav>
-    </div>
-    {% if active_page == 'news_7x24' %}
-    <nav class="timeline-category-filters" aria-label="资讯栏目筛选">
-      <button type="button" class="timeline-category-filter active" data-timeline-module="all">全部栏目</button>
-      {% for code, name in modules.items() %}
-      <button type="button" class="timeline-category-filter" data-timeline-module="{{ code }}">{{ name }}</button>
-      {% endfor %}
-    </nav>
-    {% endif %}
-    </div>
 
     {% if active_page == 'news_7x24' %}
     <section class="news-timeline" aria-label="近七日新闻时间轴">
@@ -159,7 +156,7 @@
       {% if ui.get('message') %}<p class="module-recent-fallback">{{ ui.get('message') }}（当日暂无新增）</p>{% endif %}
       <div class="entry-grid risk-event-list">
         {% for e in mod_entries %}
-        <article class="entry-card risk-event-card" data-risk-tags="{{ e.risk_tags|join('|') }}" data-risk-level="{{ e.risk_level }}" data-news-search="{{ (e.title or '') ~ ' ' ~ (e.overview or '') ~ ' ' ~ (e.source_title or '') ~ ' ' ~ (e.published_at|string) ~ ' ' ~ (e.risk_tags|join(' ')) ~ ' ' ~ name }}">
+        <article class="entry-card risk-event-card" data-module="{{ code }}" data-risk-tags="{{ e.risk_tags|join('|') }}" data-risk-level="{{ e.risk_level }}" data-news-search="{{ (e.title or '') ~ ' ' ~ (e.overview or '') ~ ' ' ~ (e.source_title or '') ~ ' ' ~ (e.published_at|string) ~ ' ' ~ (e.risk_tags|join(' ')) ~ ' ' ~ name }}">
           <div class="risk-event-top">
             <span class="risk-level-tag risk-tag-{{ e.risk_level }}">{{ e.risk_level }}</span>
             {% if e.category_tag %}
@@ -227,7 +224,7 @@
 
 {% block scripts %}
 {{ super() }}
-<script src="/static/js/news_risk_filters.js?v=20260825-3"></script>
+<script src="/static/js/news_risk_filters.js?v=20260826-1"></script>
 <script>
   window.REPORT_DATE = "{{ report_date }}";
   window.PIPELINE_MODULES = "{{ module_codes_csv }}".split(",").filter(Boolean);
