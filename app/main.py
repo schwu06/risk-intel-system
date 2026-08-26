@@ -123,6 +123,22 @@ def on_startup():
         if recovered:
             log.warning("启动时清理遗留采集任务: %s", recovered)
         start_scheduler()
+        # Modified by DingJiaye: 2026-08-26 — 后台预热所有已配置上市主体的株探三表缓存，
+        # 不等待网络请求完成，避免拖慢服务启动；抓取异常不会影响其他页面。
+        from threading import Thread
+        from app.services.entity_kabutan import warm_kabutan_statements
+
+        listed_codes = [
+            profile.stock_code
+            for profile in configured_entity_catalog().profiles
+            if profile.stock_code and not profile.prefer_financial_pdf
+        ]
+        Thread(
+            target=warm_kabutan_statements,
+            args=(listed_codes,),
+            name="kabutan-finance-warmup",
+            daemon=True,
+        ).start()
         log.info(
             "定时采集已启用（需保持进程运行）：整点新闻 + 每日 cron=%s",
             cfg.daily_pipeline_cron,
@@ -552,15 +568,25 @@ def _entity_assessment_context(
             }
         )
         unverified_time_count = sum(1 for risk in display_risks if risk.published_at is None)
-        translated_risks = translate_fields_to_chinese([
-            {
-                "id": str(risk.id),
-                "title": risk.title or "",
-                "summary": risk.summary or "",
-                "impact": risk.impact_analysis or "",
-            }
-            for risk in display_risks
-        ], db=db, cache_source="entity_risk_display")
+        # Modified by DingJiaye: 2026-08-26 — 首屏只读取数据库缓存，不在
+        # 页面导航请求中等待模型翻译；完整翻译由 live-panels 异步请求补齐。
+        translated_risks = (
+            translate_fields_to_chinese(
+                [
+                    {
+                        "id": str(risk.id),
+                        "title": risk.title or "",
+                        "summary": risk.summary or "",
+                        "impact": risk.impact_analysis or "",
+                    }
+                    for risk in display_risks
+                ],
+                db=db,
+                cache_source="entity_risk_display",
+            )
+            if live
+            else {}
+        )
         for risk in display_risks:
             translated = translated_risks.get(str(risk.id), {})
             detail_available = has_publishable_content_detail(risk.title, risk.summary)
@@ -911,6 +937,8 @@ def entity_assessment_page(
         report_date=report_date,
         entity_id=entity_id,
         db=db,
+        # Modified by DingJiaye: 2026-08-26 — 先返回可点击的缓存页面；
+        # 新闻、株探财务与 AI 翻译在浏览器完成首屏渲染后异步补齐。
         live=False,
     )
     return templates.TemplateResponse("entity_assessment.html", ctx)
@@ -930,9 +958,9 @@ def entity_assessment_live_panels(
         report_date=report_date,
         entity_id=entity_id,
         db=db,
-        # 页面加载与旧版前端的面板请求均只读取已落库的主体事件、
-        # 翻译与财务缓存；外部采集只能由用户主动点击刷新资讯触发。
-        live=False,
+        # 新闻仍只读取已入库缓存；财务面板允许从株探读取已上市主体的公开通期数据。
+        # entity_kabutan 会命中 6 小时缓存，避免每次页面请求重复抓取。
+        live=True,
     )
     news_html = templates.get_template("entity_assessment_news_panel.html").render(ctx)
     finance_html = templates.get_template("entity_assessment_finance_panel.html").render(ctx)

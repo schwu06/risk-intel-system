@@ -277,8 +277,14 @@
     if (!entityId) return;
     var newsPanel = document.getElementById("ea-news-panel");
     var financePanel = document.getElementById("ea-finance-panel");
-    if (newsPanel) newsPanel.classList.add("is-refreshing");
-    if (financePanel) financePanel.classList.add("is-refreshing");
+    if (newsPanel) {
+      newsPanel.classList.add("is-refreshing");
+      newsPanel.setAttribute("aria-busy", "true");
+    }
+    if (financePanel) {
+      financePanel.classList.add("is-refreshing");
+      financePanel.setAttribute("aria-busy", "true");
+    }
     var url = "/entity-assessment/live-panels?entity_id=" + encodeURIComponent(entityId);
     if (window.REPORT_DATE) url += "&report_date=" + encodeURIComponent(window.REPORT_DATE);
     fetch(url, { headers: { Accept: "application/json" } })
@@ -290,6 +296,7 @@
         if (Number(window.ENTITY_ID) !== Number(entityId)) return;
         replacePanel("ea-news-panel", data.news_html);
         replacePanel("ea-finance-panel", data.finance_html);
+        if (window.renderEntityFinancialCharts) window.renderEntityFinancialCharts();
         var eventList = document.getElementById("risk-event-list");
         if (eventList && data.event_html && data.event_html.trim()) {
           eventList.innerHTML = data.event_html;
@@ -307,6 +314,14 @@
       });
   }
 
-  // 首屏内容由服务端从 SQLite 缓存渲染。不要在每次打开页面时再次
-  // 请求外部新闻/财报；用户点击“刷新资讯”后由采集流水线更新缓存并刷新页面。
+  // Modified by DingJiaye: 2026-08-26 — 首屏已可交互后再请求慢速信源；
+  // 网络、PDF 或 AI 较慢时仅更新相应面板，不阻塞主体切换、日期筛选和侧栏。
+  function scheduleLivePanels() {
+    window.setTimeout(refreshLivePanels, 120);
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", scheduleLivePanels, { once: true });
+  } else {
+    scheduleLivePanels();
+  }
 })();
