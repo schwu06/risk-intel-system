@@ -282,6 +282,10 @@ def summarize_latest_news(
     db: Any | None = None,
 ) -> tuple[str, str | None, str]:
     """返回 (摘要, 生成时间, 来源 deepseek|template)。"""
+    # Modified by DingJiaye: 2026-08-26 — 首屏只展示缓存/模板，不能为等待
+    # 大模型摘要而阻塞主体索引、日期筛选或页面其他交互。
+    if not live:
+        return fallback, None, "template"
     settings = get_settings()
     deepseek_ready = not is_placeholder_key(getattr(settings, "deepseek_api_key", None))
     if not deepseek_ready:

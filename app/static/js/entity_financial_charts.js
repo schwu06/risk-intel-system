@@ -104,6 +104,8 @@
   window.addEventListener("resize", function () {
     instances.forEach(function (chart) { chart.resize(); });
   });
+  // Modified by DingJiaye: 2026-08-26 — 财务面板异步替换后重新绘制图表。
+  window.renderEntityFinancialCharts = render;
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", render);
   else render();
 })();
