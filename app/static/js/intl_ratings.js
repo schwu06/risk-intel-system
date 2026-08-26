@@ -5,7 +5,6 @@
   "use strict";
 
   var API = "/api/v1/intl-ratings";
-  var TABLE_DATA = "/static/data/intl_ratings_table.json?v=20260826-6";
 
   var rows = [];
   var selectedId = null;
@@ -323,32 +322,32 @@
     setMsg(tip, data.source === "skeleton");
   }
 
-  function loadSnapshot() {
-    return fetch(TABLE_DATA)
-      .then(function (res) {
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        return res.json();
-      })
-      .then(function (data) {
+  function loadSnapshot(forceApi) {
+    var embedded = document.getElementById("ir-embedded-data");
+    if (embedded && !forceApi) {
+      try {
+        var data = JSON.parse(embedded.textContent);
         var list = data.rows || [];
         if (!list.length) throw new Error("表格数据为空");
         applySnapshot({
-          source: "excel",
+          source: "html",
           message: "",
           updated_at: data.updated_at || null,
           rows: list,
         });
+        return Promise.resolve();
+      } catch (err) {
+        setMsg("HTML 内评级数据无效，正在读取接口…", true);
+      }
+    }
+    return fetch(API)
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
       })
+      .then(applySnapshot)
       .catch(function (err) {
-        return fetch(API)
-          .then(function (res) {
-            if (!res.ok) throw new Error("HTTP " + res.status);
-            return res.json();
-          })
-          .then(applySnapshot)
-          .catch(function (apiErr) {
-            setMsg("加载评级数据失败：" + (apiErr.message || err.message || err), true);
-          });
+        setMsg("加载评级数据失败：" + (err.message || err), true);
       });
   }
 
@@ -375,7 +374,7 @@
             if (job.status === "failed") {
               setMsg("更新失败：" + (job.error || job.message), true);
             }
-            return loadSnapshot().then(function () {
+            return loadSnapshot(true).then(function () {
               if (job.status === "succeeded") {
                 setMsg(job.message || "评级数据已更新");
               }
