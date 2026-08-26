@@ -4,16 +4,12 @@
 (function () {
   "use strict";
 
-  var CATEGORY_SIMPLE = "简易分类债券";
-  var CATEGORY_NON_SIMPLE = "非简易分类债券";
   var API = "/api/v1/intl-ratings";
+  var TABLE_DATA = "/static/data/intl_ratings_table.json?v=20260826-6";
 
   var rows = [];
   var selectedId = null;
   var activeFilter = "all";
-  var groupCollapsed = {};
-  groupCollapsed[CATEGORY_SIMPLE] = false;
-  groupCollapsed[CATEGORY_NON_SIMPLE] = false;
   var pollTimer = null;
 
   var els = {
@@ -26,7 +22,6 @@
     msg: document.getElementById("ir-action-msg"),
     btnRefresh: document.getElementById("btn-ir-refresh"),
     btnExport: document.getElementById("btn-ir-export"),
-    headerStatus: document.getElementById("ir-header-status"),
     statTotal: document.getElementById("ir-stat-total"),
     statRated: document.getElementById("ir-stat-rated"),
     statChanges: document.getElementById("ir-stat-changes"),
@@ -52,7 +47,10 @@
   function filteredRows() {
     var q = getQuery();
     return rows.filter(function (r) {
-      var matchesSearch = !q || (r.issuer || "").toLowerCase().indexOf(q) !== -1;
+      var matchesSearch =
+        !q ||
+        (r.issuer || "").toLowerCase().indexOf(q) !== -1 ||
+        (r.jpName || "").toLowerCase().indexOf(q) !== -1;
       return matchesSearch && matchesFilter(r);
     });
   }
@@ -66,18 +64,6 @@
     if (activeFilter === "changed") return isChanged(r);
     if (activeFilter === "market") return hasMarketAlert(r);
     return true;
-  }
-
-  function groupRows(list) {
-    var groups = [
-      { name: CATEGORY_SIMPLE, items: [] },
-      { name: CATEGORY_NON_SIMPLE, items: [] },
-    ];
-    list.forEach(function (r) {
-      if (r.category === CATEGORY_SIMPLE) groups[0].items.push(r);
-      else groups[1].items.push(r);
-    });
-    return groups;
   }
 
   function escapeHtml(s) {
@@ -102,13 +88,16 @@
     );
   }
 
-  function ratingPackHtml(r) {
-    var values = [["穆", r.moodys], ["标", r.sp], ["惠", r.fitch]];
-    return '<td class="ir-cell col-rating-pack"><div class="ir-rating-pack">' + values.map(function (pair) {
-      var rating = text(pair[1]) || "NR";
-      var isNr = rating.toUpperCase() === "NR" || rating === "—";
-      return '<span class="ir-rating-pill' + (isNr ? ' is-nr' : '') + '"><b>' + pair[0] + '</b>' + escapeHtml(rating) + '</span>';
-    }).join("") + "</div></td>";
+  function ratingCellHtml(value) {
+    var rating = text(value) || "NR";
+    var isNr = rating.toUpperCase() === "NR" || rating === "—";
+    return (
+      '<td class="ir-cell col-rating"><span class="ir-rating-pill' +
+      (isNr ? " is-nr" : "") +
+      '">' +
+      escapeHtml(rating) +
+      "</span></td>"
+    );
   }
 
   function signalHtml(value, emptyText) {
@@ -130,7 +119,7 @@
     if (!els.tbody) return;
     if (!list.length) {
       els.tbody.innerHTML =
-        '<tr class="ir-empty-row"><td colspan="5">暂无匹配数据</td></tr>';
+        '<tr class="ir-empty-row"><td colspan="10">暂无匹配数据</td></tr>';
       return;
     }
     els.tbody.innerHTML = list
@@ -144,15 +133,16 @@
           '" id="row-' +
           escapeHtml(r.id) +
           '">' +
+          cellHtml(r.seq == null || r.seq === "" ? "" : r.seq, "col-seq") +
           cellHtml(r.issuer, "col-issuer") +
-          ratingPackHtml(r) +
-          '<td class="ir-cell col-change">' + signalHtml(r.ratingChanged, "未见变动") + "</td>" +
-          '<td class="ir-cell col-signal">' + marketSignalHtml(r.priceDrop) + "</td>" +
-          '<td class="ir-cell col-rss">' +
-          (r.ratingSourceUrl ? '<button type="button" class="btn small ir-rating-source-btn" data-url="' + escapeHtml(r.ratingSourceUrl) + '">评级来源</button>' : '') +
-          (r.rssUrl ? '<button type="button" class="btn small ir-rss-btn" data-issuer-id="' + escapeHtml(r.id) + '">市场来源</button>' : '') +
-          (!r.ratingSourceUrl && !r.rssUrl ? '<span class="ir-signal muted">待接入</span>' : '') +
-          "</td>" +
+          cellHtml(r.jpName, "col-jp") +
+          ratingCellHtml(r.moodys) +
+          ratingCellHtml(r.sp) +
+          ratingCellHtml(r.fitch) +
+          cellHtml(r.businessStructure, "col-structure") +
+          cellHtml(r.bondType, "col-bond") +
+          cellHtml(r.ebitda, "col-ebitda") +
+          cellHtml(r.netIncome, "col-profit") +
           "</tr>"
         );
       })
@@ -161,7 +151,6 @@
 
   function renderTree(list) {
     if (!els.tree) return;
-    var groups = groupRows(list);
     var total = list.length;
     if (els.empty) {
       els.empty.hidden = total !== 0;
@@ -171,48 +160,25 @@
       return;
     }
 
-    els.tree.innerHTML = groups
-      .map(function (g) {
-        if (!g.items.length && getQuery()) return "";
-        var collapsed = !!groupCollapsed[g.name];
-        var count = g.items.length;
-        var itemsHtml = g.items
-          .map(function (r) {
-            var active = r.id === selectedId ? " active" : "";
-            return (
-              '<li role="none">' +
-              '<button type="button" class="ir-tree-item' +
-              active +
-              '" role="treeitem" data-issuer-id="' +
-              escapeHtml(r.id) +
-              '" title="' +
-              escapeHtml(r.issuer) +
-              '">' +
-              escapeHtml(r.issuer) +
-              "</button></li>"
-            );
-          })
-          .join("");
+    var itemsHtml = list
+      .map(function (r) {
+        var active = r.id === selectedId ? " active" : "";
         return (
-          '<div class="ir-tree-group' +
-          (collapsed ? " is-collapsed" : "") +
-          '" data-group="' +
-          escapeHtml(g.name) +
+          '<li role="none">' +
+          '<button type="button" class="ir-tree-item' +
+          active +
+          '" role="treeitem" data-issuer-id="' +
+          escapeHtml(r.id) +
+          '" title="' +
+          escapeHtml(r.issuer) +
           '">' +
-          '<button type="button" class="ir-tree-group-title" data-toggle-group="' +
-          escapeHtml(g.name) +
-          '">' +
-          '<span class="ir-tree-caret" aria-hidden="true"></span>' +
-          escapeHtml(g.name) +
-          ' <span class="ir-tree-count">' +
-          count +
-          "</span></button>" +
-          '<ul class="ir-tree-list" role="group">' +
-          itemsHtml +
-          "</ul></div>"
+          escapeHtml(r.issuer) +
+          "</button></li>"
         );
       })
       .join("");
+    els.tree.innerHTML =
+      '<ul class="ir-tree-list" role="group">' + itemsHtml + "</ul>";
   }
 
   function refresh() {
@@ -273,26 +239,30 @@
       return;
     }
     var header = [
+      "序号",
       "发行体",
-      "分类",
-      "穆迪评级",
-      "标普评级",
+      "日文名",
+      "穆迪",
+      "标普",
       "惠誉评级",
-      "评级变动",
-      "市场信号（近 1 个月）",
-      "信息源",
+      "业务结构",
+      "债券种类",
+      "EBITDA",
+      "净利润",
     ];
     var data = [header].concat(
       list.map(function (r) {
         return [
+          r.seq || "",
           r.issuer,
-          r.category,
+          r.jpName || "",
           r.moodys,
           r.sp,
           r.fitch,
-          r.ratingChanged,
-          r.priceDrop,
-          r.rssUrl || "",
+          r.businessStructure || "",
+          r.bondType || "",
+          r.ebitda || "",
+          r.netIncome || "",
         ];
       })
     );
@@ -316,8 +286,32 @@
     setMsg("已导出 " + list.length + " 条记录：" + filename);
   }
 
+  function contentKey(r) {
+    var skip = { id: true, seq: true };
+    return Object.keys(r)
+      .filter(function (k) { return !skip[k]; })
+      .sort()
+      .map(function (k) { return k + "=" + text(r[k]); })
+      .join("\u0001");
+  }
+
+  function mergeIdenticalRows(list) {
+    var seen = {};
+    var out = [];
+    list.forEach(function (r) {
+      var key = contentKey(r);
+      if (seen[key]) return;
+      seen[key] = true;
+      var copy = Object.assign({}, r);
+      copy.seq = out.length + 1;
+      copy.id = "ir-" + copy.seq;
+      out.push(copy);
+    });
+    return out;
+  }
+
   function applySnapshot(data) {
-    rows = (data.rows || []).slice();
+    rows = mergeIdenticalRows((data.rows || []).slice());
     renderOverview();
     refresh();
     var tip = data.message || "";
@@ -327,20 +321,34 @@
       tip = "共 " + rows.length + " 家发行体";
     }
     setMsg(tip, data.source === "skeleton");
-    if (els.headerStatus) {
-      els.headerStatus.textContent = data.updated_at ? "快照已更新" : "等待评级数据接入";
-    }
   }
 
   function loadSnapshot() {
-    return fetch(API)
+    return fetch(TABLE_DATA)
       .then(function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status);
         return res.json();
       })
-      .then(applySnapshot)
+      .then(function (data) {
+        var list = data.rows || [];
+        if (!list.length) throw new Error("表格数据为空");
+        applySnapshot({
+          source: "excel",
+          message: "",
+          updated_at: data.updated_at || null,
+          rows: list,
+        });
+      })
       .catch(function (err) {
-        setMsg("加载评级数据失败：" + (err.message || err), true);
+        return fetch(API)
+          .then(function (res) {
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            return res.json();
+          })
+          .then(applySnapshot)
+          .catch(function (apiErr) {
+            setMsg("加载评级数据失败：" + (apiErr.message || err.message || err), true);
+          });
       });
   }
 
@@ -420,13 +428,6 @@
     }
     if (els.tree) {
       els.tree.addEventListener("click", function (ev) {
-        var toggle = ev.target.closest("[data-toggle-group]");
-        if (toggle) {
-          var g = toggle.getAttribute("data-toggle-group");
-          groupCollapsed[g] = !groupCollapsed[g];
-          renderTree(filteredRows());
-          return;
-        }
         var item = ev.target.closest(".ir-tree-item");
         if (item) {
           selectIssuer(item.getAttribute("data-issuer-id"), true);

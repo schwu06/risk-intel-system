@@ -444,11 +444,17 @@ class EntityRiskOut(BaseModel):
 
 class IntlRatingRowOut(BaseModel):
     id: str
+    seq: int = 0
     issuer: str
+    jpName: str = ""
     category: str = ""
     moodys: str = "NR"
     sp: str = "NR"
     fitch: str = "NR"
+    businessStructure: str = ""
+    bondType: str = ""
+    ebitda: str = ""
+    netIncome: str = ""
     loss: str = ""
     listed: str = ""
     delisted: str = ""
@@ -456,6 +462,9 @@ class IntlRatingRowOut(BaseModel):
     noRatingReason: str = ""
     ratingChanged: str = ""
     rssUrl: str = ""
+    ratingSourceUrl: str = ""
+
+    model_config = {"extra": "allow"}
 
 
 class IntlRatingsSnapshotOut(BaseModel):

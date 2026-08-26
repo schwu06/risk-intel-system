@@ -4,6 +4,9 @@
  * 修改记录
  * - 2026-08-25 | DingJiaye | 新建国际评级独立样式入口。
  * - 2026-08-25 | wusicheng | 相对原 main：恢复左侧可折叠索引及箭头样式。
+ * - 2026-08-26 | wusicheng | 表格增加序号及 Excel 字段列宽，不改原有视觉规格。
+ * - 2026-08-26 | wusicheng | 索引去掉简易/非简易分类层，公司名直接列在索引下。
+ * - 2026-08-26 | wusicheng | 穆迪、标普、惠誉拆分为三个间距适中的独立列。
  */
 
 .ir-sidebar .daily-index-title[aria-controls] {
@@ -70,4 +73,47 @@
   overflow-x: hidden;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+.ir-sidebar .ir-tree-list {
+  margin: 0;
+}
+
+.ir-sidebar .ir-tree-item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ir-table .col-seq {
+  min-width: 52px;
+  max-width: 64px;
+}
+
+.ir-table .col-jp {
+  min-width: 140px;
+  max-width: 220px;
+}
+
+.ir-table .col-rating {
+  min-width: 82px;
+  max-width: 104px;
+}
+
+.ir-table td.col-rating .ir-rating-pill {
+  justify-content: center;
+  min-width: 42px;
+  padding: 0.13rem 0.4rem;
+}
+
+.ir-table .col-structure,
+.ir-table .col-bond {
+  min-width: 110px;
+  max-width: 180px;
+}
+
+.ir-table .col-ebitda,
+.ir-table .col-profit {
+  min-width: 88px;
+  max-width: 140px;
 }

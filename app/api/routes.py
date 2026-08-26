@@ -1655,6 +1655,11 @@ def get_intl_ratings():
         try:
             rows.append(IntlRatingRowOut.model_validate(r))
         except Exception:
+            if isinstance(r, dict) and r.get("issuer"):
+                rows.append(IntlRatingRowOut(
+                    id=str(r.get("id") or r.get("issuer")),
+                    issuer=str(r.get("issuer") or ""),
+                ))
             continue
     return IntlRatingsSnapshotOut(
         updated_at=snap.get("updated_at"),

@@ -4747,20 +4747,6 @@ body.daily-news-ui .module-status { padding: 1.1rem 1.3rem; border-radius: 10px;
   line-height: 1.5;
 }
 
-.ir-header-status {
-  display: inline-flex;
-  align-items: center;
-  min-height: 36px;
-  padding: 0.25rem 0.65rem;
-  border: 1px solid #dce0e7;
-  border-radius: 12px;
-  background: #fff;
-  color: #525a67;
-  font-family: var(--font-cjk);
-  font-size: 0.86rem;
-  font-weight: 400;
-}
-
 .ir-overview {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

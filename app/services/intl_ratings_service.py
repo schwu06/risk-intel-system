@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2]
 SNAPSHOT_PATH = ROOT / "data" / "intl_ratings" / "latest.json"
+TABLE_SEED_PATH = ROOT / "config" / "intl_ratings_table.json"
 JOBS: dict[str, dict[str, Any]] = {}
 _LOCK = threading.Lock()
 _RUNNING = False
@@ -105,11 +106,17 @@ def _resolve_category(name: str, raw: str = "") -> str:
 def _placeholder_row(idx: int, name: str, category: str) -> dict[str, Any]:
     return {
         "id": f"ir-{idx}",
+        "seq": idx,
         "issuer": name,
+        "jpName": "",
         "category": _resolve_category(name, category),
         "moodys": NR,
         "sp": NR,
         "fitch": NR,
+        "businessStructure": "",
+        "bondType": "",
+        "ebitda": "",
+        "netIncome": "",
         "loss": "[需人工复核]",
         "listed": "否",
         "delisted": "未上市",
@@ -117,7 +124,67 @@ def _placeholder_row(idx: int, name: str, category: str) -> dict[str, Any]:
         "noRatingReason": "",
         "ratingChanged": "否",
         "rssUrl": "",
+        "ratingSourceUrl": "",
     }
+
+
+_ROW_ID_KEYS = {"id", "seq"}
+
+
+def _row_content_key(row: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    items: list[tuple[str, str]] = []
+    for key in sorted(row.keys()):
+        if key in _ROW_ID_KEYS:
+            continue
+        items.append((key, str(row.get(key) or "").strip()))
+    return tuple(items)
+
+
+def _merge_identical_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """保留首次出现的行，合并内容完全相同的重复行，并重排序号。"""
+    seen: set[tuple[tuple[str, str], ...]] = set()
+    merged: list[dict[str, Any]] = []
+    for row in rows:
+        key = _row_content_key(row)
+        if key in seen:
+            continue
+        seen.add(key)
+        item = dict(row)
+        seq = len(merged) + 1
+        item["seq"] = seq
+        item["id"] = f"ir-{seq}"
+        merged.append(item)
+    return merged
+
+
+def _load_table_seed() -> list[dict[str, Any]]:
+    if not TABLE_SEED_PATH.is_file():
+        return []
+    try:
+        with TABLE_SEED_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("rows"), list):
+            rows = [row for row in data["rows"] if isinstance(row, dict)]
+        elif isinstance(data, list):
+            rows = [row for row in data if isinstance(row, dict)]
+        else:
+            rows = []
+        return _merge_identical_rows(rows)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("读取评级表格种子失败: %s", exc)
+    return []
+
+
+def _snapshot_has_excel_fields(rows: list[Any]) -> bool:
+    return bool(rows) and isinstance(rows[0], dict) and "jpName" in rows[0]
+
+
+def _keep_public_rating(new: Any, old: Any) -> str:
+    n = str(new or "").strip()
+    if n and n.upper() != "NR":
+        return n
+    o = str(old or "").strip()
+    return o or NR
 
 
 def _market_source_url(pipeline: Any, issuer_name: str) -> str:
@@ -155,15 +222,25 @@ def load_snapshot() -> dict[str, Any]:
             with SNAPSHOT_PATH.open("r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict) and isinstance(data.get("rows"), list):
-                data["running"] = _is_running()
-                return data
+                if _snapshot_has_excel_fields(data["rows"]):
+                    data["running"] = _is_running()
+                    return data
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("读取评级快照失败: %s", exc)
     return _build_skeleton_snapshot()
 
 
 def _build_skeleton_snapshot() -> dict[str, Any]:
-    """尚无流水线结果时，用清单生成占位行，避免前端空白。"""
+    """尚无流水线结果时，优先使用 Excel 种子表，否则用清单生成占位行。"""
+    seed = _load_table_seed()
+    if seed:
+        return {
+            "updated_at": None,
+            "source": "excel",
+            "message": "",
+            "rows": seed,
+            "running": _is_running(),
+        }
     rows: list[dict[str, Any]] = []
     try:
         if get_intl_config is None or load_issuer_records is None:
@@ -312,17 +389,24 @@ def _run_job(*, job_id: str, limit: int, quick: bool) -> None:
         pipeline = IntlRatingsPipeline(cfg)
         report_rows, excel_path = pipeline.run(issuers=names, export=True)
 
+        pipeline_by_name: dict[str, dict[str, Any]] = {}
         api_rows: list[dict[str, Any]] = []
         for i, row in enumerate(report_rows, start=1):
             d = row.to_excel_dict()
             name = d.get("发行体") or ""
             api_row = {
                     "id": f"ir-{i}",
+                    "seq": i,
                     "issuer": name,
+                    "jpName": "",
                     "category": _resolve_category(name, cat_map.get(name, "")),
                     "moodys": d.get("穆迪评级") or NR,
                     "sp": d.get("标普评级") or NR,
                     "fitch": d.get("惠誉评级") or NR,
+                    "businessStructure": "",
+                    "bondType": "",
+                    "ebitda": "",
+                    "netIncome": "",
                     "loss": d.get("债务人最近一期決算是否亏损(是/否)") or "",
                     "listed": d.get("是否上市（是/否）") or "",
                     "delisted": d.get("若上市，债务人是否被上市废止(是/否)") or "",
@@ -335,7 +419,28 @@ def _run_job(*, job_id: str, limit: int, quick: bool) -> None:
             api_row["ratingChanged"] = _rating_change_label(
                 api_row, previous_by_issuer.get(name)
             )
+            pipeline_by_name[name] = api_row
             api_rows.append(api_row)
+
+        seed_rows = _load_table_seed()
+        if seed_rows:
+            merged: list[dict[str, Any]] = []
+            for old in seed_rows:
+                item = dict(old)
+                hit = pipeline_by_name.get(str(item.get("issuer") or ""))
+                if hit:
+                    item["moodys"] = _keep_public_rating(hit.get("moodys"), item.get("moodys"))
+                    item["sp"] = _keep_public_rating(hit.get("sp"), item.get("sp"))
+                    item["fitch"] = _keep_public_rating(hit.get("fitch"), item.get("fitch"))
+                    item["ratingChanged"] = _rating_change_label(
+                        item, previous_by_issuer.get(str(item.get("issuer") or ""))
+                    )
+                    if hit.get("ratingSourceUrl"):
+                        item["ratingSourceUrl"] = hit["ratingSourceUrl"]
+                    if hit.get("rssUrl"):
+                        item["rssUrl"] = hit["rssUrl"]
+                merged.append(item)
+            api_rows = merged
 
         save_snapshot(api_rows, source="pipeline_quick" if quick else "pipeline")
         with _LOCK:

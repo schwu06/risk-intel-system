@@ -47,7 +47,6 @@
         <h1>国际评级监测表</h1>
         <p class="ir-page-desc">聚合穆迪、标普、惠誉主体评级与公开市场信号；仅用于日常监测与人工复核。</p>
       </div>
-      <span class="ir-header-status" id="ir-header-status">评级快照加载中</span>
     </header>
 
     <section class="ir-overview" aria-label="评级监测概览">
@@ -68,11 +67,16 @@
       <table class="ir-table" id="ir-table">
         <thead>
           <tr>
+            <th class="col-seq">序号</th>
             <th class="col-issuer">发行体</th>
-            <th class="col-rating-pack">三大评级</th>
-            <th class="col-change">评级变动</th>
-            <th class="col-signal">市场信号</th>
-            <th class="col-rss">来源</th>
+            <th class="col-jp">日文名</th>
+            <th class="col-rating">穆迪</th>
+            <th class="col-rating">标普</th>
+            <th class="col-rating">惠誉</th>
+            <th class="col-structure">业务结构</th>
+            <th class="col-bond">债券种类</th>
+            <th class="col-ebitda">EBITDA</th>
+            <th class="col-profit">净利润</th>
           </tr>
         </thead>
         <tbody id="ir-table-body"></tbody>
@@ -84,5 +88,5 @@
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="/static/js/intl_ratings.js?v=20260819-4"></script>
+<script src="/static/js/intl_ratings.js?v=20260826-6"></script>
 {% endblock %}
