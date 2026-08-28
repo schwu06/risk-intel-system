@@ -1,0 +1,17 @@
+{
+  "name": "RiskIntel 风险情报系统",
+  "user": "ubuntu",
+  "install": "bash scripts/cloud-agent-install.sh",
+  "terminals": [
+    {
+      "name": "app-server",
+      "command": ".venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    }
+  ],
+  "ports": [
+    {
+      "name": "web",
+      "port": 8000
+    }
+  ]
+}
