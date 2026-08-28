@@ -1,0 +1,38 @@
+{% for e in risks %}
+<article
+  class="risk-event-card level-border-{{ e.risk_level }}"
+  data-category="{{ e.risk_category or '' }}"
+  data-tab="{{ e.risk_tab or '' }}"
+  data-search="{{ ((e.display_title or e.title or '') ~ ' ' ~ (e.display_overview or '') ~ ' ' ~ (e.source_name or '') ~ ' ' ~ (e.related_company or ''))|lower }}"
+>
+  <div class="risk-event-top">
+    <span class="risk-level-tag risk-tag-{{ e.risk_level }}">信号 {{ e.risk_level }}</span>
+    {% if e.news_importance %}<span class="risk-category-chip">重要度 {{ e.news_importance }}</span>{% endif %}
+    {% if e.risk_category %}
+    <span class="risk-category-chip">{{ e.risk_category }}</span>
+    {% endif %}
+    {% if not e.published_at %}<span class="risk-provenance unverified">时间待核验</span>{% endif %}
+    <time class="risk-event-time">{% if e.published_at %}源发布时间 {{ e.published_at }}{% else %}报告日 {{ e.report_date }}{% endif %}</time>
+  </div>
+  <h3 class="risk-event-title">{{ e.display_title or e.title }}</h3>
+  {% if e.display_overview %}
+  <div class="risk-event-detail">
+    <span class="risk-event-detail-label">内容详情</span>
+    <p>{{ e.display_overview }}</p>
+  </div>
+  {% endif %}
+  {% if e.risk_reasoning and e.risk_reasoning.show %}
+  <p class="risk-tip"><span>风险提示</span>{{ e.risk_reasoning.transmission }}</p>
+  {% endif %}
+  <footer class="risk-event-footer">
+    {% if e.source_url %}
+    <a class="risk-event-source" href="{{ e.source_url }}" target="_blank" rel="noopener noreferrer">{{ e.source_name or '查看原始来源' }}</a>
+    {% else %}
+    <span class="risk-event-source muted">来源未标注</span>
+    {% endif %}
+    {% if e.related_company %}
+    <span class="risk-event-related">关联：{{ e.related_company }}</span>
+    {% endif %}
+  </footer>
+</article>
+{% endfor %}

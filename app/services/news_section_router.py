@@ -459,8 +459,6 @@ def item_in_module_scope(
             return False, "排除：大型企业仅保留官网、交易所或可信财经媒体信源"
         if not is_financial_news_item(title=title, content=content):
             return True, f"可信信源命中监控企业「{company}」，保留企业公告/业务动态"
-    elif not is_financial_news_item(title=title, content=content):
-        return False, "排除：不含财经、企业经营或市场风险实质"
     result = route_news_sections(
         title=title,
         content=content,

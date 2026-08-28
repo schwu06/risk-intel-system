@@ -107,6 +107,8 @@ def build_risk_reasoning(
     fact = _clean(summary) or f"公开来源披露：{_clean(title, 180) or '该事件'}。"
     summary_text = _clean(summary)
     impact_text = _clean(impact)
+    if "结构化分析暂不可用" in impact_text or "正文未取得" in impact_text:
+        impact_text = ""
     fact = summary_text or f"公开来源披露：{_clean(title, 180) or '该事件'}。"
     title_text = _clean(title, 180)
     # 影响分析只有在与标题、概况都不同，确实补足传导关系时才展示。

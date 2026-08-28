@@ -1,4 +1,6 @@
+import json
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.services.display_zh import build_display_cards, has_publishable_content_detail
 
@@ -23,6 +25,35 @@ def test_keeps_news_with_substantive_detail() -> None:
         "机构回应及后续安排。目前部分数据仍有待官方进一步确认，原始来源提供了完整说明。"
     )
     assert has_publishable_content_detail("市场新闻", detail)
+    assert not has_publishable_content_detail("市场新闻", "正文未取得")
+
+
+def test_display_card_shows_recovered_body() -> None:
+    detail = (
+        "住友商事社长上野表示，公司将持续出售低效资产并提高资本效率。"
+        "声明提到将检视现有投资组合、加快资产周转，并评估对融资成本和股东回报的影响。"
+        "目前尚未公布具体出售清单或金额。"
+    )
+    entry = SimpleNamespace(
+        id=2,
+        module_code="C",
+        title="住友商事社长谈资产流动",
+        summary="正文未取得",
+        impact_analysis="",
+        related_company="住友商事",
+        risk_category="金融与经营数据",
+        category_tag=None,
+        risk_level="低",
+        source_url="https://example.com/sumitomo",
+        source_title="日本经济新闻",
+        published_at=None,
+        structured_json='{"source_body": %s}' % json.dumps(detail, ensure_ascii=False),
+    )
+    with patch("app.services.display_zh.get_cached_items", return_value=None):
+        with patch("app.services.display_zh._translate_batch", return_value={}):
+            card = build_display_cards(object(), [entry], social_resolver=lambda _: {})[0]
+    assert "资本效率" in card.overview
+    assert card.title == entry.title
 
 
 def test_keeps_title_card_when_content_detail_is_unavailable() -> None:
@@ -41,7 +72,9 @@ def test_keeps_title_card_when_content_detail_is_unavailable() -> None:
         published_at=None,
     )
 
-    card = build_display_cards(object(), [entry], social_resolver=lambda _: {})[0]
+    with patch("app.services.display_zh.get_cached_items", return_value=None):
+        with patch("app.services.display_zh._translate_batch", return_value={}):
+            card = build_display_cards(object(), [entry], social_resolver=lambda _: {})[0]
 
     assert card.title == entry.title
     assert card.overview == ""

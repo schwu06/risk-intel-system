@@ -297,6 +297,7 @@
         replacePanel("ea-news-panel", data.news_html);
         replacePanel("ea-finance-panel", data.finance_html);
         if (window.renderEntityFinancialCharts) window.renderEntityFinancialCharts();
+        // 仅用库内结构化事件刷新文案；空结果不覆盖首屏。
         var eventList = document.getElementById("risk-event-list");
         if (eventList && data.event_html && data.event_html.trim()) {
           eventList.innerHTML = data.event_html;

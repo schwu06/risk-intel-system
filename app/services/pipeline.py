@@ -33,6 +33,7 @@ from app.database.models import (
 )
 from app.services.chart_generator import extract_and_build_charts
 from app.services.content_extractor import enrich_items_with_body
+from app.services.display_zh import fill_structured_row_content
 from app.services.dedup import content_fingerprint, dedupe_by_title_similarity, titles_similar
 from app.services.deepseek_analyzer import DeepSeekAnalyzer
 from app.services.domain_rules import get_active_blacklist, get_active_whitelist
@@ -2246,43 +2247,42 @@ class RiskPipeline:
             if not is_substantive_news_item(it):
                 continue
             title = (it.get("title") or "未命名条目").strip()
-            snippet = (it.get("snippet") or it.get("body") or "").strip()
+            snippet = (it.get("body") or it.get("snippet") or "").strip()
             if len(snippet) < 12:
                 continue
             # 降级时也保留抓取到的完整正文，供页面“内容详情”直接呈现。
             summary = snippet
             is_entity = bool(self.entity_id)
-            rows.append(
-                {
-                    "标题": title,
-                    "关联企业": it.get("company")
-                    or metadata.get("company")
-                    or metadata.get("target")
-                    or it.get("entity_key")
-                    or "",
-                    "风险类别": metadata.get("category") or metadata.get("topic") or "资讯快讯",
-                    "风险等级": "低" if is_entity else "中",
-                    "核心摘要": summary,
-                    "影响分析": (
-                        _degraded_impact_text("模型未完成主体信用信号判定")
-                        if is_entity
-                        else summary[:280]
-                    ),
-                    "来源链接": it.get("url") or "",
-                    "来源名称": it.get("publisher") or it.get("feed") or "",
-                    "发布时间": it.get("published_at") or "",
-                    "资讯重要度": "中" if is_entity else "",
-                    "影响方向": "unknown" if is_entity else "",
-                    "信用风险信号": "none" if is_entity else "",
-                    "主体相关性": it.get("relation") or "unknown",
-                    "置信度": "",
-                    "_degraded": True,
-                    "_structure_fallback": True,
-                    "_fingerprint": it.get("fingerprint"),
-                    "_metadata": metadata,
-                    "_source_item": it,
-                }
-            )
+            row_dict = {
+                "标题": title,
+                "关联企业": it.get("company")
+                or metadata.get("company")
+                or metadata.get("target")
+                or it.get("entity_key")
+                or "",
+                "风险类别": metadata.get("category") or metadata.get("topic") or "资讯快讯",
+                "风险等级": "低" if is_entity else "中",
+                "核心摘要": summary,
+                "影响分析": (
+                    _degraded_impact_text("模型未完成主体信用信号判定")
+                    if is_entity
+                    else ""
+                ),
+                "来源链接": it.get("url") or "",
+                "来源名称": it.get("publisher") or it.get("feed") or "",
+                "发布时间": it.get("published_at") or "",
+                "资讯重要度": "中" if is_entity else "",
+                "影响方向": "unknown" if is_entity else "",
+                "信用风险信号": "none" if is_entity else "",
+                "主体相关性": it.get("relation") or "unknown",
+                "置信度": "",
+                "_degraded": True,
+                "_structure_fallback": True,
+                "_fingerprint": it.get("fingerprint"),
+                "_metadata": metadata,
+                "_source_item": it,
+            }
+            rows.append(fill_structured_row_content(row_dict, it))
         return filter_publishable_rows(rows)
 
     def _llm_analyze(
@@ -2352,37 +2352,36 @@ class RiskPipeline:
             if not is_substantive_news_item(it):
                 continue
             title = (it.get("title") or "未命名条目").strip()
-            snippet = (it.get("snippet") or it.get("body") or "").strip()
+            snippet = (it.get("body") or it.get("snippet") or "").strip()
             if len(snippet) < 12:
                 continue
             is_entity = bool(self.entity_id)
-            rows.append(
-                {
-                    "标题": title,
-                    "关联企业": it.get("company")
-                    or metadata.get("company")
-                    or metadata.get("target")
-                    or it.get("entity_key")
-                    or "",
-                    "风险类别": metadata.get("category") or metadata.get("topic") or "资讯快讯",
-                    "风险等级": "低" if is_entity else "中",
-                    "核心摘要": snippet,
-                    "影响分析": impact,
-                    "来源链接": it.get("url") or "",
-                    "来源名称": it.get("publisher") or it.get("feed") or "",
-                    "发布时间": it.get("published_at") or "",
-                    "资讯重要度": "中" if is_entity else "",
-                    "影响方向": "unknown" if is_entity else "",
-                    "信用风险信号": "none" if is_entity else "",
-                    "主体相关性": it.get("relation") or "unknown",
-                    "置信度": "",
-                    "_degraded": True,
-                    "_degrade_reason": reason,
-                    "_fingerprint": it.get("fingerprint"),
-                    "_metadata": metadata,
-                    "_source_item": it,
-                }
-            )
+            row_dict = {
+                "标题": title,
+                "关联企业": it.get("company")
+                or metadata.get("company")
+                or metadata.get("target")
+                or it.get("entity_key")
+                or "",
+                "风险类别": metadata.get("category") or metadata.get("topic") or "资讯快讯",
+                "风险等级": "低" if is_entity else "中",
+                "核心摘要": snippet,
+                "影响分析": impact,
+                "来源链接": it.get("url") or "",
+                "来源名称": it.get("publisher") or it.get("feed") or "",
+                "发布时间": it.get("published_at") or "",
+                "资讯重要度": "中" if is_entity else "",
+                "影响方向": "unknown" if is_entity else "",
+                "信用风险信号": "none" if is_entity else "",
+                "主体相关性": it.get("relation") or "unknown",
+                "置信度": "",
+                "_degraded": True,
+                "_degrade_reason": reason,
+                "_fingerprint": it.get("fingerprint"),
+                "_metadata": metadata,
+                "_source_item": it,
+            }
+            rows.append(fill_structured_row_content(row_dict, it))
         return filter_publishable_rows(rows)
 
     def _purge_out_of_scope_entries(self, report_date: date, module_code: str) -> int:
@@ -2936,6 +2935,10 @@ class RiskPipeline:
         seen_titles: set[str] = set()
 
         for row in structured:
+            fill_structured_row_content(
+                row,
+                row.get("_source_item") if isinstance(row.get("_source_item"), dict) else None,
+            )
             title = (row.get("标题") or "未命名条目").strip()
             title_key = title.lower()
             if title_key in seen_titles:
@@ -2970,6 +2973,9 @@ class RiskPipeline:
             )
             source_name = (row.get("来源名称") or "").strip() or None
             provenance = "degraded" if row.get("_degraded") else "real"
+            src_item = row.get("_source_item") if isinstance(row.get("_source_item"), dict) else {}
+            if src_item.get("body"):
+                enriched["source_body"] = str(src_item.get("body") or "")[:8000]
             entry = DailyRiskEntry(
                 report_date=report_date,
                 module_code=module_code,

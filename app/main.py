@@ -39,7 +39,9 @@ from app.services.data_source_service import list_industry_sources
 from app.services.display_zh import (
     build_display_cards,
     format_news_overview,
-    has_publishable_content_detail,
+    is_placeholder_summary,
+    pick_publishable_detail,
+    structured_body_text,
     translate_fields_to_chinese,
 )
 from app.services.domain_rules import seed_default_domains
@@ -68,8 +70,9 @@ from app.services.citation_rendering import (
 from app.services.evidence_packet import build_evidence_packet
 from app.services.pipeline import RISK_LEVEL_ORDER
 from app.services.scheduler import shutdown_scheduler, start_scheduler
+from app.services.recency import is_within_hours, parse_published_at
 from app.services.social_source import resolve_social_source
-from app.timeutil import format_tokyo, tokyo_day_tabs, tokyo_today
+from app.timeutil import TOKYO, format_tokyo, tokyo_day_tabs, tokyo_today
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
@@ -223,6 +226,40 @@ def _dedupe_daily_news(entries: list[NewsArticle]) -> list[NewsArticle]:
     return _sort_news(unique)
 
 
+def _tokyo_published_date(value: object) -> date | None:
+    """发布时间对应的东京日历日；无法解析则返回 None。"""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(TOKYO).date()
+        return value.date()
+    if isinstance(value, date):
+        return value
+    parsed = parse_published_at(value)
+    if parsed is None:
+        return None
+    return parsed.astimezone(TOKYO).date()
+
+
+def _visible_on_daily_news(
+    entry: NewsArticle, *, view_day: date, today: date
+) -> bool:
+    """今日展示近 24 小时；历史日只展示该东京日历日。"""
+    pub = getattr(entry, "published_at", None)
+    report = getattr(entry, "report_date", None)
+    if view_day == today:
+        if report == today:
+            return True
+        if report == today - timedelta(days=1):
+            return is_within_hours(pub, NEWS_WINDOW_HOURS_24, allow_unknown=False)
+        return False
+    pub_day = _tokyo_published_date(pub)
+    if pub_day is None:
+        return report == view_day
+    return pub_day == view_day
+
+
 def _news_charts_json(entries: list[NewsArticle]) -> str:
     entry_charts: list[dict] = []
     for e in entries:
@@ -285,7 +322,13 @@ def _daily_news_context(
     )
     if page_key == "daily_news":
         q = q.filter(NewsArticle.window_hours.in_((NEWS_WINDOW_HOURS_24, NEWS_WINDOW_HOURS_7X24)))
-        q = q.filter(NewsArticle.report_date == rd)
+        if rd == today:
+            # 今日跨日近 24 小时：纳入昨日快照中仍落在窗内的条目。
+            q = q.filter(NewsArticle.report_date >= today - timedelta(days=1)).filter(
+                NewsArticle.report_date <= today
+            )
+        else:
+            q = q.filter(NewsArticle.report_date == rd)
     elif page_key == "news_7x24":
         q = q.filter(NewsArticle.window_hours == window_hours)
         if selected_timeline_day:
@@ -301,27 +344,10 @@ def _daily_news_context(
         q = q.filter(NewsArticle.module_code == selected)
     raw_entries = q.all()
     fallback_module_codes: set[str] = set()
-    # 日报当天没有新增时，保留最近一周内已经核验入库的最后资讯，避免某个板块
-    # 因为周末/披露空窗而整块留白。页面会明确标为“近 7 日最近资讯”。
     if page_key == "daily_news":
-        active_codes = [selected] if selected else list(allowed_codes)
-        present_codes = {str(row.module_code or "").upper() for row in raw_entries}
-        missing_codes = [code for code in active_codes if code and code not in present_codes]
-        if missing_codes:
-            fallback_rows = (
-                db.query(NewsArticle)
-                .filter(NewsArticle.module_code.in_(missing_codes))
-                .filter(NewsArticle.report_date >= rd - timedelta(days=6))
-                .filter(NewsArticle.report_date < rd)
-                .filter(NewsArticle.window_hours.in_((NEWS_WINDOW_HOURS_24, NEWS_WINDOW_HOURS_7X24)))
-                .order_by(NewsArticle.published_at.desc(), NewsArticle.id.desc())
-                .all()
-            )
-            for code in missing_codes:
-                rows = [row for row in fallback_rows if row.module_code == code][:8]
-                if rows:
-                    raw_entries.extend(rows)
-                    fallback_module_codes.add(code)
+        raw_entries = [
+            row for row in raw_entries if _visible_on_daily_news(row, view_day=rd, today=today)
+        ]
     raw_entries = _dedupe_daily_news(raw_entries) if page_key == "daily_news" else _sort_news(raw_entries)
     # 展示层再滤一遍，立刻隐藏历史越界旧数据（科普/彩票/非本板块等）
     entries: list[NewsArticle] = []
@@ -412,7 +438,7 @@ def _daily_news_context(
                 "message": "近 7 日最近资讯" if code in fallback_module_codes else "",
             }
         elif not run:
-            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击右上角“刷新”开始采集。"}
+            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击“刷新资讯”开始采集。"}
         elif (run.status or "").lower() == "failed" or (
             run.notes and "请求失败" in (run.notes or "")
         ):
@@ -435,7 +461,7 @@ def _daily_news_context(
         elif (run.status or "").lower() in ("empty", "completed") and (run.entry_count or 0) == 0:
             module_ui[code] = {"state": "empty", "message": "今日无动态"}
         else:
-            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击右上角“刷新”开始采集。"}
+            module_ui[code] = {"state": "idle", "message": "尚未采集，请点击“刷新资讯”开始采集。"}
 
     return {
         "request": request,
@@ -568,37 +594,48 @@ def _entity_assessment_context(
             }
         )
         unverified_time_count = sum(1 for risk in display_risks if risk.published_at is None)
-        # Modified by DingJiaye: 2026-08-26 — 首屏只读取数据库缓存，不在
-        # 页面导航请求中等待模型翻译；完整翻译由 live-panels 异步请求补齐。
-        translated_risks = (
-            translate_fields_to_chinese(
-                [
-                    {
-                        "id": str(risk.id),
-                        "title": risk.title or "",
-                        "summary": risk.summary or "",
-                        "impact": risk.impact_analysis or "",
-                    }
-                    for risk in display_risks
-                ],
-                db=db,
-                cache_source="entity_risk_display",
-            )
-            if live
-            else {}
+        # 首屏只读取已缓存翻译，不在页面导航中等待模型；
+        # 未命中的条目由 live-panels 异步补齐。
+        translated_risks = translate_fields_to_chinese(
+            [
+                {
+                    "id": str(risk.id),
+                    "title": risk.title or "",
+                    "summary": risk.summary or "",
+                    "impact": risk.impact_analysis or "",
+                }
+                for risk in display_risks
+            ],
+            db=db,
+            cache_source="entity_risk_display",
+            live=live,
         )
         for risk in display_risks:
             translated = translated_risks.get(str(risk.id), {})
-            detail_available = has_publishable_content_detail(risk.title, risk.summary)
-            setattr(risk, "display_title", translated.get("title") or risk.title)
-            setattr(risk, "display_summary", translated.get("summary") or risk.summary)
-            setattr(risk, "display_impact_analysis", translated.get("impact") or risk.impact_analysis)
+            display_title = translated.get("title") or risk.title
+            display_summary = pick_publishable_detail(
+                display_title,
+                translated.get("summary"),
+                risk.summary,
+                structured_body_text(risk),
+            ) or (translated.get("summary") or risk.summary)
+            display_impact = translated.get("impact") or risk.impact_analysis
+            if is_placeholder_summary(display_impact):
+                display_impact = ""
+            setattr(risk, "display_title", display_title)
+            setattr(risk, "display_summary", display_summary)
+            setattr(risk, "display_impact_analysis", display_impact)
             setattr(
                 risk,
                 "display_overview",
                 format_news_overview(
-                    title=risk.display_title,
-                    summary=risk.display_summary if detail_available else "",
+                    title=display_title,
+                    summary=pick_publishable_detail(
+                        display_title,
+                        translated.get("summary"),
+                        risk.summary,
+                        structured_body_text(risk),
+                    ),
                     source_name=risk.source_name,
                     source_url=risk.source_url,
                     published_at=risk.published_at,
@@ -964,7 +1001,12 @@ def entity_assessment_live_panels(
     )
     news_html = templates.get_template("entity_assessment_news_panel.html").render(ctx)
     finance_html = templates.get_template("entity_assessment_finance_panel.html").render(ctx)
-    event_html = templates.get_template("entity_assessment_live_event_cards.html").render(ctx)
+    # 只刷新库内已结构化事件（含翻译），不用 RSS 占位卡覆盖已有分析。
+    event_html = (
+        templates.get_template("entity_assessment_event_cards.html").render(ctx)
+        if ctx.get("risks")
+        else ""
+    )
     return JSONResponse({"news_html": news_html, "finance_html": finance_html, "event_html": event_html})
 
 

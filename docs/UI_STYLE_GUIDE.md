@@ -10,6 +10,7 @@
 | `app/static/css/dashboard.css` | 历史兼容 | 只修旧样式，不新增功能 |
 | `app/static/css/ui/tokens.css` | 视觉变量 | 色板、边框、圆角、阴影 |
 | `app/static/css/ui/layout.css` | 通用布局 | 顶栏、侧栏、分栏、响应式 |
+| `app/static/css/ui/motion.css` | 动效 | 滚动进入、卡片呈现、按钮反馈 |
 | `app/static/css/ui/daily-news.css` | 新闻汇总 | 新闻卡、筛选、时间轴、空状态 |
 | `app/static/css/ui/entity-assessment.css` | 主体评估 | 概览、事件、财务展示 |
 | `app/static/css/ui/industry-analysis.css` | 行业分析 | 索引、信源、报告、对话栏 |

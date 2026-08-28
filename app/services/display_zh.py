@@ -99,8 +99,69 @@ def format_news_overview(
     return detail.rstrip("。") + "。"
 
 
+def is_placeholder_summary(text: str | None) -> bool:
+    """占位句不能当作内容详情或影响分析。"""
+    t = " ".join(unescape(str(text or "")).split()).strip()
+    if not t:
+        return True
+    if _DEGRADED_ZH in t:
+        return True
+    if "正文未取得" in t or "暂无正文" in t or "暂无内容" in t:
+        return True
+    return bool(_EMPTY_DETAIL_RE.fullmatch(t.rstrip("。.")))
+
+
+def pick_publishable_detail(title: str | None, *candidates: Any) -> str:
+    """选出可展示的内容详情；标题重复句、snippet 冒充和占位句会被跳过。"""
+    seen: set[str] = set()
+    for raw in candidates:
+        text = unescape(str(raw or "")).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        if is_placeholder_summary(text):
+            continue
+        if has_publishable_content_detail(title, text):
+            return text
+    return ""
+
+
+def structured_body_text(entry: Any) -> str:
+    raw = getattr(entry, "structured_json", None)
+    if not raw:
+        return ""
+    try:
+        payload = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("source_body") or payload.get("核心摘要") or "")
+
+
+def fill_structured_row_content(
+    row: dict[str, Any],
+    source_item: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """分析完成后用已抓取正文填核心摘要，不用标题或 snippet 冒充。"""
+    src = source_item if isinstance(source_item, dict) else {}
+    if not src:
+        attached = row.get("_source_item")
+        src = attached if isinstance(attached, dict) else {}
+    title = str(row.get("标题") or src.get("title") or "")
+    picked = pick_publishable_detail(title, row.get("核心摘要"), src.get("body"))
+    if picked:
+        row["核心摘要"] = picked
+    if is_placeholder_summary(str(row.get("影响分析") or "")):
+        row["影响分析"] = ""
+    return row
+
+
 def has_publishable_content_detail(title: str | None, summary: str | None) -> bool:
-    """只有取得了有实质的内容详情才允许生成新闻卡片。"""
+    """只有取得了有实质的内容详情才允许展示概要。"""
+    if is_placeholder_summary(summary):
+        return False
+
     def comparable(value: str | None) -> str:
         text = unescape(str(value or "")).lower()
         # Google News 常在标题末尾拼接媒体名；相似度判断时去除该尾缀。
@@ -189,8 +250,9 @@ def translate_fields_to_chinese(
     *,
     db: Session | None = None,
     cache_source: str = "display_zh_live",
+    live: bool = True,
 ) -> dict[str, dict[str, str]]:
-    """供主体评估实时标题使用；可选缓存避免每次页面刷新重复调用模型。"""
+    """供主体评估标题使用。live=False 时只读缓存，不调用模型。"""
     out: dict[str, dict[str, str]] = {}
     pending: list[dict[str, str]] = []
     cache_keys: dict[str, str] = {}
@@ -211,7 +273,7 @@ def translate_fields_to_chinese(
             out[rid] = {name: str(cached[0].get(name) or "") for name in ("title", "summary", "impact")}
         else:
             pending.append(row)
-    translated = _translate_batch(pending[:16])
+    translated = _translate_batch(pending[:16]) if live and pending else {}
     for rid, value in translated.items():
         out[rid] = value
         if db and rid in cache_keys:
@@ -303,40 +365,49 @@ def build_display_cards(
     for e in entries:
         eid = str(e.id)
         tr = translated.get(eid) or {}
-        detail_available = has_publishable_content_detail(e.title, e.summary)
+        display_title = tr.get("title") or e.title
+        raw_impact = tr.get("impact") if tr.get("impact") is not None else e.impact_analysis
+        if is_placeholder_summary(raw_impact):
+            raw_impact = ""
+        detail = pick_publishable_detail(
+            display_title,
+            tr.get("summary"),
+            e.summary,
+            structured_body_text(e),
+        )
         social = social_resolver(e)
         assessment = assess_news_risk(
-            title=tr.get("title") or e.title,
-            summary=tr.get("summary") or e.summary,
-            impact=tr.get("impact") if tr.get("impact") is not None else e.impact_analysis,
+            title=display_title,
+            summary=detail or tr.get("summary") or e.summary,
+            impact=raw_impact,
             stored_level=e.risk_level,
         )
         cards.append(
             NewsDisplayCard(
                 id=e.id,
                 module_code=e.module_code,
-                title=tr.get("title") or e.title,
+                title=display_title,
                 related_company=e.related_company,
                 risk_category=e.risk_category,
                 category_tag=getattr(e, "category_tag", None),
                 risk_level=assessment.level,
-                summary=tr.get("summary") or e.summary,
-                impact_analysis=tr.get("impact") if tr.get("impact") is not None else e.impact_analysis,
+                summary=detail or tr.get("summary") or e.summary,
+                impact_analysis=raw_impact,
                 source_url=e.source_url,
                 source_title=getattr(e, "source_title", None),
                 published_at=e.published_at,
                 social_source_label=social.get("social_source_label") or "暂无",
                 social_source_url=social.get("social_source_url"),
                 risk_reasoning=build_risk_reasoning(
-                    title=tr.get("title") or e.title,
-                    summary=tr.get("summary") or e.summary,
-                    impact=tr.get("impact") if tr.get("impact") is not None else e.impact_analysis,
+                    title=display_title,
+                    summary=detail or tr.get("summary") or e.summary,
+                    impact=raw_impact,
                     risk_level=assessment.level,
                     category=assessment.tags[0] if assessment.tags else e.risk_category,
                 ),
                 overview=format_news_overview(
-                    title=tr.get("title") or e.title,
-                    summary=(tr.get("summary") or e.summary) if detail_available else "",
+                    title=display_title,
+                    summary=detail,
                     source_name=getattr(e, "source_title", None),
                     source_url=e.source_url,
                     published_at=e.published_at,

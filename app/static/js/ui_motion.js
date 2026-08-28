@@ -1,6 +1,7 @@
 /*
  * RiskIntel motion controller
  * 负责：卡片进入视区时的柔和呈现、主要控件的微交互反馈。
+ * 样式在 static/css/ui/motion.css；本文件只加 class，不写视觉规则。
  * 不依赖第三方库，且尊重 prefers-reduced-motion。
  * Modified by DingJiaye: 2026-08-26.
  */

@@ -1,0 +1,51 @@
+/*
+ * RiskIntel 动效层
+ * 负责：页面进入、滚动呈现与按钮反馈。不改变信息层级。
+ * 配套脚本：static/js/ui_motion.js（只为命中的内容加 class）。
+ * 用户启用“减少动态效果”时全部关闭。
+ * 修改记录
+ * - 2026-08-27 | 从 ui/layout.css 拆出，避免动画样式与布局规则混写。
+ */
+
+@media (prefers-reduced-motion: no-preference) {
+  .motion-reveal {
+    opacity: 0;
+    transform: translateY(10px);
+    transition:
+      opacity 420ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition-delay: var(--motion-delay, 0ms);
+    will-change: opacity, transform;
+  }
+
+  .motion-reveal.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+    will-change: auto;
+  }
+
+  .motion-press {
+    transition:
+      transform 150ms ease,
+      box-shadow 180ms ease,
+      background-color 180ms ease,
+      border-color 180ms ease;
+  }
+
+  .motion-press:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+
+  .motion-press.is-pressed {
+    transform: translateY(1px) scale(0.985);
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-reveal,
+  .motion-press {
+    transition: none !important;
+    transform: none !important;
+  }
+}

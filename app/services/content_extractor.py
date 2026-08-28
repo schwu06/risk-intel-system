@@ -131,16 +131,16 @@ def enrich_items_with_body(
     max_items: int = 8,
     max_chars: int = 6000,
 ) -> list[dict]:
-    """为前 N 条结果补充正文，便于下游 LLM 分析。"""
-    enriched: list[dict] = []
+    """为尚无正文的条目补抓详情页；已有 body 的不占用配额。"""
+    enriched: list[dict] = [dict(row) for row in items]
     fetched = 0
-    for row in items:
-        item = dict(row)
+    for item in enriched:
+        if str(item.get(body_key) or "").strip():
+            continue
         url = str(item.get(url_key) or "")
         if fetched < max_items and url:
             body = extract_article_text(url, max_chars=max_chars)
             if body:
                 item[body_key] = body
                 fetched += 1
-        enriched.append(item)
     return enriched
